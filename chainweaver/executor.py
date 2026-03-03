@@ -154,6 +154,30 @@ class FlowExecutor:
         flow = self._registry.get_flow(flow_name)
         _logger.info("Flow '%s' started | steps=%d", flow_name, len(flow.steps))
 
+        # -- Flow-level input validation ------------------------------------
+        if flow.input_schema is not None:
+            try:
+                flow.input_schema.model_validate(initial_input)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(flow_name, -1, str(exc))
+                _logger.error(
+                    "Flow '%s' input validation failed: %s", flow_name, wrapped
+                )
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[
+                        StepRecord(
+                            step_index=-1,
+                            tool_name=flow_name,
+                            inputs=initial_input,
+                            error=wrapped,
+                            success=False,
+                        )
+                    ],
+                )
+
         context: dict[str, Any] = dict(initial_input)
         log: list[StepRecord] = []
 
@@ -185,6 +209,33 @@ class FlowExecutor:
                         key,
                     )
             context.update(record.outputs)
+
+        # -- Flow-level output validation -----------------------------------
+        if flow.output_schema is not None:
+            try:
+                flow.output_schema.model_validate(context)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(
+                    flow_name, len(flow.steps), str(exc)
+                )
+                _logger.error(
+                    "Flow '%s' output validation failed: %s", flow_name, wrapped
+                )
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log
+                    + [
+                        StepRecord(
+                            step_index=len(flow.steps),
+                            tool_name=flow_name,
+                            inputs=context,
+                            error=wrapped,
+                            success=False,
+                        )
+                    ],
+                )
 
         _logger.info("Flow '%s' completed successfully", flow_name)
         return ExecutionResult(
