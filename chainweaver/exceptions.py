@@ -32,12 +32,20 @@ class FlowAlreadyExistsError(ChainWeaverError):
 class SchemaValidationError(ChainWeaverError):
     """Raised when input or output data fails schema validation."""
 
-    def __init__(self, tool_name: str, step_index: int, detail: str) -> None:
+    def __init__(
+        self,
+        tool_name: str,
+        step_index: int,
+        detail: str,
+        *,
+        context: str = "tool",
+    ) -> None:
         self.tool_name = tool_name
         self.step_index = step_index
         self.detail = detail
+        self.context = context
         super().__init__(
-            f"Schema validation failed for tool '{tool_name}' at step {step_index}: {detail}"
+            f"Schema validation failed for {context} '{tool_name}' at step {step_index}: {detail}"
         )
 
 
