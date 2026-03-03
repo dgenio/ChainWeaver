@@ -172,7 +172,10 @@ class FlowExecutor:
                 )
 
             # Merge step outputs into the shared context.
-            assert record.outputs is not None
+            if record.outputs is None:
+                raise RuntimeError(
+                    f"Step {idx} ({step.tool_name}) succeeded but produced no outputs"
+                )
             context.update(record.outputs)
 
         _logger.info("Flow '%s' completed successfully", flow_name)
