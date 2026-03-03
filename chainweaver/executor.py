@@ -237,7 +237,7 @@ class FlowExecutor:
                         StepRecord(
                             step_index=len(flow.steps),
                             tool_name=flow_name,
-                            inputs=context,
+                            inputs=dict(context),
                             error=wrapped,
                             success=False,
                         )
