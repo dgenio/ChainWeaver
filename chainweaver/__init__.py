@@ -37,7 +37,7 @@ from chainweaver.tools import Tool
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 __all__ = [
     # Core abstractions
