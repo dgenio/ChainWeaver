@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from chainweaver.exceptions import (
+    FlowExecutionError,
     FlowNotFoundError,
     InputMappingError,
     SchemaValidationError,
@@ -319,3 +320,183 @@ class TestInputMapping:
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == 21
+
+    def test_empty_mapping_passes_full_context(self) -> None:
+        """A step with no input_mapping receives the full context as-is."""
+
+        class CtxInput(BaseModel):
+            a: int
+            b: int
+
+        class SumOutput(BaseModel):
+            total: int
+
+        def sum_fn(inp: CtxInput) -> dict:
+            return {"total": inp.a + inp.b}
+
+        sum_tool = Tool(
+            name="sum",
+            description="Adds a and b.",
+            input_schema=CtxInput,
+            output_schema=SumOutput,
+            fn=sum_fn,
+        )
+        flow = Flow(
+            name="passthrough_flow",
+            description="Step with empty input_mapping.",
+            steps=[FlowStep(tool_name="sum", input_mapping={})],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(sum_tool)
+
+        result = ex.execute_flow("passthrough_flow", {"a": 3, "b": 7})
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["total"] == 10
+
+
+# ---------------------------------------------------------------------------
+# Error: FlowExecutionError wrapping
+# ---------------------------------------------------------------------------
+
+
+class TestFlowExecutionError:
+    """Tool fn raises a generic exception → wrapped as FlowExecutionError."""
+
+    def test_runtime_error_wrapped(self) -> None:
+        class InSchema(BaseModel):
+            x: int
+
+        class OutSchema(BaseModel):
+            x: int
+
+        def boom(inp: InSchema) -> dict:
+            raise RuntimeError("something went wrong")
+
+        tool = Tool(
+            name="boom",
+            description="Always fails.",
+            input_schema=InSchema,
+            output_schema=OutSchema,
+            fn=boom,
+        )
+        flow = Flow(
+            name="boom_flow",
+            description="Flow whose tool explodes.",
+            steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(tool)
+
+        result = ex.execute_flow("boom_flow", {"x": 1})
+        assert result.success is False
+        record = result.execution_log[0]
+        assert record.success is False
+        assert isinstance(record.error, FlowExecutionError)
+        assert "something went wrong" in str(record.error)
+
+    def test_value_error_wrapped(self) -> None:
+        class InSchema(BaseModel):
+            x: int
+
+        class OutSchema(BaseModel):
+            x: int
+
+        def bad(inp: InSchema) -> dict:
+            raise ValueError("bad value")
+
+        tool = Tool(
+            name="bad",
+            description="Raises ValueError.",
+            input_schema=InSchema,
+            output_schema=OutSchema,
+            fn=bad,
+        )
+        flow = Flow(
+            name="bad_flow",
+            description="Flow with ValueError tool.",
+            steps=[FlowStep(tool_name="bad", input_mapping={"x": "x"})],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(tool)
+
+        result = ex.execute_flow("bad_flow", {"x": 1})
+        assert result.success is False
+        assert isinstance(result.execution_log[0].error, FlowExecutionError)
+
+
+# ---------------------------------------------------------------------------
+# Edge case: empty flow
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyFlow:
+    def test_empty_flow_succeeds(self) -> None:
+        """A flow with no steps should succeed, returning the initial input."""
+        flow = Flow(
+            name="empty",
+            description="No steps.",
+            steps=[],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+
+        result = ex.execute_flow("empty", {"key": "value"})
+        assert result.success is True
+        assert result.final_output == {"key": "value"}
+        assert result.execution_log == []
+
+
+# ---------------------------------------------------------------------------
+# Tool.run() in isolation
+# ---------------------------------------------------------------------------
+
+
+class TestToolRun:
+    """Direct unit tests for Tool.run()."""
+
+    def test_valid_round_trip(self) -> None:
+        tool = Tool(
+            name="double",
+            description="Doubles.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+        output = tool.run({"number": 4})
+        assert output == {"value": 8}
+
+    def test_invalid_input_raises_validation_error(self) -> None:
+        tool = Tool(
+            name="double",
+            description="Doubles.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+        with pytest.raises(ValidationError):
+            tool.run({"number": "not_a_number"})
+
+    def test_invalid_output_raises_validation_error(self) -> None:
+        class StrictOut(BaseModel):
+            required_field: str
+
+        def wrong_output(inp: NumberInput) -> dict:
+            return {"wrong_key": 123}
+
+        tool = Tool(
+            name="wrong",
+            description="Returns wrong keys.",
+            input_schema=NumberInput,
+            output_schema=StrictOut,
+            fn=wrong_output,
+        )
+        with pytest.raises(ValidationError):
+            tool.run({"number": 1})
