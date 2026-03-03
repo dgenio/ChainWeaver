@@ -32,20 +32,20 @@ class Tool:
         from pydantic import BaseModel
         from chainweaver.tools import Tool
 
-        class DoublInput(BaseModel):
+        class DoubleInput(BaseModel):
             number: int
 
-        class DoublOutput(BaseModel):
+        class DoubleOutput(BaseModel):
             value: int
 
-        def double(inp: DoublInput) -> dict:
+        def double(inp: DoubleInput) -> dict:
             return {"value": inp.number * 2}
 
         tool = Tool(
             name="double",
             description="Doubles a number.",
-            input_schema=DoublInput,
-            output_schema=DoublOutput,
+            input_schema=DoubleInput,
+            output_schema=DoubleOutput,
             fn=double,
         )
     """
