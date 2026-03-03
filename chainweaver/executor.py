@@ -150,7 +150,6 @@ class FlowExecutor:
 
         Raises:
             FlowNotFoundError: When *flow_name* is not registered.
-            ToolNotFoundError: When a step references an unregistered tool.
         """
         flow = self._registry.get_flow(flow_name)
         _logger.info("Flow '%s' started | steps=%d", flow_name, len(flow.steps))
@@ -243,7 +242,17 @@ class FlowExecutor:
         Returns:
             A :class:`StepRecord` describing the outcome.
         """
-        tool = self.get_tool(step.tool_name)
+        try:
+            tool = self.get_tool(step.tool_name)
+        except ToolNotFoundError as exc:
+            log_step_error(_logger, step_index, step.tool_name, exc)
+            return StepRecord(
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs={},
+                error=exc,
+                success=False,
+            )
 
         try:
             inputs = self._resolve_inputs(step, context, step_index)

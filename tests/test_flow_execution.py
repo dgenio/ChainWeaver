@@ -164,13 +164,16 @@ class TestMissingFlow:
 
 
 class TestMissingTool:
-    def test_tool_not_found_raises(self, linear_flow: Flow) -> None:
+    def test_tool_not_found_fails_step(self, linear_flow: Flow) -> None:
         registry = FlowRegistry()
         registry.register_flow(linear_flow)
         ex = FlowExecutor(registry=registry)
-        # No tools registered — should raise immediately on first step.
-        with pytest.raises(ToolNotFoundError):
-            ex.execute_flow("double_add_format", {"number": 5})
+        # No tools registered — step 0 should fail gracefully.
+        result = ex.execute_flow("double_add_format", {"number": 5})
+        assert result.success is False
+        assert len(result.execution_log) == 1
+        assert isinstance(result.execution_log[0].error, ToolNotFoundError)
+        assert result.execution_log[0].success is False
 
 
 # ---------------------------------------------------------------------------
