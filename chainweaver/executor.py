@@ -28,7 +28,7 @@ _logger = get_logger("chainweaver.executor")
 
 @dataclass
 class StepRecord:
-    """Immutable record of a single executed step.
+    """Record of a single executed step.
 
     Attributes:
         step_index: Zero-based position of this step in the flow.
