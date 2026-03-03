@@ -64,7 +64,7 @@ class FlowRegistry:
         try:
             return self._flows[name]
         except KeyError:
-            raise FlowNotFoundError(name)
+            raise FlowNotFoundError(name) from None
 
     def list_flows(self) -> list[str]:
         """Return the names of all registered flows in insertion order.
