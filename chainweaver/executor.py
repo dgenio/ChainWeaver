@@ -31,8 +31,13 @@ class StepRecord:
     """Record of a single executed step.
 
     Attributes:
-        step_index: Zero-based position of this step in the flow.
-        tool_name: Name of the tool that was invoked.
+        step_index: Position of this record in the flow.  For normal steps
+            this is the zero-based step index.  Two sentinel values are
+            used for flow-level schema validation:
+            ``-1`` — input validation (before any step runs),
+            ``len(steps)`` — output validation (after all steps complete).
+        tool_name: Name of the tool that was invoked (or the flow name for
+            flow-level validation records).
         inputs: The validated inputs that were passed to the tool.
         outputs: The validated outputs produced by the tool, or ``None`` if
             the step failed.
@@ -57,8 +62,10 @@ class ExecutionResult:
         success: ``True`` when all steps completed without error.
         final_output: The merged execution context (initial input combined
             with all step outputs), or ``None`` on failure.
-        execution_log: Ordered list of :class:`StepRecord` objects, one per
-            executed step.
+        execution_log: Ordered list of :class:`StepRecord` objects.  Contains
+            one entry per executed step, plus up to two additional entries
+            for flow-level input/output schema validation when
+            ``input_schema`` or ``output_schema`` are set on the flow.
     """
 
     flow_name: str
