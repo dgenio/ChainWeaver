@@ -166,12 +166,8 @@ class FlowExecutor:
             try:
                 flow.input_schema.model_validate(initial_input)
             except ValidationError as exc:
-                wrapped = SchemaValidationError(
-                    flow_name, -1, str(exc), context="flow_input"
-                )
-                _logger.error(
-                    "Flow '%s' input validation failed: %s", flow_name, wrapped
-                )
+                wrapped = SchemaValidationError(flow_name, -1, str(exc), context="flow_input")
+                _logger.error("Flow '%s' input validation failed: %s", flow_name, wrapped)
                 return ExecutionResult(
                     flow_name=flow_name,
                     success=False,
@@ -227,22 +223,20 @@ class FlowExecutor:
                 wrapped = SchemaValidationError(
                     flow_name, len(flow.steps), str(exc), context="flow_output"
                 )
-                _logger.error(
-                    "Flow '%s' output validation failed: %s", flow_name, wrapped
-                )
+                _logger.error("Flow '%s' output validation failed: %s", flow_name, wrapped)
                 return ExecutionResult(
                     flow_name=flow_name,
                     success=False,
                     final_output=None,
-                    execution_log=log
-                    + [
+                    execution_log=[
+                        *log,
                         StepRecord(
                             step_index=len(flow.steps),
                             tool_name=flow_name,
                             inputs=dict(context),
                             error=wrapped,
                             success=False,
-                        )
+                        ),
                     ],
                 )
 
