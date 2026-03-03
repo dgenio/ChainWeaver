@@ -144,15 +144,13 @@ class FlowExecutor:
 
         Returns:
             An :class:`ExecutionResult` describing the outcome and containing
-            the full execution log.
+            the full execution log. Step-level validation, input-mapping, and
+            execution errors are recorded in the execution log and reported via
+            ``ExecutionResult.success`` instead of being raised.
 
         Raises:
             FlowNotFoundError: When *flow_name* is not registered.
             ToolNotFoundError: When a step references an unregistered tool.
-            SchemaValidationError: When input or output validation fails.
-            InputMappingError: When a mapping key is missing from the context.
-            FlowExecutionError: When the tool callable raises an unexpected
-                exception.
         """
         flow = self._registry.get_flow(flow_name)
         _logger.info("Flow '%s' started | steps=%d", flow_name, len(flow.steps))
