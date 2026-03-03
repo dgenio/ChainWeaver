@@ -30,7 +30,9 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def log_step_start(logger: logging.Logger, step_index: int, tool_name: str, inputs: dict[str, Any]) -> None:
+def log_step_start(
+    logger: logging.Logger, step_index: int, tool_name: str, inputs: dict[str, Any]
+) -> None:
     """Emit a structured log entry at the start of a flow step.
 
     Args:
@@ -47,7 +49,9 @@ def log_step_start(logger: logging.Logger, step_index: int, tool_name: str, inpu
     )
 
 
-def log_step_end(logger: logging.Logger, step_index: int, tool_name: str, outputs: dict[str, Any]) -> None:
+def log_step_end(
+    logger: logging.Logger, step_index: int, tool_name: str, outputs: dict[str, Any]
+) -> None:
     """Emit a structured log entry at the end of a flow step.
 
     Args:
@@ -64,7 +68,9 @@ def log_step_end(logger: logging.Logger, step_index: int, tool_name: str, output
     )
 
 
-def log_step_error(logger: logging.Logger, step_index: int, tool_name: str, error: Exception) -> None:
+def log_step_error(
+    logger: logging.Logger, step_index: int, tool_name: str, error: Exception
+) -> None:
     """Emit a structured log entry when a flow step fails.
 
     Args:

@@ -91,7 +91,10 @@ class FlowRegistry:
         """
         intent_lower = intent.lower()
         for flow in self._flows.values():
-            if intent_lower in flow.name.lower() or intent_lower in flow.description.lower():
+            if (
+                intent_lower in flow.name.lower()
+                or intent_lower in flow.description.lower()
+            ):
                 return flow
         return None
 
