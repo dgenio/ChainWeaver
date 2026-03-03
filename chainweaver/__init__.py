@@ -40,9 +40,7 @@ logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 __version__ = "0.0.1"
 
 __all__ = [
-    # Exceptions
     "ChainWeaverError",
-    # Result types
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",
@@ -54,7 +52,6 @@ __all__ = [
     "InputMappingError",
     "SchemaValidationError",
     "StepRecord",
-    # Core abstractions
     "Tool",
     "ToolNotFoundError",
 ]
