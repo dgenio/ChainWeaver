@@ -7,7 +7,8 @@ work inside a :class:`~chainweaver.flow.Flow`.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Type
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -55,8 +56,8 @@ class Tool:
         *,
         name: str,
         description: str,
-        input_schema: Type[BaseModel],
-        output_schema: Type[BaseModel],
+        input_schema: type[BaseModel],
+        output_schema: type[BaseModel],
         fn: Callable[[Any], dict[str, Any]],
     ) -> None:
         self.name = name

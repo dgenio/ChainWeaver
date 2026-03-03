@@ -7,8 +7,6 @@ they can be executed by a :class:`~chainweaver.executor.FlowExecutor`.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from chainweaver.exceptions import FlowAlreadyExistsError, FlowNotFoundError
 from chainweaver.flow import Flow
 
@@ -74,7 +72,7 @@ class FlowRegistry:
         """
         return list(self._flows.keys())
 
-    def match_flow_by_intent(self, intent: str) -> Optional[Flow]:
+    def match_flow_by_intent(self, intent: str) -> Flow | None:
         """Return the first flow whose name or description contains *intent*.
 
         This is a very basic substring match intended as a placeholder for a

@@ -60,6 +60,4 @@ class FlowExecutionError(ChainWeaverError):
         self.tool_name = tool_name
         self.step_index = step_index
         self.detail = detail
-        super().__init__(
-            f"Execution error in tool '{tool_name}' at step {step_index}: {detail}"
-        )
+        super().__init__(f"Execution error in tool '{tool_name}' at step {step_index}: {detail}")
