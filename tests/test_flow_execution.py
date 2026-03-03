@@ -17,7 +17,6 @@ from chainweaver.flow import Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -90,15 +89,20 @@ def linear_flow() -> Flow:
         name="double_add_format",
         description="Doubles a number, adds 10, and formats the result.",
         steps=[
-            FlowStep(tool_name="double",        input_mapping={"number": "number"}),
-            FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
+            FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
             FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
         ],
     )
 
 
 @pytest.fixture()
-def executor(linear_flow: Flow, double_tool: Tool, add_ten_tool: Tool, format_tool: Tool) -> FlowExecutor:
+def executor(
+    linear_flow: Flow,
+    double_tool: Tool,
+    add_ten_tool: Tool,
+    format_tool: Tool,
+) -> FlowExecutor:
     registry = FlowRegistry()
     registry.register_flow(linear_flow)
     ex = FlowExecutor(registry=registry)

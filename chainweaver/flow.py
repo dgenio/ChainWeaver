@@ -8,7 +8,7 @@ wire tool outputs into the next tool's inputs.  Flows are registered in a
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -75,7 +75,7 @@ class Flow(BaseModel):
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
-    trigger_conditions: Optional[dict[str, Any]] = None
+    trigger_conditions: dict[str, Any] | None = None
 
     # TODO (Phase 2): Add support for DAG-based steps with explicit
     # dependency edges and parallel execution groups.

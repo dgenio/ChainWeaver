@@ -119,8 +119,8 @@ flow = Flow(
     name="double_add_format",
     description="Doubles a number, adds 10, and formats the result.",
     steps=[
-        FlowStep(tool_name="double",        input_mapping={"number": "number"}),
-        FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
+        FlowStep(tool_name="double", input_mapping={"number": "number"}),
+        FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
         FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
     ],
 )
