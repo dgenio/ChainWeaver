@@ -19,7 +19,7 @@ from chainweaver.exceptions import (
     ToolNotFoundError,
 )
 from chainweaver.flow import FlowStep
-from chainweaver.logging import get_logger, log_step_end, log_step_error, log_step_start
+from chainweaver.log_utils import get_logger, log_step_end, log_step_error, log_step_start
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
