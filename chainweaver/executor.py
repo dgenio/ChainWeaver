@@ -178,7 +178,7 @@ class FlowExecutor:
                         StepRecord(
                             step_index=-1,
                             tool_name=flow_name,
-                            inputs=initial_input,
+                            inputs=dict(initial_input),
                             error=wrapped,
                             success=False,
                         )
