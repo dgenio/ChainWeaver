@@ -8,9 +8,9 @@ wire tool outputs into the next tool's inputs.  Flows are registered in a
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FlowStep(BaseModel):
@@ -54,6 +54,14 @@ class Flow(BaseModel):
         steps: Ordered list of :class:`FlowStep` objects.
         deterministic: When ``True`` (the default) the executor guarantees
             that no LLM calls are inserted between steps.
+        input_schema: An optional :class:`pydantic.BaseModel` subclass that
+            defines and validates the flow's expected input.  When set, the
+            executor validates ``initial_input`` against this schema before
+            executing any steps.
+        output_schema: An optional :class:`pydantic.BaseModel` subclass that
+            defines and validates the flow's expected output.  When set, the
+            executor validates ``final_output`` against this schema after the
+            last step completes.
         trigger_conditions: Optional free-form metadata that an agent or
             higher-level orchestrator can use to decide when to invoke this
             flow.  ChainWeaver itself does not evaluate these conditions.
@@ -68,14 +76,20 @@ class Flow(BaseModel):
                 FlowStep(tool_name="add_ten",   input_mapping={"value": "value"}),
                 FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
             ],
+            input_schema=NumberInput,
+            output_schema=FormattedOutput,
         )
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     description: str
     steps: list[FlowStep]
+    input_schema: type[BaseModel] | None = None
+    output_schema: type[BaseModel] | None = None
     deterministic: bool = True
-    trigger_conditions: Optional[dict[str, Any]] = None
+    trigger_conditions: dict[str, Any] | None = None
 
     # TODO (Phase 2): Add support for DAG-based steps with explicit
     # dependency edges and parallel execution groups.

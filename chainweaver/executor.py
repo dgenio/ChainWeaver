@@ -19,7 +19,12 @@ from chainweaver.exceptions import (
     ToolNotFoundError,
 )
 from chainweaver.flow import FlowStep
-from chainweaver.log_utils import get_logger, log_step_end, log_step_error, log_step_start
+from chainweaver.log_utils import (
+    get_logger,
+    log_step_end,
+    log_step_error,
+    log_step_start,
+)
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -157,6 +162,29 @@ class FlowExecutor:
         context: dict[str, Any] = dict(initial_input)
         log: list[StepRecord] = []
 
+        # --- Flow-level input validation ---
+        if flow.input_schema is not None:
+            try:
+                flow.input_schema.model_validate(initial_input)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(flow_name, -1, str(exc))
+                _logger.error("Flow '%s' input validation failed: %s", flow_name, exc)
+                log.append(
+                    StepRecord(
+                        step_index=-1,
+                        tool_name=flow_name,
+                        inputs=initial_input,
+                        error=wrapped,
+                        success=False,
+                    )
+                )
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                )
+
         for idx, step in enumerate(flow.steps):
             record = self._execute_step(idx, step, context)
             log.append(record)
@@ -185,6 +213,29 @@ class FlowExecutor:
                         key,
                     )
             context.update(record.outputs)
+
+        # --- Flow-level output validation ---
+        if flow.output_schema is not None:
+            try:
+                flow.output_schema.model_validate(context)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(flow_name, len(flow.steps), str(exc))
+                _logger.error("Flow '%s' output validation failed: %s", flow_name, exc)
+                log.append(
+                    StepRecord(
+                        step_index=len(flow.steps),
+                        tool_name=flow_name,
+                        inputs=context,
+                        error=wrapped,
+                        success=False,
+                    )
+                )
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                )
 
         _logger.info("Flow '%s' completed successfully", flow_name)
         return ExecutionResult(

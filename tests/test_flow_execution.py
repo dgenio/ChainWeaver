@@ -90,15 +90,17 @@ def linear_flow() -> Flow:
         name="double_add_format",
         description="Doubles a number, adds 10, and formats the result.",
         steps=[
-            FlowStep(tool_name="double",        input_mapping={"number": "number"}),
-            FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
+            FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
             FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
         ],
     )
 
 
 @pytest.fixture()
-def executor(linear_flow: Flow, double_tool: Tool, add_ten_tool: Tool, format_tool: Tool) -> FlowExecutor:
+def executor(
+    linear_flow: Flow, double_tool: Tool, add_ten_tool: Tool, format_tool: Tool
+) -> FlowExecutor:
     registry = FlowRegistry()
     registry.register_flow(linear_flow)
     ex = FlowExecutor(registry=registry)
@@ -500,3 +502,136 @@ class TestToolRun:
         )
         with pytest.raises(ValidationError):
             tool.run({"number": 1})
+
+
+# ---------------------------------------------------------------------------
+# Flow-level input/output schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestFlowLevelSchemas:
+    """Tests for Flow.input_schema and Flow.output_schema validation."""
+
+    def test_valid_input_and_output_schemas(self) -> None:
+        """Flow with matching input/output schemas succeeds normally."""
+        flow = Flow(
+            name="schema_flow",
+            description="Flow with input/output schemas.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            ],
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(
+            Tool(
+                name="double",
+                description="Doubles.",
+                input_schema=NumberInput,
+                output_schema=ValueOutput,
+                fn=_double_fn,
+            )
+        )
+
+        result = ex.execute_flow("schema_flow", {"number": 5})
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["value"] == 10
+
+    def test_invalid_input_caught_before_execution(self) -> None:
+        """Invalid initial_input is caught before any step runs."""
+        flow = Flow(
+            name="guarded_flow",
+            description="Flow that validates input.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            ],
+            input_schema=NumberInput,
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(
+            Tool(
+                name="double",
+                description="Doubles.",
+                input_schema=NumberInput,
+                output_schema=ValueOutput,
+                fn=_double_fn,
+            )
+        )
+
+        result = ex.execute_flow("guarded_flow", {"number": "not_a_number"})
+        assert result.success is False
+        assert result.final_output is None
+        # Only the flow-level validation record, no step records.
+        assert len(result.execution_log) == 1
+        assert result.execution_log[0].step_index == -1
+        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+
+    def test_invalid_output_caught_after_execution(self) -> None:
+        """Invalid final_output is caught after all steps complete."""
+
+        class ExpectedOutput(BaseModel):
+            missing_field: str
+
+        flow = Flow(
+            name="bad_output_flow",
+            description="Flow whose output doesn't match output_schema.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            ],
+            output_schema=ExpectedOutput,
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(
+            Tool(
+                name="double",
+                description="Doubles.",
+                input_schema=NumberInput,
+                output_schema=ValueOutput,
+                fn=_double_fn,
+            )
+        )
+
+        result = ex.execute_flow("bad_output_flow", {"number": 5})
+        assert result.success is False
+        assert result.final_output is None
+        # Step 0 succeeded, then the output validation record is appended.
+        assert len(result.execution_log) == 2
+        assert result.execution_log[0].success is True
+        output_record = result.execution_log[1]
+        assert output_record.step_index == 1  # len(steps) == 1
+        assert isinstance(output_record.error, SchemaValidationError)
+
+    def test_none_schemas_behave_unchanged(self) -> None:
+        """When input_schema and output_schema are None, behavior is unchanged."""
+        flow = Flow(
+            name="no_schema_flow",
+            description="Flow without schemas.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(
+            Tool(
+                name="double",
+                description="Doubles.",
+                input_schema=NumberInput,
+                output_schema=ValueOutput,
+                fn=_double_fn,
+            )
+        )
+
+        result = ex.execute_flow("no_schema_flow", {"number": 5})
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["value"] == 10
