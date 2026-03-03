@@ -123,6 +123,8 @@ flow = Flow(
         FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
         FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
     ],
+    input_schema=NumberInput,
+    output_schema=FormattedOutput,
 )
 
 

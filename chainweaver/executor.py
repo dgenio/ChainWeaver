@@ -31,8 +31,13 @@ class StepRecord:
     """Record of a single executed step.
 
     Attributes:
-        step_index: Zero-based position of this step in the flow.
-        tool_name: Name of the tool that was invoked.
+        step_index: Position of this record in the flow.  For normal steps
+            this is the zero-based step index.  Two sentinel values are
+            used for flow-level schema validation:
+            ``-1`` — input validation (before any step runs),
+            ``len(steps)`` — output validation (after all steps complete).
+        tool_name: Name of the tool that was invoked (or the flow name for
+            flow-level validation records).
         inputs: The validated inputs that were passed to the tool.
         outputs: The validated outputs produced by the tool, or ``None`` if
             the step failed.
@@ -57,8 +62,10 @@ class ExecutionResult:
         success: ``True`` when all steps completed without error.
         final_output: The merged execution context (initial input combined
             with all step outputs), or ``None`` on failure.
-        execution_log: Ordered list of :class:`StepRecord` objects, one per
-            executed step.
+        execution_log: Ordered list of :class:`StepRecord` objects.  Contains
+            one entry per executed step, plus up to two additional entries
+            for flow-level input/output schema validation when
+            ``input_schema`` or ``output_schema`` are set on the flow.
     """
 
     flow_name: str
@@ -154,6 +161,28 @@ class FlowExecutor:
         flow = self._registry.get_flow(flow_name)
         _logger.info("Flow '%s' started | steps=%d", flow_name, len(flow.steps))
 
+        # -- Flow-level input validation ------------------------------------
+        if flow.input_schema is not None:
+            try:
+                flow.input_schema.model_validate(initial_input)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(flow_name, -1, str(exc), context="flow_input")
+                _logger.error("Flow '%s' input validation failed: %s", flow_name, wrapped)
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[
+                        StepRecord(
+                            step_index=-1,
+                            tool_name=flow_name,
+                            inputs=dict(initial_input),
+                            error=wrapped,
+                            success=False,
+                        )
+                    ],
+                )
+
         context: dict[str, Any] = dict(initial_input)
         log: list[StepRecord] = []
 
@@ -185,6 +214,31 @@ class FlowExecutor:
                         key,
                     )
             context.update(record.outputs)
+
+        # -- Flow-level output validation -----------------------------------
+        if flow.output_schema is not None:
+            try:
+                flow.output_schema.model_validate(context)
+            except ValidationError as exc:
+                wrapped = SchemaValidationError(
+                    flow_name, len(flow.steps), str(exc), context="flow_output"
+                )
+                _logger.error("Flow '%s' output validation failed: %s", flow_name, wrapped)
+                return ExecutionResult(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[
+                        *log,
+                        StepRecord(
+                            step_index=len(flow.steps),
+                            tool_name=flow_name,
+                            inputs=dict(context),
+                            error=wrapped,
+                            success=False,
+                        ),
+                    ],
+                )
 
         _logger.info("Flow '%s' completed successfully", flow_name)
         return ExecutionResult(

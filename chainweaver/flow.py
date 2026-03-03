@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FlowStep(BaseModel):
@@ -57,6 +57,18 @@ class Flow(BaseModel):
         trigger_conditions: Optional free-form metadata that an agent or
             higher-level orchestrator can use to decide when to invoke this
             flow.  ChainWeaver itself does not evaluate these conditions.
+        input_schema: An optional Pydantic :class:`~pydantic.BaseModel`
+            subclass describing the shape of the *initial_input* dictionary
+            that a caller must provide when executing this flow.  When set,
+            the :class:`~chainweaver.executor.FlowExecutor` validates
+            *initial_input* against this schema **before** the first step
+            runs.
+        output_schema: An optional Pydantic :class:`~pydantic.BaseModel`
+            subclass describing the shape of the final merged context
+            produced after every step has completed.  When set, the
+            :class:`~chainweaver.executor.FlowExecutor` validates the
+            accumulated context against this schema **after** the last step
+            finishes.
 
     Example::
 
@@ -68,14 +80,20 @@ class Flow(BaseModel):
                 FlowStep(tool_name="add_ten",   input_mapping={"value": "value"}),
                 FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
             ],
+            input_schema=NumberInput,
+            output_schema=FormattedOutput,
         )
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
     trigger_conditions: dict[str, Any] | None = None
+    input_schema: type[BaseModel] | None = None
+    output_schema: type[BaseModel] | None = None
 
     # TODO (Phase 2): Add support for DAG-based steps with explicit
     # dependency edges and parallel execution groups.
