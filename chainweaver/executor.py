@@ -175,6 +175,15 @@ class FlowExecutor:
                 raise RuntimeError(
                     f"Step {idx} ({step.tool_name}) succeeded but produced no outputs"
                 )
+
+            for key in record.outputs:
+                if key in context:
+                    _logger.debug(
+                        "Step %d (%s): context key '%s' overwritten",
+                        idx,
+                        step.tool_name,
+                        key,
+                    )
             context.update(record.outputs)
 
         _logger.info("Flow '%s' completed successfully", flow_name)
