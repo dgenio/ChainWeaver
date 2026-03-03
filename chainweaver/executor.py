@@ -55,7 +55,8 @@ class ExecutionResult:
     Attributes:
         flow_name: Name of the flow that was executed.
         success: ``True`` when all steps completed without error.
-        final_output: The output of the last step, or ``None`` on failure.
+        final_output: The merged execution context (initial input combined
+            with all step outputs), or ``None`` on failure.
         execution_log: Ordered list of :class:`StepRecord` objects, one per
             executed step.
     """
