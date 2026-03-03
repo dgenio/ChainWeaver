@@ -17,9 +17,20 @@ Run this script from the repository root with::
 
 from __future__ import annotations
 
+import logging
+
 from pydantic import BaseModel
 
 from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep, Tool
+
+# Configure logging so that ChainWeaver step logs are visible when running
+# this example directly.  Applications should configure logging to their own
+# preferences.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ Public API
     )
 """
 
+import logging as _logging
+
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -30,6 +32,10 @@ from chainweaver.exceptions import (
 from chainweaver.flow import Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+
+# Follow Python library best practice: attach only a NullHandler so that
+# applications can configure logging centrally without interference.
+_logging.getLogger("chainweaver").addHandler(_logging.NullHandler())
 
 __version__ = "0.1.0"
 

@@ -1,16 +1,25 @@
-"""Structured logging utilities for ChainWeaver."""
+"""Structured logging utilities for ChainWeaver.
+
+ChainWeaver follows standard Python library practice and does **not** attach
+handlers or configure log levels.  A :class:`logging.NullHandler` is added to
+the ``chainweaver`` package logger in ``__init__.py`` so that applications can
+configure logging centrally (e.g. via :func:`logging.basicConfig` or
+:func:`logging.config.dictConfig`).
+"""
 
 import logging
-import sys
 from typing import Any
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Return a named logger configured for ChainWeaver.
+    """Return a named logger for ChainWeaver.
 
     All ChainWeaver loggers share the ``chainweaver`` root namespace so that
-    consumers can control verbosity with a single ``logging.getLogger("chainweaver")``
-    call.
+    consumers can control verbosity with a single
+    ``logging.getLogger("chainweaver")`` call.
+
+    No handlers or levels are configured here — that is the application's
+    responsibility.
 
     Args:
         name: Sub-logger name, typically the module ``__name__``.
@@ -18,17 +27,7 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         A :class:`logging.Logger` instance.
     """
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(
-            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S",
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.propagate = False
-    return logger
+    return logging.getLogger(name)
 
 
 def log_step_start(logger: logging.Logger, step_index: int, tool_name: str, inputs: dict[str, Any]) -> None:
