@@ -123,3 +123,27 @@ class TestMatchFlowByIntent:
         registry.register_flow(flow)
         match = registry.match_flow_by_intent("uppercase")
         assert match is not None
+
+    def test_empty_registry_returns_none(self) -> None:
+        """An empty registry has nothing to match."""
+        registry = FlowRegistry()
+        assert registry.match_flow_by_intent("anything") is None
+
+
+# ---------------------------------------------------------------------------
+# Overwrite preserves count
+# ---------------------------------------------------------------------------
+
+
+class TestOverwritePreservesCount:
+    def test_register_flow_then_overwrite_preserves_count(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(_make_flow("keep"))
+        registry.register_flow(_make_flow("replace_me"))
+        assert len(registry) == 2
+
+        new_flow = _make_flow("replace_me")
+        new_flow.description = "Replaced"
+        registry.register_flow(new_flow, overwrite=True)
+        assert len(registry) == 2
+        assert registry.get_flow("replace_me").description == "Replaced"
