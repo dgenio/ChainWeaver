@@ -84,7 +84,7 @@ class TestMissingTool:
         registry = FlowRegistry()
         registry.register_flow(linear_flow)
         ex = FlowExecutor(registry=registry)
-        # No tools registered — step 0 should fail gracefully.
+        # No tools registered \u2014 step 0 should fail gracefully.
         result = ex.execute_flow("double_add_format", {"number": 5})
         assert result.success is False
         assert len(result.execution_log) == 1
@@ -278,7 +278,7 @@ class TestInputMapping:
 
 
 class TestFlowExecutionError:
-    """Tool fn raises a generic exception → wrapped as FlowExecutionError."""
+    """Tool fn raises a generic exception \u2192 wrapped as FlowExecutionError."""
 
     def test_runtime_error_wrapped(self) -> None:
         class InSchema(BaseModel):
@@ -578,7 +578,7 @@ class TestFlowLevelSchemas:
 
 
 class TestSingleStepFlow:
-    """A flow with exactly one step — simplest chaining case."""
+    """A flow with exactly one step \u2014 simplest chaining case."""
 
     def test_single_step_succeeds(
         self,
@@ -622,7 +622,8 @@ class TestContextAccumulation:
         # Initial input key is preserved.
         assert "number" in result.final_output
         assert result.final_output["number"] == 5
-        # Intermediate key from double/add_ten steps.
+        # Intermediate key: both double and add_ten write "value";
+        # 20 (from add_ten) confirms last-write-wins merge semantics.
         assert "value" in result.final_output
         assert result.final_output["value"] == 20
         # Final key from format_result step.
@@ -688,25 +689,25 @@ class TestToolZeroDivisionError:
 
 
 class TestBoundaryValues:
-    """Negative numbers and zero through the double→add→format chain."""
+    """Negative numbers and zero through the double\u2192add\u2192format chain."""
 
     def test_negative_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": -3})
-        # double(-3) → -6, add_ten(-6) → 4, format(4) → "Final value: 4"
+        # double(-3) \u2192 -6, add_ten(-6) \u2192 4, format(4) \u2192 "Final value: 4"
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: 4"
 
     def test_large_positive_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": 1000})
-        # double(1000) → 2000, add_ten(2000) → 2010, format(2010) → "Final value: 2010"
+        # double(1000) \u2192 2000, add_ten(2000) \u2192 2010, format(2010) \u2192 "Final value: 2010"
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: 2010"
 
     def test_large_negative_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": -1000})
-        # double(-1000) → -2000, add_ten(-2000) → -1990
+        # double(-1000) \u2192 -2000, add_ten(-2000) \u2192 -1990
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: -1990"
