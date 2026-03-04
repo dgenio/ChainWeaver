@@ -700,7 +700,7 @@ class TestBoundaryValues:
 
     def test_large_positive_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": 1000})
-        # double(1000) \u2192 2000, add_ten(2000) \u2192 2010, format(2010) \u2192 "Final value: 2010"
+        # double(1000)\u21922000, add_ten(2000)\u21922010, format\u2192"Final value: 2010"
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: 2010"
