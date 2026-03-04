@@ -697,12 +697,12 @@ class TestBoundaryValues:
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: 4"
 
-    def test_zero_input(self, executor: FlowExecutor) -> None:
-        result = executor.execute_flow("double_add_format", {"number": 0})
-        # double(0) → 0, add_ten(0) → 10, format(10) → "Final value: 10"
+    def test_large_positive_input(self, executor: FlowExecutor) -> None:
+        result = executor.execute_flow("double_add_format", {"number": 1000})
+        # double(1000) → 2000, add_ten(2000) → 2010, format(2010) → "Final value: 2010"
         assert result.success is True
         assert result.final_output is not None
-        assert result.final_output["result"] == "Final value: 10"
+        assert result.final_output["result"] == "Final value: 2010"
 
     def test_large_negative_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": -1000})
