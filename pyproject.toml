@@ -31,6 +31,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.8",
+    "mypy>=1.0",
 ]
 
 [project.urls]
@@ -58,6 +59,17 @@ select = [
     "SIM",  # flake8-simplify
     "RUF",  # Ruff-specific rules
 ]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
 
 [tool.setuptools.packages.find]
 where = ["."]

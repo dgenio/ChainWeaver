@@ -334,23 +334,23 @@ class FlowExecutor:
         try:
             outputs = tool.run(inputs)
         except ValidationError as exc:
-            wrapped = SchemaValidationError(step.tool_name, step_index, str(exc))
-            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            schema_err = SchemaValidationError(step.tool_name, step_index, str(exc))
+            log_step_error(_logger, step_index, step.tool_name, schema_err)
             return StepRecord(
                 step_index=step_index,
                 tool_name=step.tool_name,
                 inputs=inputs,
-                error=wrapped,
+                error=schema_err,
                 success=False,
             )
         except Exception as exc:
-            wrapped = FlowExecutionError(step.tool_name, step_index, str(exc))
-            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            exec_err = FlowExecutionError(step.tool_name, step_index, str(exc))
+            log_step_error(_logger, step_index, step.tool_name, exec_err)
             return StepRecord(
                 step_index=step_index,
                 tool_name=step.tool_name,
                 inputs=inputs,
-                error=wrapped,
+                error=exec_err,
                 success=False,
             )
 
