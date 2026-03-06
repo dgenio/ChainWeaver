@@ -73,7 +73,7 @@ python -m mypy chainweaver/
 python -m pytest tests/ -v
 ```
 
-Always run all four checks. CI runs lint + format on Python 3.10 only;
+Always run all four checks. CI runs lint + format + mypy on Python 3.10 only;
 tests run across Python 3.10, 3.11, 3.12, 3.13.
 
 ## PR conventions
