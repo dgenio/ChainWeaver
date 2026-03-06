@@ -60,6 +60,9 @@ select = [
     "RUF",  # Ruff-specific rules
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["chainweaver"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true
