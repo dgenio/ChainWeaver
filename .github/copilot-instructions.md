@@ -80,7 +80,7 @@ tests run across Python 3.10, 3.11, 3.12, 3.13.
 
 - One logical change per PR
 - PR title: imperative mood (e.g., "Add retry logic to executor")
-- If you change architecture (add/remove/rename modules), update AGENTS.md in the same PR
+- If you change architecture (add/remove/rename modules), update AGENTS.md and the project layout in this file in the same PR
 - If you change coding conventions, update this file in the same PR
 
 ## Anti-patterns (never generate these)
