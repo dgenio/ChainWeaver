@@ -64,6 +64,10 @@ select = [
 python_version = "3.10"
 strict = true
 
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["chainweaver*"]
