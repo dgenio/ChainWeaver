@@ -53,7 +53,7 @@ chainweaver/
 ## 5. Top invariants
 
 1. **No LLM calls in `executor.py`** — the executor is deterministic by design.
-2. All exceptions inherit from `ChainWeaverError` and include context (`tool_name`, `step_index`, `detail`).
+2. All exceptions inherit from `ChainWeaverError` and carry relevant context attributes (e.g. `tool_name`, `step_index`, `detail` where applicable).
 3. All public API symbols must be exported in `chainweaver/__init__.py` `__all__`.
 4. Every tool function signature: `fn(validated_input: BaseModel) -> dict[str, Any]`.
 5. `from __future__ import annotations` at the top of every module.
