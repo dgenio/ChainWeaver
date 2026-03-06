@@ -1,5 +1,7 @@
 """Custom exceptions for ChainWeaver."""
 
+from __future__ import annotations
+
 
 class ChainWeaverError(Exception):
     """Base exception for all ChainWeaver errors."""

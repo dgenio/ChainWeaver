@@ -7,6 +7,8 @@ configure logging centrally (e.g. via :func:`logging.basicConfig` or
 :func:`logging.config.dictConfig`).
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 
