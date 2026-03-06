@@ -95,7 +95,7 @@ See [README > Development](README.md#development) for extended context.
 
 | Task | Where to look | What to update |
 |---|---|---|
-| Add a new Tool | `chainweaver/tools.py` | Unit tests in `tests/test_tools.py` (standalone); integration tests in `tests/test_flow_execution.py` |
+| Add a new Tool | `chainweaver/tools.py` | Integration tests in `tests/test_flow_execution.py` |
 | Add a new exception | `chainweaver/exceptions.py` | Re-export in `chainweaver/__init__.py`, update `__all__` |
 | Modify flow execution | `chainweaver/executor.py` | Ensure `StepRecord` and `ExecutionResult` stay consistent |
 | Add a new Flow field | `chainweaver/flow.py` | Update serialization tests if `model_dump()` changes |
