@@ -76,9 +76,9 @@ files that conflict with these names:
 
 | Reserved name | Issue | Purpose |
 |---------------|-------|---------|
-| `compiler.py` | #71 | Compile-time schema chain validation |
-| `analyzer.py` | #77 | Offline chain analyzer |
-| `observer.py` | #78 | Runtime chain observer |
+| `compiler.py` | #71 | Compile-time schema flow validation |
+| `analyzer.py` | #77 | Offline flow analyzer |
+| `observer.py` | #78 | Runtime flow observer |
 | `compat.py` | #48 | Schema fingerprinting |
 | `viz.py` | #79 | Flow visualization |
 | `cli.py` | #44 | CLI interface |
