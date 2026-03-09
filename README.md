@@ -1,12 +1,48 @@
 # ChainWeaver
 
-**Deterministic orchestration layer for MCP-based agents.**
+**Compile deterministic MCP tool chains into LLM-free executable flows.**
 
-> *Compiled execution graphs, not interpreted reasoning.*
+[![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
+[![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/pypi/pyversions/chainweaver)](https://pypi.org/project/chainweaver/)
+[![License](https://img.shields.io/github/license/dgenio/ChainWeaver)](LICENSE)
+
+```mermaid
+flowchart LR
+    subgraph before ["❌ Naive Agent Chaining · N LLM calls"]
+        R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
+    end
+    subgraph after ["✅ ChainWeaver · 0 LLM calls"]
+        R2([Request]) --> E[FlowExecutor] --> U1[Tool A] --> U2[Tool B] --> U3[Tool C]
+    end
+```
+
+```python
+from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
+# (NumberInput, ValueOutput, double_fn defined in full example below)
+
+# 1. Wrap any function as a schema-validated Tool
+double = Tool(name="double", description="Doubles a number.",
+              input_schema=NumberInput, output_schema=ValueOutput, fn=double_fn)
+# 2. Wire tools into a Flow
+flow = Flow(name="calc", description="Double a number.",
+            steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})])
+# 3. Register and execute — zero LLM calls
+registry = FlowRegistry()
+registry.register_flow(flow)
+executor = FlowExecutor(registry=registry)
+executor.register_tool(double)
+result = executor.execute_flow("calc", {"number": 5})
+# result.final_output → {"number": 5, "value": 10}
+```
+
+> See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
+
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Roadmap](#roadmap)**
 
 ---
 
-## The Problem
+## Why ChainWeaver?
 
 When an LLM-powered agent chains tools together — `fetch_data → transform → store` — a
 common pattern is to insert an LLM call between *every* step so the model can "decide"
@@ -35,10 +71,8 @@ previous output) these intermediate LLM calls add:
 - **Cost** — every call consumes tokens and credits.
 - **Unpredictability** — a language model might route differently on each invocation.
 
-## The Solution
-
 ChainWeaver compiles deterministic multi-tool chains into **executable flows** that run
-without any LLM involvement between steps.
+without any LLM involvement between steps:
 
 ```
 User request
@@ -52,22 +86,27 @@ Response
 
 Think of it as the difference between an **interpreter** and a **compiler**:
 
-| Naive agent chaining         | ChainWeaver flow                   |
-|------------------------------|------------------------------------|
-| Interpreted, step by step    | Compiled, graph-first              |
-| LLM decides each next action | Execution is pre-wired             |
-| Non-deterministic by default | Deterministic by design            |
-| Cost scales with steps       | Fixed overhead per flow invocation |
+| Criterion | Naive LLM chaining | ChainWeaver |
+|---|---|---|
+| LLM calls per step | 1 per step | 0 |
+| Latency | O(n × LLM RTT) | O(n × tool RTT) |
+| Cost | O(n × token cost) | Fixed infra cost |
+| Reproducibility | Non-deterministic | Deterministic |
+| Schema validation | Ad-hoc / none | Pydantic enforced |
+| Observability | Prompt logs only | Structured step logs |
+| Reusability | Prompt templates | Registered, versioned flows |
 
 ---
 
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
 pip install chainweaver
 ```
+
+---
+
+## Quick Start
 
 ### Define tools, build a flow, and execute it
 
@@ -178,7 +217,7 @@ chainweaver/
 ├── registry.py       # FlowRegistry — in-memory flow catalogue
 ├── executor.py       # FlowExecutor — deterministic, LLM-free runner
 ├── exceptions.py     # Typed exceptions with traceable context
-└── logging.py        # Structured per-step logging
+└── log_utils.py      # Structured per-step logging
 ```
 
 ### Core abstractions
@@ -341,20 +380,6 @@ All exceptions inherit from `ChainWeaverError`.
 - [ ] Determinism scoring for partial flows
 - [ ] OpenTelemetry trace export
 - [ ] Async execution mode
-
----
-
-## Comparison: Naive Agent Chaining vs ChainWeaver
-
-| Criterion | Naive LLM chaining | ChainWeaver |
-|---|---|---|
-| LLM calls per step | 1 per step | 0 |
-| Latency | O(n × LLM RTT) | O(n × tool RTT) |
-| Cost | O(n × token cost) | Fixed infra cost |
-| Reproducibility | Non-deterministic | Deterministic |
-| Schema validation | Ad-hoc / none | Pydantic enforced |
-| Observability | Prompt logs only | Structured step logs |
-| Reusability | Prompt templates | Registered, versioned flows |
 
 ---
 
