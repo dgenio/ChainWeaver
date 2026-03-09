@@ -19,6 +19,7 @@ flowchart LR
 
 ```python
 from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
+# (NumberInput, ValueOutput, double_fn defined in full example below)
 
 # 1. Wrap any function as a schema-validated Tool
 double = Tool(name="double", description="Doubles a number.",
