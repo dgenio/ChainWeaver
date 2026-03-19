@@ -93,6 +93,15 @@ def _build_tool(
     # -- Build input schema fields ------------------------------------------
     fields: dict[str, Any] = {}
     for param_name, param in sig.parameters.items():
+        # Positional-only parameters cannot be passed as keyword arguments,
+        # but the adapter always calls the function via **kwargs.
+        if param.kind is inspect.Parameter.POSITIONAL_ONLY:
+            raise ChainWeaverError(
+                f"Function '{fn.__name__}' uses positional-only parameters, "
+                f"which are not supported by the @tool decorator. "
+                f"Use the explicit Tool() constructor instead."
+            )
+
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             raise ChainWeaverError(
                 f"Function '{fn.__name__}' uses *args or **kwargs, "

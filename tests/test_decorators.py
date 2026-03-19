@@ -172,6 +172,13 @@ class TestMissingHints:
             def bad(**kwargs: int) -> ValueOutput:
                 return {"value": 0}
 
+    def test_positional_only_rejected(self) -> None:
+        with pytest.raises(ChainWeaverError, match="positional-only parameters"):
+
+            @tool(description="Bad.")
+            def bad(x: int, /) -> ValueOutput:
+                return {"value": x}
+
 
 # ---------------------------------------------------------------------------
 # Default parameter values
