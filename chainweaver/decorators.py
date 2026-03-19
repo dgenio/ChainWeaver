@@ -69,7 +69,14 @@ def _build_tool(
     tool_name = name if name is not None else fn.__name__
     tool_description = description if description is not None else (fn.__doc__ or "").strip()
 
-    hints = get_type_hints(fn, include_extras=True)
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except (NameError, TypeError) as exc:
+        raise ChainWeaverError(
+            f"Failed to resolve type hints for function '{fn.__name__}': {exc}. "
+            f"Ensure all annotations are importable and any forward references "
+            f"are either quoted or resolvable in the tool's module."
+        ) from exc
     sig = inspect.signature(fn)
 
     # -- Validate return type -----------------------------------------------

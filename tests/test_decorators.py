@@ -179,6 +179,13 @@ class TestMissingHints:
             def bad(x: int, /) -> ValueOutput:
                 return {"value": x}
 
+    def test_unresolvable_forward_ref(self) -> None:
+        with pytest.raises(ChainWeaverError, match="Failed to resolve type hints"):
+
+            @tool(description="Bad.")
+            def bad(x: NoSuchType) -> ValueOutput:  # type: ignore[name-defined]  # noqa: F821
+                return {"value": 0}
+
 
 # ---------------------------------------------------------------------------
 # Default parameter values
