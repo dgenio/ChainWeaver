@@ -21,6 +21,7 @@ and tools, the same flow produces the same output every time.
 
 | Module | Responsibility | Key constraint |
 |--------|---------------|----------------|
+| `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
 | `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
 | `flow.py` | Define `FlowStep` and `Flow` as Pydantic models | Pure data definitions; no execution logic |
 | `registry.py` | Store and retrieve flows by name | In-memory; intentionally simple for later wrapping |
