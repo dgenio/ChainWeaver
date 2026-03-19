@@ -1,0 +1,188 @@
+"""Decorator for zero-boilerplate tool definition.
+
+The :func:`tool` decorator creates a :class:`~chainweaver.tools.Tool` from a
+type-annotated Python function, eliminating the need to manually define
+Pydantic input/output schemas and the ``Tool()`` constructor call.
+
+Example::
+
+    from chainweaver import tool
+
+    class ValueOutput(BaseModel):
+        value: int
+
+    @tool(description="Doubles a number.")
+    def double(number: int) -> ValueOutput:
+        return {"value": number * 2}
+"""
+
+from __future__ import annotations
+
+import inspect
+from collections.abc import Callable
+from typing import Any, get_type_hints, overload
+
+from pydantic import BaseModel, create_model
+
+from chainweaver.exceptions import ChainWeaverError
+from chainweaver.tools import Tool
+
+
+class _DecoratedTool(Tool):
+    """A Tool created via the ``@tool`` decorator that is also directly callable.
+
+    Behaves exactly like a :class:`~chainweaver.tools.Tool` but additionally
+    supports calling with the original function signature.
+    """
+
+    def __init__(
+        self,
+        *,
+        original_fn: Callable[..., Any],
+        name: str,
+        description: str,
+        input_schema: type[BaseModel],
+        output_schema: type[BaseModel],
+        fn: Callable[[Any], dict[str, Any]],
+    ) -> None:
+        super().__init__(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            fn=fn,
+        )
+        self._original_fn = original_fn
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Call the original function directly, bypassing schema validation."""
+        return self._original_fn(*args, **kwargs)
+
+
+def _build_tool(
+    fn: Callable[..., Any],
+    *,
+    name: str | None,
+    description: str | None,
+) -> _DecoratedTool:
+    """Build a :class:`_DecoratedTool` from a type-annotated function."""
+    tool_name = name if name is not None else fn.__name__
+    tool_description = description if description is not None else (fn.__doc__ or "").strip()
+
+    hints = get_type_hints(fn, include_extras=True)
+    sig = inspect.signature(fn)
+
+    # -- Validate return type -----------------------------------------------
+    return_type = hints.get("return")
+    if return_type is None:
+        raise ChainWeaverError(
+            f"Function '{fn.__name__}' is missing a return type annotation. "
+            f"The return type must be a BaseModel subclass. "
+            f"Use the explicit Tool() constructor for functions without full type hints."
+        )
+
+    if not (isinstance(return_type, type) and issubclass(return_type, BaseModel)):
+        raise ChainWeaverError(
+            f"Function '{fn.__name__}' return type must be a BaseModel subclass, "
+            f"got '{return_type}'. "
+            f"Use the explicit Tool() constructor for functions without full type hints."
+        )
+
+    output_schema = return_type
+
+    # -- Build input schema fields ------------------------------------------
+    fields: dict[str, Any] = {}
+    for param_name, param in sig.parameters.items():
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            raise ChainWeaverError(
+                f"Function '{fn.__name__}' uses *args or **kwargs, "
+                f"which cannot be introspected into a schema. "
+                f"Use the explicit Tool() constructor instead."
+            )
+
+        if param_name not in hints:
+            raise ChainWeaverError(
+                f"Parameter '{param_name}' of function '{fn.__name__}' "
+                f"is missing a type annotation. "
+                f"Use the explicit Tool() constructor for functions "
+                f"without full type hints."
+            )
+
+        param_type = hints[param_name]
+        if param.default is inspect.Parameter.empty:
+            fields[param_name] = (param_type, ...)
+        else:
+            fields[param_name] = (param_type, param.default)
+
+    input_schema: type[BaseModel] = create_model(f"{tool_name}_input", **fields)
+
+    # -- Create adapter for Tool.fn signature --------------------------------
+    def _adapter(inp: Any) -> dict[str, Any]:
+        return fn(**inp.model_dump())  # type: ignore[no-any-return]
+
+    return _DecoratedTool(
+        original_fn=fn,
+        name=tool_name,
+        description=tool_description,
+        input_schema=input_schema,
+        output_schema=output_schema,
+        fn=_adapter,
+    )
+
+
+@overload
+def tool(fn: Callable[..., Any], /) -> _DecoratedTool: ...
+
+
+@overload
+def tool(
+    *,
+    name: str | None = ...,
+    description: str | None = ...,
+) -> Callable[[Callable[..., Any]], _DecoratedTool]: ...
+
+
+def tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]:
+    """Create a :class:`~chainweaver.tools.Tool` from a type-annotated function.
+
+    Can be used as a bare decorator or as a decorator factory with keyword
+    arguments:
+
+    .. code-block:: python
+
+        @tool
+        def greet(name: str) -> GreetOutput:
+            \"\"\"Say hello.\"\"\"
+            return {"message": f"Hello, {name}!"}
+
+        @tool(name="custom_double", description="Doubles a number.")
+        def double(number: int) -> ValueOutput:
+            return {"value": number * 2}
+
+    Args:
+        fn: The function to wrap (used when the decorator is applied without
+            parentheses).
+        name: Override the tool name.  Defaults to the function name.
+        description: Tool description.  Falls back to the function's docstring
+            if not provided.
+
+    Returns:
+        A :class:`~chainweaver.tools.Tool` that is also directly callable with
+        the original function's signature.
+
+    Raises:
+        ChainWeaverError: When type hints are missing or the return type is not
+            a :class:`~pydantic.BaseModel` subclass.
+    """
+    if fn is not None:
+        return _build_tool(fn, name=name, description=description)
+
+    def _decorator(fn: Callable[..., Any]) -> _DecoratedTool:
+        return _build_tool(fn, name=name, description=description)
+
+    return _decorator

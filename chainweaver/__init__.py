@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
     FlowAlreadyExistsError,
@@ -56,4 +57,5 @@ __all__ = [
     "StepRecord",
     "Tool",
     "ToolNotFoundError",
+    "tool",
 ]
