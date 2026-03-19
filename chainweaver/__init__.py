@@ -5,7 +5,7 @@ Public API
 
 .. code-block:: python
 
-    from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
+    from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor, tool
     from chainweaver.exceptions import (
         ChainWeaverError,
         ToolNotFoundError,
@@ -14,6 +14,7 @@ Public API
         SchemaValidationError,
         InputMappingError,
         FlowExecutionError,
+        ToolDecoratorError,
     )
 """
 
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
     FlowAlreadyExistsError,
@@ -28,6 +30,7 @@ from chainweaver.exceptions import (
     FlowNotFoundError,
     InputMappingError,
     SchemaValidationError,
+    ToolDecoratorError,
     ToolNotFoundError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
@@ -55,5 +58,7 @@ __all__ = [
     "SchemaValidationError",
     "StepRecord",
     "Tool",
+    "ToolDecoratorError",
     "ToolNotFoundError",
+    "tool",
 ]

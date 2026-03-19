@@ -108,6 +108,71 @@ pip install chainweaver
 
 ## Quick Start
 
+### Zero-boilerplate: `@tool` decorator
+
+The `@chainweaver.tool` decorator creates a fully validated `Tool` from a
+type-annotated function — no separate input/output models, no constructor call:
+
+```python
+from pydantic import BaseModel
+import chainweaver
+from chainweaver import Flow, FlowStep, FlowRegistry, FlowExecutor
+
+class ValueOutput(BaseModel):
+    value: int
+
+class FormattedOutput(BaseModel):
+    result: str
+
+@chainweaver.tool(description="Takes a number and returns its double.")
+def double(number: int) -> ValueOutput:
+    return {"value": number * 2}
+
+@chainweaver.tool(description="Adds 10 to a value.")
+def add_ten(value: int) -> ValueOutput:
+    return {"value": value + 10}
+
+@chainweaver.tool(description="Formats a numeric value into a human-readable string.")
+def format_result(value: int) -> FormattedOutput:
+    return {"result": f"Final value: {value}"}
+
+# Tools are also directly callable as normal functions
+assert double(number=5) == {"value": 10}
+
+flow = Flow(
+    name="double_add_format",
+    description="Doubles a number, adds 10, and formats the result.",
+    steps=[
+        FlowStep(tool_name="double",        input_mapping={"number": "number"}),
+        FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
+        FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
+    ],
+)
+
+registry = FlowRegistry()
+registry.register_flow(flow)
+executor = FlowExecutor(registry=registry)
+executor.register_tool(double)
+executor.register_tool(add_ten)
+executor.register_tool(format_result)
+
+result = executor.execute_flow("double_add_format", {"number": 5})
+print(result.success)       # True
+print(result.final_output)  # {'number': 5, 'value': 20, 'result': 'Final value: 20'}
+```
+
+**Decorator options:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `name` | function name | Override the tool name |
+| `description` | docstring, then `""` | Human-readable description |
+
+The explicit `Tool()` constructor continues to work unchanged — see the
+[full example](#define-tools-build-a-flow-and-execute-it) below.
+
+---
+
 ### Define tools, build a flow, and execute it
 
 ```python
@@ -213,6 +278,7 @@ python examples/simple_linear_flow.py
 chainweaver/
 ├── __init__.py       # Public API
 ├── tools.py          # Tool — named callable with Pydantic schemas
+├── decorators.py     # @tool decorator — zero-boilerplate tool definition
 ├── flow.py           # FlowStep + Flow — ordered step definitions
 ├── registry.py       # FlowRegistry — in-memory flow catalogue
 ├── executor.py       # FlowExecutor — deterministic, LLM-free runner
@@ -346,6 +412,7 @@ All errors are typed and traceable:
 | `SchemaValidationError` | Input or output fails Pydantic validation |
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
+| `ToolDecoratorError` | `@tool` cannot build a `Tool` (missing/invalid type hints) |
 
 All exceptions inherit from `ChainWeaverError`.
 

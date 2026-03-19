@@ -71,3 +71,15 @@ class FlowExecutionError(ChainWeaverError):
         self.step_index = step_index
         self.detail = detail
         super().__init__(f"Execution error in tool '{tool_name}' at step {step_index}: {detail}")
+
+
+class ToolDecoratorError(ChainWeaverError):
+    """Raised when the ``@tool`` decorator cannot build a :class:`~chainweaver.tools.Tool`."""
+
+    def __init__(self, fn_name: str, detail: str) -> None:
+        self.fn_name = fn_name
+        self.detail = detail
+        super().__init__(
+            f"Cannot create tool from '{fn_name}': {detail} "
+            "Use the explicit Tool() constructor instead."
+        )

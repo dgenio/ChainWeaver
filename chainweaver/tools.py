@@ -84,5 +84,26 @@ class Tool:
         validated_output = self.output_schema.model_validate(raw_output)
         return validated_output.model_dump()
 
+    def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        """Call the tool directly with keyword arguments.
+
+        Validates *kwargs* against *input_schema*, invokes the underlying
+        callable, and returns the raw ``dict`` result **without** output schema
+        validation.  This makes a :class:`Tool` usable as a plain function in
+        addition to being usable inside a :class:`~chainweaver.flow.Flow`.
+
+        For full schema-validated execution (including output validation), use
+        :meth:`run` directly or let :class:`~chainweaver.executor.FlowExecutor`
+        invoke the tool inside a flow.
+
+        Args:
+            **kwargs: Keyword arguments matching the fields of *input_schema*.
+
+        Returns:
+            The ``dict`` returned by the underlying callable.
+        """
+        validated_input = self.input_schema(**kwargs)
+        return self.fn(validated_input)
+
     def __repr__(self) -> str:
         return f"Tool(name={self.name!r})"

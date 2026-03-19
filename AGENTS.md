@@ -35,6 +35,7 @@ Use these terms consistently in code, docs, comments, and PR descriptions.
 chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas
+├── decorators.py      @tool decorator: zero-boilerplate tool definition
 ├── flow.py            FlowStep + Flow: ordered step definitions (Pydantic models)
 ├── registry.py        FlowRegistry: in-memory catalogue of named flows
 ├── executor.py        FlowExecutor: sequential, LLM-free runner (main entry point)
