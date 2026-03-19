@@ -205,6 +205,63 @@ You can also run the bundled example directly:
 python examples/simple_linear_flow.py
 ```
 
+### With the `@tool` decorator
+
+The `@tool` decorator eliminates boilerplate by introspecting type hints to
+auto-generate input schemas:
+
+```python
+from pydantic import BaseModel
+from chainweaver import tool, Flow, FlowStep, FlowRegistry, FlowExecutor
+
+class ValueOutput(BaseModel):
+    value: int
+
+class FormattedOutput(BaseModel):
+    result: str
+
+@tool(description="Doubles a number.")
+def double(number: int) -> ValueOutput:
+    return {"value": number * 2}
+
+@tool(description="Adds ten.")
+def add_ten(value: int) -> ValueOutput:
+    return {"value": value + 10}
+
+@tool(description="Formats the result.")
+def format_result(value: int) -> FormattedOutput:
+    return {"result": f"Final value: {value}"}
+
+flow = Flow(
+    name="double_add_format",
+    description="Doubles a number, adds 10, and formats the result.",
+    steps=[
+        FlowStep(tool_name="double",        input_mapping={"number": "number"}),
+        FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
+        FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
+    ],
+)
+
+registry = FlowRegistry()
+registry.register_flow(flow)
+
+executor = FlowExecutor(registry=registry)
+executor.register_tool(double)
+executor.register_tool(add_ten)
+executor.register_tool(format_result)
+
+result = executor.execute_flow("double_add_format", {"number": 5})
+print(result.final_output)  # {'number': 5, 'value': 20, 'result': 'Final value: 20'}
+```
+
+Decorated tools are also directly callable:
+
+```python
+print(double(number=5))  # {'value': 10}
+```
+
+See `examples/decorator_tool.py` for a runnable before/after comparison.
+
 ---
 
 ## Architecture
@@ -212,6 +269,7 @@ python examples/simple_linear_flow.py
 ```
 chainweaver/
 ├── __init__.py       # Public API
+├── decorators.py     # @tool decorator for zero-boilerplate tool definition
 ├── tools.py          # Tool — named callable with Pydantic schemas
 ├── flow.py           # FlowStep + Flow — ordered step definitions
 ├── registry.py       # FlowRegistry — in-memory flow catalogue
