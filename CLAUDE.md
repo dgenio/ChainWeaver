@@ -9,6 +9,6 @@ coding conventions, and guardrails are maintained in a single canonical source:
 
 1. No LLM calls in `executor.py` — deterministic by design.
 2. All exceptions inherit from `ChainWeaverError`.
-3. All public symbols exported in `__init__.py` `__all__`.
+3. All public symbols exported in `chainweaver/__init__.py` `__all__`.
 4. `from __future__ import annotations` at the top of every module.
 5. All code must pass: `ruff check`, `ruff format --check`, `mypy`, `pytest`.
