@@ -346,6 +346,7 @@ All errors are typed and traceable:
 | `SchemaValidationError` | Input or output fails Pydantic validation |
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
+| `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 
 All exceptions inherit from `ChainWeaverError`.
 

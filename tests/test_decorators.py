@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from chainweaver import tool
-from chainweaver.exceptions import ChainWeaverError
+from chainweaver.exceptions import ToolDefinitionError
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import Flow, FlowStep
 from chainweaver.registry import FlowRegistry
@@ -138,49 +138,51 @@ class TestDirectCallable:
 
 class TestMissingHints:
     def test_missing_return_type(self) -> None:
-        with pytest.raises(ChainWeaverError, match="missing a return type"):
+        with pytest.raises(ToolDefinitionError, match="Missing a return type") as exc_info:
 
             @tool(description="Bad.")
             def bad(x: int):  # type: ignore[no-untyped-def]
                 return {"value": x}
 
+        assert exc_info.value.function_name == "bad"
+
     def test_non_basemodel_return_type(self) -> None:
-        with pytest.raises(ChainWeaverError, match="must be a BaseModel subclass"):
+        with pytest.raises(ToolDefinitionError, match="must be a BaseModel subclass"):
 
             @tool(description="Bad.")
             def bad(x: int) -> dict:  # type: ignore[type-arg]
                 return {"value": x}
 
     def test_missing_param_annotation(self) -> None:
-        with pytest.raises(ChainWeaverError, match="missing a type annotation"):
+        with pytest.raises(ToolDefinitionError, match="missing a type annotation"):
 
             @tool(description="Bad.")
             def bad(x) -> ValueOutput:  # type: ignore[no-untyped-def]
                 return {"value": x}
 
     def test_var_positional_rejected(self) -> None:
-        with pytest.raises(ChainWeaverError, match="\\*args or \\*\\*kwargs"):
+        with pytest.raises(ToolDefinitionError, match="\\*args or \\*\\*kwargs"):
 
             @tool(description="Bad.")
             def bad(*args: int) -> ValueOutput:
                 return {"value": 0}
 
     def test_var_keyword_rejected(self) -> None:
-        with pytest.raises(ChainWeaverError, match="\\*args or \\*\\*kwargs"):
+        with pytest.raises(ToolDefinitionError, match="\\*args or \\*\\*kwargs"):
 
             @tool(description="Bad.")
             def bad(**kwargs: int) -> ValueOutput:
                 return {"value": 0}
 
     def test_positional_only_rejected(self) -> None:
-        with pytest.raises(ChainWeaverError, match="positional-only parameters"):
+        with pytest.raises(ToolDefinitionError, match="positional-only parameters"):
 
             @tool(description="Bad.")
             def bad(x: int, /) -> ValueOutput:
                 return {"value": x}
 
     def test_unresolvable_forward_ref(self) -> None:
-        with pytest.raises(ChainWeaverError, match="Failed to resolve type hints"):
+        with pytest.raises(ToolDefinitionError, match="Failed to resolve type hints"):
 
             @tool(description="Bad.")
             def bad(x: NoSuchType) -> ValueOutput:  # type: ignore[name-defined]  # noqa: F821

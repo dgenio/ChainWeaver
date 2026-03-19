@@ -14,6 +14,7 @@ Public API
         SchemaValidationError,
         InputMappingError,
         FlowExecutionError,
+        ToolDefinitionError,
     )
 """
 
@@ -29,6 +30,7 @@ from chainweaver.exceptions import (
     FlowNotFoundError,
     InputMappingError,
     SchemaValidationError,
+    ToolDefinitionError,
     ToolNotFoundError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
@@ -56,6 +58,7 @@ __all__ = [
     "SchemaValidationError",
     "StepRecord",
     "Tool",
+    "ToolDefinitionError",
     "ToolNotFoundError",
     "tool",
 ]

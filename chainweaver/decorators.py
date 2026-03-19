@@ -24,7 +24,7 @@ from typing import Any, get_type_hints, overload
 
 from pydantic import BaseModel, create_model
 
-from chainweaver.exceptions import ChainWeaverError
+from chainweaver.exceptions import ToolDefinitionError
 from chainweaver.tools import Tool
 
 
@@ -72,27 +72,29 @@ def _build_tool(
     try:
         hints = get_type_hints(fn, include_extras=True)
     except (NameError, TypeError) as exc:
-        raise ChainWeaverError(
-            f"Failed to resolve type hints for function '{fn.__name__}': {exc}. "
+        raise ToolDefinitionError(
+            fn.__name__,
+            f"Failed to resolve type hints: {exc}. "
             f"Ensure all annotations are importable and any forward references "
-            f"are either quoted or resolvable in the tool's module."
+            f"are either quoted or resolvable in the tool's module.",
         ) from exc
     sig = inspect.signature(fn)
 
     # -- Validate return type -----------------------------------------------
     return_type = hints.get("return")
     if return_type is None:
-        raise ChainWeaverError(
-            f"Function '{fn.__name__}' is missing a return type annotation. "
-            f"The return type must be a BaseModel subclass. "
-            f"Use the explicit Tool() constructor for functions without full type hints."
+        raise ToolDefinitionError(
+            fn.__name__,
+            "Missing a return type annotation. "
+            "The return type must be a BaseModel subclass. "
+            "Use the explicit Tool() constructor for functions without full type hints.",
         )
 
     if not (isinstance(return_type, type) and issubclass(return_type, BaseModel)):
-        raise ChainWeaverError(
-            f"Function '{fn.__name__}' return type must be a BaseModel subclass, "
-            f"got '{return_type}'. "
-            f"Use the explicit Tool() constructor for functions without full type hints."
+        raise ToolDefinitionError(
+            fn.__name__,
+            f"Return type must be a BaseModel subclass, got '{return_type}'. "
+            f"Use the explicit Tool() constructor for functions without full type hints.",
         )
 
     output_schema = return_type
@@ -103,25 +105,27 @@ def _build_tool(
         # Positional-only parameters cannot be passed as keyword arguments,
         # but the adapter always calls the function via **kwargs.
         if param.kind is inspect.Parameter.POSITIONAL_ONLY:
-            raise ChainWeaverError(
-                f"Function '{fn.__name__}' uses positional-only parameters, "
-                f"which are not supported by the @tool decorator. "
-                f"Use the explicit Tool() constructor instead."
+            raise ToolDefinitionError(
+                fn.__name__,
+                "Uses positional-only parameters, "
+                "which are not supported by the @tool decorator. "
+                "Use the explicit Tool() constructor instead.",
             )
 
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-            raise ChainWeaverError(
-                f"Function '{fn.__name__}' uses *args or **kwargs, "
-                f"which cannot be introspected into a schema. "
-                f"Use the explicit Tool() constructor instead."
+            raise ToolDefinitionError(
+                fn.__name__,
+                "Uses *args or **kwargs, "
+                "which cannot be introspected into a schema. "
+                "Use the explicit Tool() constructor instead.",
             )
 
         if param_name not in hints:
-            raise ChainWeaverError(
-                f"Parameter '{param_name}' of function '{fn.__name__}' "
-                f"is missing a type annotation. "
+            raise ToolDefinitionError(
+                fn.__name__,
+                f"Parameter '{param_name}' is missing a type annotation. "
                 f"Use the explicit Tool() constructor for functions "
-                f"without full type hints."
+                f"without full type hints.",
             )
 
         param_type = hints[param_name]
@@ -192,8 +196,8 @@ def tool(
         the original function's signature.
 
     Raises:
-        ChainWeaverError: When type hints are missing or the return type is not
-            a :class:`~pydantic.BaseModel` subclass.
+        ToolDefinitionError: When type hints are missing or the return type is
+            not a :class:`~pydantic.BaseModel` subclass.
     """
     if fn is not None:
         return _build_tool(fn, name=name, description=description)
