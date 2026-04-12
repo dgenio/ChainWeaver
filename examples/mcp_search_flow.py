@@ -133,7 +133,7 @@ _KNOWLEDGE_BASE: list[dict[str, Any]] = [
     {
         "id": "doc_005",
         "title": "Widget Delta Release Notes",
-        "body": "Widget Delta v2.1 ships with improved latency and cost optimisations.",
+        "body": "Widget Delta v2.1 ships with improved latency and cost optimizations.",
         "tags": ["widget", "release"],
         "score": 0.88,
         "author": "product",

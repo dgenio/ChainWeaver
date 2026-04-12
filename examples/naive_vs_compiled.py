@@ -361,8 +361,9 @@ def main() -> None:
     compiled_output, compiled_time = run_compiled(record_id)
 
     # Both approaches must produce the same result.
-    assert naive_output["status"] == compiled_output["status"] == "processed"  # type: ignore[index]
-    assert naive_output["score"] == compiled_output["score"]  # type: ignore[index]
+    assert naive_output == compiled_output, (
+        f"Output mismatch!\n  naive:    {naive_output}\n  compiled: {compiled_output}"
+    )
 
     speedup = naive_time / compiled_time if compiled_time > 0 else float("inf")
     saved_ms = (naive_time - compiled_time) * 1000
