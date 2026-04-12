@@ -5,7 +5,7 @@ Public API
 
 .. code-block:: python
 
-    from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
+    from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor, FlowBuilder
     from chainweaver.exceptions import (
         ChainWeaverError,
         ToolNotFoundError,
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -49,6 +50,8 @@ __all__ = [
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",
+    "FlowBuilder",
+    "FlowBuilderError",
     "FlowExecutionError",
     "FlowExecutor",
     "FlowNotFoundError",

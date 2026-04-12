@@ -262,6 +262,36 @@ print(double(number=5))  # {'value': 10}
 
 See `examples/decorator_tool.py` for a runnable before/after comparison.
 
+### With `FlowBuilder`
+
+`FlowBuilder` provides a fluent, chainable API as a more Pythonic alternative
+to constructing `Flow` objects directly.  It produces an identical `Flow` — it
+is syntax sugar, not a replacement:
+
+```python
+from chainweaver import FlowBuilder
+
+flow = (
+    FlowBuilder("double_add_format", "Doubles a number, adds 10, and formats.")
+    .step("double", number="number")
+    .step("add_ten", value="value")
+    .step("format_result", value="value")
+    .with_input_schema(NumberInput)
+    .with_output_schema(FormattedOutput)
+    .build()
+)
+```
+
+- **`.step(tool_name, **mapping)`** — adds a step; string values are context-key
+  lookups, non-string values are literal constants, no kwargs = full-context
+  passthrough.
+- **`.step_from(flow_step)`** — appends a pre-built `FlowStep` for interop.
+- **`.with_input_schema(Model)`** / **`.with_output_schema(Model)`** — optional
+  flow-level Pydantic schema declarations.
+- **`.with_trigger(conditions)`** — optional free-form trigger metadata.
+- **`.build()`** — returns a validated `Flow`; raises `FlowBuilderError` if
+  `name` or `description` is missing.
+
 ---
 
 ## Architecture
@@ -269,6 +299,7 @@ See `examples/decorator_tool.py` for a runnable before/after comparison.
 ```
 chainweaver/
 ├── __init__.py       # Public API
+├── builder.py        # FlowBuilder — fluent API for flow construction
 ├── decorators.py     # @tool decorator for zero-boilerplate tool definition
 ├── tools.py          # Tool — named callable with Pydantic schemas
 ├── flow.py           # FlowStep + Flow — ordered step definitions
@@ -405,6 +436,7 @@ All errors are typed and traceable:
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
+| `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -416,6 +448,7 @@ All exceptions inherit from `ChainWeaverError`.
 
 - [x] `Tool` with Pydantic input/output schemas
 - [x] `Flow` as an ordered list of `FlowStep` objects
+- [x] `FlowBuilder` fluent API for flow construction
 - [x] `FlowRegistry` (in-memory)
 - [x] `FlowExecutor` (sequential, LLM-free)
 - [x] Structured per-step logging
