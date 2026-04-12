@@ -199,10 +199,13 @@ for record in result.execution_log:
 # 2 format_result {'result': 'Final value: 20'}
 ```
 
-You can also run the bundled example directly:
+You can also run the bundled examples directly:
 
 ```bash
-python examples/simple_linear_flow.py
+python examples/simple_linear_flow.py   # simple arithmetic chain
+python examples/data_pipeline_flow.py   # ETL pipeline: fetch → validate → normalize → enrich → store
+python examples/mcp_search_flow.py      # MCP-style search → extract → format
+python examples/naive_vs_compiled.py    # timing comparison: naive LLM chaining vs ChainWeaver
 ```
 
 ### With the `@tool` decorator
@@ -451,8 +454,11 @@ pip install -e ".[dev]"
 # Run tests
 pytest
 
-# Run the example
-python examples/simple_linear_flow.py
+# Run the examples
+python examples/simple_linear_flow.py   # simple arithmetic chain
+python examples/data_pipeline_flow.py   # ETL pipeline
+python examples/mcp_search_flow.py      # MCP-style search & summarize
+python examples/naive_vs_compiled.py    # naive vs compiled timing comparison
 ```
 
 ---
