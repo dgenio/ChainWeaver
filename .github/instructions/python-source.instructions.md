@@ -21,9 +21,8 @@ These instructions apply when editing production source code in `chainweaver/`.
 - All custom exceptions inherit from `ChainWeaverError`
 - Exception constructors accept context kwargs: `tool_name`, `step_index`, `detail`
 - Import exceptions from `chainweaver.exceptions`, never define inline
-- Available exception types: `ToolNotFoundError`, `FlowNotFoundError`,
-  `FlowAlreadyExistsError`, `SchemaValidationError`, `InputMappingError`,
-  `FlowExecutionError`, `ToolDefinitionError`
+- Available exception types: `ToolNotFoundError`, `FlowNotFoundError`, `FlowAlreadyExistsError`,
+  `SchemaValidationError`, `InputMappingError`, `FlowExecutionError`, `ToolDefinitionError`
 
 ## Export rules
 - Any new public class/function MUST be added to `chainweaver/__init__.py` `__all__`
