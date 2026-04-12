@@ -34,7 +34,7 @@ jobs:
 
       - name: Type check with mypy
         if: ${{ matrix.python-version == '3.10' }}
-        run: python -m mypy chainweaver/
+        run: python -m mypy chainweaver/ tests/
 
       - name: Run tests
         run: python -m pytest tests/ -v
