@@ -7,19 +7,21 @@ applyTo: "chainweaver/**/*.py"
 These instructions apply when editing production source code in `chainweaver/`.
 
 ## Module conventions
-- Every module starts with `from __future__ import annotations`
 - Every module has a module-level docstring explaining its role
+- Include `from __future__ import annotations` immediately after the module docstring
 - All public classes and functions have Google-style docstrings
 
 ## Pydantic patterns
-- Use `pydantic.BaseModel` for all data models (v2 API)
-- Use `model_dump()` not `.dict()` (v2 migration)
-- Use `model_validate()` not `.parse_obj()` (v2 migration)
+- Use `pydantic.BaseModel` for schemas / I/O contracts (v2 API)
+- For `BaseModel` types, use `model_dump()` not `.dict()` (v2 migration)
+- For `BaseModel` types, use `model_validate()` not `.parse_obj()` (v2 migration)
 - Field descriptions via `Field(description="...")` for schema clarity
+- Internal runtime records that need to carry `Exception` instances may remain `dataclass`es per repo invariants
 
 ## Exception patterns
 - All custom exceptions inherit from `ChainWeaverError`
-- Exception constructors accept context kwargs: `tool_name`, `step_index`, `detail`
+- Exceptions should carry relevant context attributes where applicable; do not assume a uniform
+  constructor signature — follow the API defined by each exception class in `chainweaver.exceptions`
 - Import exceptions from `chainweaver.exceptions`, never define inline
 - Available exception types: `ToolNotFoundError`, `FlowNotFoundError`, `FlowAlreadyExistsError`,
   `SchemaValidationError`, `InputMappingError`, `FlowExecutionError`, `ToolDefinitionError`

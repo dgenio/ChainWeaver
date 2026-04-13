@@ -36,4 +36,4 @@ Copilot Code Review to avoid false-positive review comments on test patterns.
 ## Anti-patterns in tests
 - Do NOT mock internal ChainWeaver classes unless testing integration boundaries
 - Do NOT use `time.sleep()` — tests must be deterministic and fast
-- Do NOT import from `chainweaver` using relative paths
+- Do not use relative imports into `chainweaver` internals; import from the public `chainweaver` package API instead

@@ -63,6 +63,8 @@ python -m pytest tests/ -v
 - **Organization:** hybrid — unit tests grouped by module, integration tests grouped by scenario.
 - **Test classes:** grouped by scenario (e.g., `TestSuccessfulExecution`, `TestMissingTool`).
 - **Assertions:** plain `assert` (pytest rewrites them). Not `self.assertEqual`.
+- **Fixture syntax:** `@pytest.fixture()` with explicit parentheses.
+- **Assertion density:** one logical assertion per test when practical.
 - **Mocking:** no mocking of internal ChainWeaver classes unless testing integration boundaries.
 - **Coverage:** test both success and failure/error paths.
 
