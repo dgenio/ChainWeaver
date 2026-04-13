@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from helpers import (
     FormattedOutput,
@@ -128,7 +130,7 @@ class TestSchemaValidation:
         class GoodInput(BaseModel):
             number: int
 
-        def bad_fn(inp: GoodInput) -> dict:
+        def bad_fn(inp: GoodInput) -> dict[str, Any]:
             # Returns a key that doesn't exist in the declared output schema.
             return {"value": inp.number * 2}
 
@@ -206,7 +208,7 @@ class TestInputMapping:
         class OutSchema(BaseModel):
             result: int
 
-        def scale_fn(inp: InpSchema) -> dict:
+        def scale_fn(inp: InpSchema) -> dict[str, Any]:
             return {"result": inp.value * inp.factor}
 
         scale_tool = Tool(
@@ -246,7 +248,7 @@ class TestInputMapping:
         class SumOutput(BaseModel):
             total: int
 
-        def sum_fn(inp: CtxInput) -> dict:
+        def sum_fn(inp: CtxInput) -> dict[str, Any]:
             return {"total": inp.a + inp.b}
 
         sum_tool = Tool(
@@ -287,7 +289,7 @@ class TestFlowExecutionError:
         class OutSchema(BaseModel):
             x: int
 
-        def boom(inp: InSchema) -> dict:
+        def boom(inp: InSchema) -> dict[str, Any]:
             raise RuntimeError("something went wrong")
 
         tool = Tool(
@@ -321,7 +323,7 @@ class TestFlowExecutionError:
         class OutSchema(BaseModel):
             x: int
 
-        def bad(inp: InSchema) -> dict:
+        def bad(inp: InSchema) -> dict[str, Any]:
             raise ValueError("bad value")
 
         tool = Tool(
@@ -403,7 +405,7 @@ class TestToolRun:
         class StrictOut(BaseModel):
             required_field: str
 
-        def wrong_output(inp: NumberInput) -> dict:
+        def wrong_output(inp: NumberInput) -> dict[str, Any]:
             return {"wrong_key": 123}
 
         tool = Tool(
@@ -647,7 +649,7 @@ class TestToolZeroDivisionError:
         class DivOutput(BaseModel):
             result: int
 
-        def divide_fn(inp: DivInput) -> dict:
+        def divide_fn(inp: DivInput) -> dict[str, Any]:
             return {"result": inp.numerator // inp.denominator}
 
         tool = Tool(
@@ -680,8 +682,10 @@ class TestToolZeroDivisionError:
         record = result.execution_log[0]
         assert record.success is False
         assert isinstance(record.error, FlowExecutionError)
-        assert "divide" in str(record.error)  # tool name preserved in error
-        assert "division by zero" in str(record.error)  # message stable across CPython 3.10-3.14+
+        assert record.error.detail in {
+            "integer division or modulo by zero",  # Python <= 3.13
+            "division by zero",  # Python 3.14+
+        }
 
 
 # ---------------------------------------------------------------------------

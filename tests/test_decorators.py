@@ -36,7 +36,7 @@ class TestBasicUsage:
     def test_creates_valid_tool(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert isinstance(double, Tool)
         assert double.name == "double"
@@ -45,7 +45,7 @@ class TestBasicUsage:
     def test_tool_run_validates_and_returns(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         result = double.run({"number": 5})
         assert result == {"value": 10}
@@ -53,7 +53,7 @@ class TestBasicUsage:
     def test_repr(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert repr(double) == "Tool(name='double')"
 
@@ -67,7 +67,7 @@ class TestCustomName:
     def test_overrides_function_name(self) -> None:
         @tool(name="my_double", description="Doubles.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double.name == "my_double"
 
@@ -82,7 +82,7 @@ class TestDescriptionFallback:
         @tool()
         def double(number: int) -> ValueOutput:
             """Doubles a number."""
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double.description == "Doubles a number."
 
@@ -90,14 +90,14 @@ class TestDescriptionFallback:
         @tool
         def double(number: int) -> ValueOutput:
             """Doubles a number."""
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double.description == "Doubles a number."
 
     def test_empty_description_when_nothing_provided(self) -> None:
         @tool()
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double.description == ""
 
@@ -105,7 +105,7 @@ class TestDescriptionFallback:
         @tool(description="Custom desc.")
         def double(number: int) -> ValueOutput:
             """This docstring is ignored."""
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double.description == "Custom desc."
 
@@ -119,14 +119,14 @@ class TestDirectCallable:
     def test_callable_with_kwargs(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double(number=5) == {"value": 10}
 
     def test_callable_with_positional_args(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         assert double(5) == {"value": 10}
 
@@ -158,35 +158,35 @@ class TestMissingHints:
 
             @tool(description="Bad.")
             def bad(x) -> ValueOutput:  # type: ignore[no-untyped-def]
-                return {"value": x}
+                return {"value": x}  # type: ignore[return-value]
 
     def test_var_positional_rejected(self) -> None:
         with pytest.raises(ToolDefinitionError, match="\\*args or \\*\\*kwargs"):
 
             @tool(description="Bad.")
             def bad(*args: int) -> ValueOutput:
-                return {"value": 0}
+                return {"value": 0}  # type: ignore[return-value]
 
     def test_var_keyword_rejected(self) -> None:
         with pytest.raises(ToolDefinitionError, match="\\*args or \\*\\*kwargs"):
 
             @tool(description="Bad.")
             def bad(**kwargs: int) -> ValueOutput:
-                return {"value": 0}
+                return {"value": 0}  # type: ignore[return-value]
 
     def test_positional_only_rejected(self) -> None:
         with pytest.raises(ToolDefinitionError, match="positional-only parameters"):
 
             @tool(description="Bad.")
             def bad(x: int, /) -> ValueOutput:
-                return {"value": x}
+                return {"value": x}  # type: ignore[return-value]
 
     def test_unresolvable_forward_ref(self) -> None:
         with pytest.raises(ToolDefinitionError, match="Failed to resolve type hints"):
 
             @tool(description="Bad.")
             def bad(x: NoSuchType) -> ValueOutput:  # type: ignore[name-defined]  # noqa: F821
-                return {"value": 0}
+                return {"value": 0}  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ class TestDefaultValues:
     def test_required_param_only(self) -> None:
         @tool(description="Adds.")
         def add(a: int, b: int = 10) -> ValueOutput:
-            return {"value": a + b}
+            return {"value": a + b}  # type: ignore[return-value]
 
         result = add.run({"a": 5})
         assert result == {"value": 15}
@@ -206,7 +206,7 @@ class TestDefaultValues:
     def test_both_params_provided(self) -> None:
         @tool(description="Adds.")
         def add(a: int, b: int = 10) -> ValueOutput:
-            return {"value": a + b}
+            return {"value": a + b}  # type: ignore[return-value]
 
         result = add.run({"a": 5, "b": 20})
         assert result == {"value": 25}
@@ -221,7 +221,7 @@ class TestNoParameters:
     def test_no_params_creates_empty_schema(self) -> None:
         @tool(description="Returns fixed value.")
         def fixed() -> ValueOutput:
-            return {"value": 42}
+            return {"value": 42}  # type: ignore[return-value]
 
         result = fixed.run({})
         assert result == {"value": 42}
@@ -238,7 +238,7 @@ class TestAnnotatedSupport:
         def greet(
             name: Annotated[str, Field(description="The name to greet")],
         ) -> GreetOutput:
-            return {"message": f"Hello, {name}!"}
+            return {"message": f"Hello, {name}!"}  # type: ignore[return-value]
 
         result = greet.run({"name": "World"})
         assert result == {"message": "Hello, World!"}
@@ -257,7 +257,7 @@ class TestRoundTripWithExecutor:
     def test_decorator_tool_in_flow(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         flow = Flow(
             name="decorator_flow",
@@ -277,11 +277,11 @@ class TestRoundTripWithExecutor:
     def test_multi_step_flow_with_decorated_tools(self) -> None:
         @tool(description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return {"value": number * 2}  # type: ignore[return-value]
 
         @tool(description="Adds ten.")
         def add_ten(value: int) -> ValueOutput:
-            return {"value": value + 10}
+            return {"value": value + 10}  # type: ignore[return-value]
 
         flow = Flow(
             name="double_then_add",
