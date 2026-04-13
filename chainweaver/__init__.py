@@ -25,6 +25,7 @@ import logging
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
+    DAGDefinitionError,
     FlowAlreadyExistsError,
     FlowExecutionError,
     FlowNotFoundError,
@@ -34,7 +35,7 @@ from chainweaver.exceptions import (
     ToolNotFoundError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -46,6 +47,9 @@ __version__ = "0.0.2"
 
 __all__ = [
     "ChainWeaverError",
+    "DAGDefinitionError",
+    "DAGFlow",
+    "DAGFlowStep",
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",

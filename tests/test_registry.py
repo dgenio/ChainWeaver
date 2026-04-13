@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from chainweaver.exceptions import FlowAlreadyExistsError, FlowNotFoundError
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.exceptions import DAGDefinitionError, FlowAlreadyExistsError, FlowNotFoundError
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 
 # ---------------------------------------------------------------------------
@@ -147,3 +147,104 @@ class TestOverwritePreservesCount:
         registry.register_flow(new_flow, overwrite=True)
         assert len(registry) == 2
         assert registry.get_flow("replace_me").description == "Replaced"
+
+
+# ---------------------------------------------------------------------------
+# DAGFlow registration
+# ---------------------------------------------------------------------------
+
+
+def _make_dag(name: str = "dag", *, steps: list[DAGFlowStep] | None = None) -> DAGFlow:
+    if steps is None:
+        steps = [
+            DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
+            DAGFlowStep(tool_name="b", step_id="B", depends_on=["A"]),
+        ]
+    return DAGFlow(name=name, description=f"Test DAG '{name}'.", steps=steps)
+
+
+class TestDAGFlowRegistration:
+    def test_valid_dag_registers(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(_make_dag("valid"))
+        assert "valid" in registry.list_flows()
+
+    def test_dag_and_linear_coexist(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(_make_flow("linear"))
+        registry.register_flow(_make_dag("dag"))
+        assert set(registry.list_flows()) == {"linear", "dag"}
+
+    def test_dag_duplicate_step_id_raises(self) -> None:
+        steps = [
+            DAGFlowStep(tool_name="a", step_id="DUP", depends_on=[]),
+            DAGFlowStep(tool_name="b", step_id="DUP", depends_on=["DUP"]),
+        ]
+        flow = DAGFlow(name="dup_dag", description="Duplicate IDs.", steps=steps)
+        registry = FlowRegistry()
+        with pytest.raises(DAGDefinitionError) as exc_info:
+            registry.register_flow(flow)
+        assert exc_info.value.reason == "duplicate_step_id"
+        assert exc_info.value.flow_name == "dup_dag"
+
+    def test_dag_unknown_dependency_raises(self) -> None:
+        steps = [
+            DAGFlowStep(tool_name="a", step_id="A", depends_on=["GHOST"]),
+        ]
+        flow = DAGFlow(name="unknown_dag", description="Unknown dep.", steps=steps)
+        registry = FlowRegistry()
+        with pytest.raises(DAGDefinitionError) as exc_info:
+            registry.register_flow(flow)
+        assert exc_info.value.reason == "unknown_dependency"
+
+    def test_dag_cycle_raises(self) -> None:
+        steps = [
+            DAGFlowStep(tool_name="a", step_id="A", depends_on=["B"]),
+            DAGFlowStep(tool_name="b", step_id="B", depends_on=["A"]),
+        ]
+        flow = DAGFlow(name="cycle_dag", description="Cycle A↔B.", steps=steps)
+        registry = FlowRegistry()
+        with pytest.raises(DAGDefinitionError) as exc_info:
+            registry.register_flow(flow)
+        assert exc_info.value.reason == "cycle"
+
+    def test_dag_self_loop_raises(self) -> None:
+        steps = [DAGFlowStep(tool_name="a", step_id="A", depends_on=["A"])]
+        flow = DAGFlow(name="self_loop", description="Self-dep.", steps=steps)
+        registry = FlowRegistry()
+        with pytest.raises(DAGDefinitionError) as exc_info:
+            registry.register_flow(flow)
+        assert exc_info.value.reason in ("unknown_dependency", "cycle")
+
+    def test_dag_overwrite_reruns_validation(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(_make_dag("dag_v1"))
+
+        bad_steps = [
+            DAGFlowStep(tool_name="x", step_id="X", depends_on=["Y"]),
+            DAGFlowStep(tool_name="y", step_id="Y", depends_on=["X"]),
+        ]
+        bad_dag = DAGFlow(name="dag_v1", description="Cycle.", steps=bad_steps)
+        with pytest.raises(DAGDefinitionError):
+            registry.register_flow(bad_dag, overwrite=True)
+        # Original should still be present (overwrite never committed).
+        assert "dag_v1" in registry.list_flows()
+
+    def test_dag_get_flow_returns_dag_instance(self) -> None:
+        registry = FlowRegistry()
+        dag = _make_dag("typed")
+        registry.register_flow(dag)
+        retrieved = registry.get_flow("typed")
+        assert isinstance(retrieved, DAGFlow)
+
+    def test_dag_match_by_intent(self) -> None:
+        registry = FlowRegistry()
+        dag = DAGFlow(
+            name="process_events",
+            description="Processes incoming event streams in parallel.",
+            steps=[DAGFlowStep(tool_name="t", step_id="T", depends_on=[])],
+        )
+        registry.register_flow(dag)
+        match = registry.match_flow_by_intent("event streams")
+        assert match is not None
+        assert match.name == "process_events"

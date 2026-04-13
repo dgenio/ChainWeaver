@@ -405,6 +405,7 @@ All errors are typed and traceable:
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
+| `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -424,8 +425,10 @@ All exceptions inherit from `ChainWeaverError`.
 
 ### v0.2 — DAG & Branching
 
-- [ ] DAG-based execution with dependency edges
-- [ ] Parallel step groups
+- [x] DAG-based execution with dependency edges (`DAGFlow`, `DAGFlowStep`)
+- [x] Topological level-grouped execution with sibling key-conflict detection
+- [x] `DAGDefinitionError` — cycle / duplicate ID / unknown dep detected at registration
+- [ ] Actual parallel/async execution for independent levels
 - [ ] Conditional branching inside flows
 
 ### v0.3 — Persistence & Learning

@@ -1,26 +1,40 @@
 """In-memory flow registry for ChainWeaver.
 
 The :class:`FlowRegistry` is the central catalogue of all registered
-:class:`~chainweaver.flow.Flow` objects.  Flows must be registered before
-they can be executed by a :class:`~chainweaver.executor.FlowExecutor`.
+:class:`~chainweaver.flow.Flow` and :class:`~chainweaver.flow.DAGFlow`
+objects.  Flows must be registered before they can be executed by a
+:class:`~chainweaver.executor.FlowExecutor`.
+
+For :class:`~chainweaver.flow.DAGFlow` registrations, topology validation
+(cycle detection, duplicate step IDs, unknown dependency references) is
+performed at registration time via
+:func:`~chainweaver.flow.validate_dag_topology`.
 """
 
 from __future__ import annotations
 
 from chainweaver.exceptions import FlowAlreadyExistsError, FlowNotFoundError
-from chainweaver.flow import Flow
+from chainweaver.flow import DAGFlow, Flow, validate_dag_topology
+
+AnyFlow = Flow | DAGFlow
 
 
 class FlowRegistry:
-    """An in-memory registry of :class:`~chainweaver.flow.Flow` objects.
+    """An in-memory registry of :class:`~chainweaver.flow.Flow` and
+    :class:`~chainweaver.flow.DAGFlow` objects.
 
     Flows are stored by name.  The registry is intentionally simple so that it
     can be wrapped, persisted, or replaced in later phases.
+
+    :class:`~chainweaver.flow.DAGFlow` instances are topology-validated at
+    registration time; a :class:`~chainweaver.exceptions.DAGDefinitionError`
+    is raised immediately if the graph is invalid.
 
     Example::
 
         registry = FlowRegistry()
         registry.register_flow(my_flow)
+        registry.register_flow(my_dag_flow)
         flow = registry.get_flow("my_flow")
 
     # TODO (Phase 2): Persist and reload flows from JSON/YAML storage.
@@ -29,10 +43,16 @@ class FlowRegistry:
     """
 
     def __init__(self) -> None:
-        self._flows: dict[str, Flow] = {}
+        self._flows: dict[str, AnyFlow] = {}
 
-    def register_flow(self, flow: Flow, *, overwrite: bool = False) -> None:
-        """Register a :class:`~chainweaver.flow.Flow`.
+    def register_flow(self, flow: AnyFlow, *, overwrite: bool = False) -> None:
+        """Register a :class:`~chainweaver.flow.Flow` or
+        :class:`~chainweaver.flow.DAGFlow`.
+
+        For :class:`~chainweaver.flow.DAGFlow` instances, topology validation
+        is run before storing: duplicate ``step_id`` values, unknown
+        ``depends_on`` references, and dependency cycles all raise
+        :class:`~chainweaver.exceptions.DAGDefinitionError`.
 
         Args:
             flow: The flow to register.
@@ -42,19 +62,24 @@ class FlowRegistry:
         Raises:
             FlowAlreadyExistsError: When a flow with the same name is already
                 registered and *overwrite* is ``False``.
+            DAGDefinitionError: When *flow* is a :class:`~chainweaver.flow.DAGFlow`
+                with an invalid topology.
         """
         if flow.name in self._flows and not overwrite:
             raise FlowAlreadyExistsError(flow.name)
+        if isinstance(flow, DAGFlow):
+            validate_dag_topology(flow)
         self._flows[flow.name] = flow
 
-    def get_flow(self, name: str) -> Flow:
+    def get_flow(self, name: str) -> AnyFlow:
         """Return the flow registered under *name*.
 
         Args:
             name: The name of the flow to retrieve.
 
         Returns:
-            The registered :class:`~chainweaver.flow.Flow`.
+            The registered :class:`~chainweaver.flow.Flow` or
+            :class:`~chainweaver.flow.DAGFlow`.
 
         Raises:
             FlowNotFoundError: When no flow with *name* is registered.
@@ -72,7 +97,7 @@ class FlowRegistry:
         """
         return list(self._flows.keys())
 
-    def match_flow_by_intent(self, intent: str) -> Flow | None:
+    def match_flow_by_intent(self, intent: str) -> AnyFlow | None:
         """Return the first flow whose name or description contains *intent*.
 
         This is a very basic substring match intended as a placeholder for a
@@ -82,7 +107,7 @@ class FlowRegistry:
             intent: A short phrase or keyword describing the desired operation.
 
         Returns:
-            The first matching :class:`~chainweaver.flow.Flow`, or ``None``.
+            The first matching flow, or ``None``.
 
         # TODO (Phase 2): Replace with embedding-based semantic similarity so
         #   agents can discover flows from natural-language descriptions.

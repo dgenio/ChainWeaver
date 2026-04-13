@@ -36,9 +36,9 @@ chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas
-├── flow.py            FlowStep + Flow: ordered step definitions (Pydantic models)
-├── registry.py        FlowRegistry: in-memory catalogue of named flows
-├── executor.py        FlowExecutor: sequential, LLM-free runner (main entry point)
+├── flow.py            FlowStep + Flow (linear) + DAGFlowStep + DAGFlow + validate_dag_topology
+├── registry.py        FlowRegistry: in-memory catalogue of Flow and DAGFlow
+├── executor.py        FlowExecutor: sequential/DAG runner (main entry point)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 └── py.typed           PEP 561 marker
@@ -131,6 +131,7 @@ For the full prohibited-actions list and anti-patterns, see
 | Add a new exception | `exceptions.py` | `__init__.py` + `__all__` + README error table — **same PR** |
 | Modify flow execution | `executor.py` | Keep `StepRecord` + `ExecutionResult` consistent |
 | Add a new Flow field | `flow.py` | Serialization tests if `model_dump()` changes |
+| Add a new DAGFlow / DAGFlowStep field | `flow.py` | Update `validate_dag_topology` if needed; update tests |
 | Change logging format | `log_utils.py` | Update tests (no re-export needed) |
 | Add a new module | See [new-module checklist](docs/agent-context/workflows.md#new-module-checklist) |
 
