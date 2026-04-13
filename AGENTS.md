@@ -90,6 +90,18 @@ For the full prohibited-actions list and anti-patterns, see
 
 ## 5. Executor and flow semantics
 
+### `Flow` (Pydantic model)
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `name` | `str` | — | Unique identifier for the flow. |
+| `description` | `str` | — | Human-readable description of what the flow does. |
+| `steps` | `list[FlowStep]` | — | Ordered list of tool invocations. |
+| `deterministic` | `bool` | `True` | Metadata annotation for downstream orchestrators. `FlowExecutor` is unconditionally LLM-free and does not evaluate this flag. |
+| `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
+| `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
+| `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
+
 ### `FlowStep.input_mapping`
 
 | Value type | Behavior |
