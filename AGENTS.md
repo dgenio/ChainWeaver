@@ -34,6 +34,7 @@ Use these terms consistently in code, docs, comments, and PR descriptions.
 ```text
 chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
+├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas
 ├── flow.py            FlowStep + Flow: ordered step definitions (Pydantic models)

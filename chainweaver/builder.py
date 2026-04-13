@@ -140,7 +140,7 @@ class FlowBuilder:
         Returns:
             ``self`` — supports method chaining.
         """
-        self._trigger_conditions = conditions
+        self._trigger_conditions = dict(conditions)
         return self
 
     # ------------------------------------------------------------------
