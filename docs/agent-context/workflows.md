@@ -17,7 +17,7 @@ ruff check chainweaver/ tests/ examples/
 ruff format --check chainweaver/ tests/ examples/
 
 # 3. Type check
-python -m mypy chainweaver/
+python -m mypy chainweaver/ tests/
 
 # 4. Tests
 python -m pytest tests/ -v
@@ -34,7 +34,7 @@ python -m pytest tests/ -v
 
 | Workflow | Trigger | Steps |
 |----------|---------|-------|
-| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy (Python 3.10 only); pytest across 3.10, 3.11, 3.12, 3.13 |
+| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 only); pytest across 3.10, 3.11, 3.12, 3.13 |
 | `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
 
 ---
