@@ -152,7 +152,7 @@ Run all four before every commit and PR:
 ```bash
 ruff check chainweaver/ tests/ examples/
 ruff format --check chainweaver/ tests/ examples/
-python -m mypy chainweaver/
+python -m mypy chainweaver/ tests/
 python -m pytest tests/ -v
 ```
 
