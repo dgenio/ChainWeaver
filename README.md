@@ -315,7 +315,7 @@ Flow(
     name="my_flow",
     description="...",
     steps=[step_a, step_b, step_c],
-    deterministic=True,          # enforced by design
+    deterministic=True,          # metadata annotation; executor is always LLM-free
     trigger_conditions={"intent": "process data"},  # optional metadata
 )
 ```
