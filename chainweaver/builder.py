@@ -95,7 +95,7 @@ class FlowBuilder:
         Returns:
             ``self`` — supports method chaining.
         """
-        self._steps.append(flow_step)
+        self._steps.append(flow_step.model_copy())
         return self
 
     # ------------------------------------------------------------------
@@ -172,5 +172,7 @@ class FlowBuilder:
             steps=list(self._steps),
             input_schema=self._input_schema,
             output_schema=self._output_schema,
-            trigger_conditions=self._trigger_conditions,
+            trigger_conditions=(
+                dict(self._trigger_conditions) if self._trigger_conditions is not None else None
+            ),
         )

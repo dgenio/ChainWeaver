@@ -7,6 +7,7 @@ from helpers import FormattedOutput, NumberInput, ValueOutput
 
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.flow import Flow, FlowStep
+from chainweaver.tools import Tool
 
 
 class TestBasicBuild:
@@ -181,9 +182,9 @@ class TestIntegrationWithExecutor:
 
     def test_builder_flow_executes_successfully(
         self,
-        double_tool,  # type: ignore[no-untyped-def]
-        add_ten_tool,  # type: ignore[no-untyped-def]
-        format_tool,  # type: ignore[no-untyped-def]
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
     ) -> None:
         from chainweaver.executor import FlowExecutor
         from chainweaver.registry import FlowRegistry

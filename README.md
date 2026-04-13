@@ -276,8 +276,6 @@ flow = (
     .step("double", number="number")
     .step("add_ten", value="value")
     .step("format_result", value="value")
-    .with_input_schema(NumberInput)
-    .with_output_schema(FormattedOutput)
     .build()
 )
 ```
