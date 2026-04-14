@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.0.4"
+version = "0.1.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
