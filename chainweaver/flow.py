@@ -104,6 +104,13 @@ class Flow(BaseModel):
     output_schema: type[BaseModel] | None = None
 
 
+# TODO (Phase 2): Add conditional branching — a step that inspects
+# context values and selects the next step(s) at runtime.
+
+# TODO (Phase 2): Add determinism scoring so that partially
+# deterministic flows can be marked and handled appropriately.
+
+
 # ---------------------------------------------------------------------------
 # DAG model
 # ---------------------------------------------------------------------------

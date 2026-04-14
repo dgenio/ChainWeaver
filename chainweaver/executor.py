@@ -108,8 +108,8 @@ class FlowExecutor:
         print(result.final_output)  # {"result": "Final value: 20"}
 
     # TODO (Phase 2): Add async execution mode for I/O-bound tool chains.
-    # TODO (Phase 2): Support DAG execution with dependency resolution and
-    #   parallel step groups.
+    # TODO (Phase 2): Support parallel/async execution for independent DAG
+    #   levels (currently steps within a level run sequentially).
     # TODO (Phase 2): Add middleware hooks (before_step / after_step) for
     #   observability and tracing integrations.
     """

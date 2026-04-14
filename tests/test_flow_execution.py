@@ -720,26 +720,6 @@ class TestBoundaryValues:
 # Shared helpers for DAG tests
 
 
-class _Doubled(BaseModel):
-    doubled: int
-
-
-class _Tripled(BaseModel):
-    tripled: int
-
-
-class _Sum(BaseModel):
-    total: int
-
-
-class _Formatted(BaseModel):
-    label: str
-
-
-def _make_dag_executor(*dag_steps_tools: tuple[str, type[BaseModel], type[BaseModel]]) -> None:
-    """Not used — helpers are defined inline per test for clarity."""
-
-
 def _build_dag_executor(flow: DAGFlow, *tools: Tool) -> FlowExecutor:
     registry = FlowRegistry()
     registry.register_flow(flow)
@@ -1258,6 +1238,36 @@ class TestDAGFlowLevelSchemas:
         assert len(result.execution_log) == 1
         assert result.execution_log[0].step_index == -1
         assert isinstance(result.execution_log[0].error, SchemaValidationError)
+
+    def test_invalid_output_schema_caught_after_execution(self) -> None:
+        class Inp(BaseModel):
+            n: int
+
+        class Out(BaseModel):
+            doubled: int
+
+        class WrongOutputSchema(BaseModel):
+            missing_field: str  # context won't have this key
+
+        ta = Tool(
+            name="ds3",
+            description="d3",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"doubled": i.n * 2},
+        )
+        flow = DAGFlow(
+            name="bad_out_dag",
+            description="Output schema mismatch.",
+            steps=[DAGFlowStep(tool_name="ds3", step_id="A", depends_on=[])],
+            input_schema=Inp,
+            output_schema=WrongOutputSchema,
+        )
+        ex = _build_dag_executor(flow, ta)
+        result = ex.execute_flow("bad_out_dag", {"n": 4})
+
+        assert result.success is False
+        assert any(isinstance(r.error, SchemaValidationError) for r in result.execution_log)
 
 
 class TestDAGLinearBackwardCompat:
