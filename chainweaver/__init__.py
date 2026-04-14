@@ -7,7 +7,7 @@ Public API
 
     from chainweaver import (
         Tool, Flow, FlowStep, DAGFlow, DAGFlowStep,
-        FlowRegistry, FlowExecutor, validate_dag_topology,
+        FlowBuilder, FlowRegistry, FlowExecutor, validate_dag_topology,
     )
     from chainweaver.exceptions import (
         ChainWeaverError,
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -57,6 +58,8 @@ __all__ = [
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",
+    "FlowBuilder",
+    "FlowBuilderError",
     "FlowExecutionError",
     "FlowExecutor",
     "FlowNotFoundError",

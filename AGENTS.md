@@ -34,6 +34,7 @@ Use these terms consistently in code, docs, comments, and PR descriptions.
 ```text
 chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
+├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas
 ├── flow.py            FlowStep + Flow (linear) + DAGFlowStep + DAGFlow + validate_dag_topology
@@ -88,6 +89,18 @@ For the full prohibited-actions list and anti-patterns, see
 ---
 
 ## 5. Executor and flow semantics
+
+### `Flow` (Pydantic model)
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `name` | `str` | — | Unique identifier for the flow. |
+| `description` | `str` | — | Human-readable description of what the flow does. |
+| `steps` | `list[FlowStep]` | — | Ordered list of tool invocations. |
+| `deterministic` | `bool` | `True` | Metadata annotation for downstream orchestrators. `FlowExecutor` is unconditionally LLM-free and does not evaluate this flag. |
+| `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
+| `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
+| `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
 
 ### `FlowStep.input_mapping`
 
@@ -152,7 +165,7 @@ Run all four before every commit and PR:
 ```bash
 ruff check chainweaver/ tests/ examples/
 ruff format --check chainweaver/ tests/ examples/
-python -m mypy chainweaver/
+python -m mypy chainweaver/ tests/
 python -m pytest tests/ -v
 ```
 

@@ -21,6 +21,7 @@ and tools, the same flow produces the same output every time.
 
 | Module | Responsibility | Key constraint |
 |--------|---------------|----------------|
+| `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
 | `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
 | `flow.py` | Define `FlowStep`, `Flow` (linear), `DAGFlowStep`, `DAGFlow`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |

@@ -199,10 +199,13 @@ for record in result.execution_log:
 # 2 format_result {'result': 'Final value: 20'}
 ```
 
-You can also run the bundled example directly:
+You can also run the bundled examples directly:
 
 ```bash
-python examples/simple_linear_flow.py
+python examples/simple_linear_flow.py   # simple arithmetic flow
+python examples/etl_flow.py             # ETL flow: fetch → validate → normalize → enrich → store
+python examples/mcp_search_flow.py      # MCP-style search → extract → format flow
+python examples/naive_vs_compiled.py    # timing comparison: naive LLM calls vs ChainWeaver flow
 ```
 
 ### With the `@tool` decorator
@@ -262,6 +265,34 @@ print(double(number=5))  # {'value': 10}
 
 See `examples/decorator_tool.py` for a runnable before/after comparison.
 
+### With `FlowBuilder`
+
+`FlowBuilder` provides a fluent, chainable API as a more Pythonic alternative
+to constructing `Flow` objects directly.  It produces an identical `Flow` — it
+is syntax sugar, not a replacement:
+
+```python
+from chainweaver import FlowBuilder
+
+flow = (
+    FlowBuilder("double_add_format", "Doubles a number, adds 10, and formats.")
+    .step("double", number="number")
+    .step("add_ten", value="value")
+    .step("format_result", value="value")
+    .build()
+)
+```
+
+- **`.step(tool_name, **mapping)`** — adds a step; string values are context-key
+  lookups, non-string values are literal constants, no kwargs = full-context
+  passthrough.
+- **`.step_from(flow_step)`** — appends a pre-built `FlowStep` for interop.
+- **`.with_input_schema(Model)`** / **`.with_output_schema(Model)`** — optional
+  flow-level Pydantic schema declarations.
+- **`.with_trigger(conditions)`** — optional free-form trigger metadata.
+- **`.build()`** — returns a validated `Flow`; raises `FlowBuilderError` if
+  `name` or `description` is missing.
+
 ---
 
 ## Architecture
@@ -269,6 +300,7 @@ See `examples/decorator_tool.py` for a runnable before/after comparison.
 ```
 chainweaver/
 ├── __init__.py       # Public API
+├── builder.py        # FlowBuilder — fluent API for flow construction
 ├── decorators.py     # @tool decorator for zero-boilerplate tool definition
 ├── tools.py          # Tool — named callable with Pydantic schemas
 ├── flow.py           # FlowStep + Flow — ordered step definitions
@@ -315,7 +347,7 @@ Flow(
     name="my_flow",
     description="...",
     steps=[step_a, step_b, step_c],
-    deterministic=True,          # enforced by design
+    deterministic=True,          # metadata annotation; executor is always LLM-free
     trigger_conditions={"intent": "process data"},  # optional metadata
 )
 ```
@@ -406,6 +438,7 @@ All errors are typed and traceable:
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 | `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
+| `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -417,6 +450,7 @@ All exceptions inherit from `ChainWeaverError`.
 
 - [x] `Tool` with Pydantic input/output schemas
 - [x] `Flow` as an ordered list of `FlowStep` objects
+- [x] `FlowBuilder` fluent API for flow construction
 - [x] `FlowRegistry` (in-memory)
 - [x] `FlowExecutor` (sequential, LLM-free)
 - [x] Structured per-step logging
@@ -452,10 +486,13 @@ All exceptions inherit from `ChainWeaverError`.
 pip install -e ".[dev]"
 
 # Run tests
-pytest
+python -m pytest tests/ -v
 
-# Run the example
-python examples/simple_linear_flow.py
+# Run the examples
+python examples/simple_linear_flow.py   # simple arithmetic flow
+python examples/etl_flow.py             # ETL flow
+python examples/mcp_search_flow.py      # MCP-style search & summarize flow
+python examples/naive_vs_compiled.py    # naive vs compiled timing comparison
 ```
 
 ---
