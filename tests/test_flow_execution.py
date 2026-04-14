@@ -21,7 +21,7 @@ from chainweaver.exceptions import (
     ToolNotFoundError,
 )
 from chainweaver.executor import FlowExecutor
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -712,7 +712,716 @@ class TestBoundaryValues:
 
     def test_large_negative_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": -1000})
-        # double(-1000) \u2192 -2000, add_ten(-2000) \u2192 -1990
+        # double(-1000) → -2000, add_ten(-2000) → -1990
         assert result.success is True
         assert result.final_output is not None
         assert result.final_output["result"] == "Final value: -1990"
+
+
+# ---------------------------------------------------------------------------
+# DAG flow execution
+# ---------------------------------------------------------------------------
+
+# Shared helpers for DAG tests
+
+
+def _build_dag_executor(flow: DAGFlow, *tools: Tool) -> FlowExecutor:
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    ex = FlowExecutor(registry=registry)
+    for t in tools:
+        ex.register_tool(t)
+    return ex
+
+
+class TestSimpleDAG:
+    """Single-path DAG: A → B (equivalent to a two-step linear flow)."""
+
+    def test_two_step_dag_succeeds(self) -> None:
+        class InpA(BaseModel):
+            x: int
+
+        class OutA(BaseModel):
+            y: int
+
+        class OutB(BaseModel):
+            z: int
+
+        tool_a = Tool(
+            name="step_a",
+            description="Doubles x.",
+            input_schema=InpA,
+            output_schema=OutA,
+            fn=lambda inp: {"y": inp.x * 2},
+        )
+        tool_b = Tool(
+            name="step_b",
+            description="Adds 1 to y.",
+            input_schema=OutA,
+            output_schema=OutB,
+            fn=lambda inp: {"z": inp.y + 1},
+        )
+        flow = DAGFlow(
+            name="simple_dag",
+            description="A → B",
+            steps=[
+                DAGFlowStep(tool_name="step_a", step_id="A", depends_on=[]),
+                DAGFlowStep(
+                    tool_name="step_b",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"y": "y"},
+                ),
+            ],
+        )
+        ex = _build_dag_executor(flow, tool_a, tool_b)
+        result = ex.execute_flow("simple_dag", {"x": 3})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["z"] == 7  # (3*2)+1
+        assert len(result.execution_log) == 2
+        assert [r.tool_name for r in result.execution_log] == ["step_a", "step_b"]
+
+
+class TestSingleNodeDAG:
+    """A DAG with exactly one step and no edges."""
+
+    def test_single_node_dag_succeeds(self) -> None:
+        class Inp(BaseModel):
+            n: int
+
+        class Out(BaseModel):
+            result: int
+
+        tool = Tool(
+            name="lone",
+            description="Identity.",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda inp: {"result": inp.n},
+        )
+        flow = DAGFlow(
+            name="lone_dag",
+            description="Single node.",
+            steps=[DAGFlowStep(tool_name="lone", step_id="ONLY", depends_on=[])],
+        )
+        ex = _build_dag_executor(flow, tool)
+        result = ex.execute_flow("lone_dag", {"n": 42})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["result"] == 42
+        assert len(result.execution_log) == 1
+
+
+class TestDiamondDAG:
+    """Diamond pattern: A → (B, C) → D."""
+
+    def test_diamond_topology_all_steps_execute(self) -> None:
+        """A produces 'a_out'; B and C each read 'a_out' and produce distinct
+        keys; D reads both B and C outputs."""
+
+        class AInp(BaseModel):
+            seed: int
+
+        class AOut(BaseModel):
+            a_out: int
+
+        class BOut(BaseModel):
+            b_out: int
+
+        class COut(BaseModel):
+            c_out: int
+
+        class DInp(BaseModel):
+            b_out: int
+            c_out: int
+
+        class DOut(BaseModel):
+            total: int
+
+        tool_a = Tool(
+            name="t_a",
+            description="Seed * 2.",
+            input_schema=AInp,
+            output_schema=AOut,
+            fn=lambda inp: {"a_out": inp.seed * 2},
+        )
+        tool_b = Tool(
+            name="t_b",
+            description="a_out + 10.",
+            input_schema=AOut,
+            output_schema=BOut,
+            fn=lambda inp: {"b_out": inp.a_out + 10},
+        )
+        tool_c = Tool(
+            name="t_c",
+            description="a_out + 100.",
+            input_schema=AOut,
+            output_schema=COut,
+            fn=lambda inp: {"c_out": inp.a_out + 100},
+        )
+        tool_d = Tool(
+            name="t_d",
+            description="b_out + c_out.",
+            input_schema=DInp,
+            output_schema=DOut,
+            fn=lambda inp: {"total": inp.b_out + inp.c_out},
+        )
+        flow = DAGFlow(
+            name="diamond",
+            description="A → (B, C) → D",
+            steps=[
+                DAGFlowStep(
+                    tool_name="t_a",
+                    step_id="A",
+                    depends_on=[],
+                ),
+                DAGFlowStep(
+                    tool_name="t_b",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"a_out": "a_out"},
+                ),
+                DAGFlowStep(
+                    tool_name="t_c",
+                    step_id="C",
+                    depends_on=["A"],
+                    input_mapping={"a_out": "a_out"},
+                ),
+                DAGFlowStep(
+                    tool_name="t_d",
+                    step_id="D",
+                    depends_on=["B", "C"],
+                    input_mapping={"b_out": "b_out", "c_out": "c_out"},
+                ),
+            ],
+        )
+        ex = _build_dag_executor(flow, tool_a, tool_b, tool_c, tool_d)
+        result = ex.execute_flow("diamond", {"seed": 5})
+
+        # seed=5 → a_out=10, b_out=20, c_out=110, total=130
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["a_out"] == 10
+        assert result.final_output["b_out"] == 20
+        assert result.final_output["c_out"] == 110
+        assert result.final_output["total"] == 130
+        assert len(result.execution_log) == 4
+
+    def test_diamond_execution_log_order(self) -> None:
+        """Within each level steps execute in definition order."""
+
+        class Val(BaseModel):
+            v: int
+
+        class AO(BaseModel):
+            av: int
+
+        class BO(BaseModel):
+            bv: int
+
+        class CO(BaseModel):
+            cv: int
+
+        class DO(BaseModel):
+            dv: int
+
+        ta = Tool(
+            name="ta",
+            description="a",
+            input_schema=Val,
+            output_schema=AO,
+            fn=lambda i: {"av": i.v},
+        )
+        tb = Tool(
+            name="tb",
+            description="b",
+            input_schema=AO,
+            output_schema=BO,
+            fn=lambda i: {"bv": i.av + 1},
+        )
+        tc = Tool(
+            name="tc",
+            description="c",
+            input_schema=AO,
+            output_schema=CO,
+            fn=lambda i: {"cv": i.av + 2},
+        )
+
+        class TDInp(BaseModel):
+            bv: int
+            cv: int
+
+        td = Tool(
+            name="td",
+            description="d",
+            input_schema=TDInp,
+            output_schema=DO,
+            fn=lambda i: {"dv": i.bv + i.cv},
+        )
+
+        flow = DAGFlow(
+            name="diamond_order",
+            description="Order test.",
+            steps=[
+                DAGFlowStep(tool_name="ta", step_id="A", depends_on=[]),
+                DAGFlowStep(
+                    tool_name="tb",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"av": "av"},
+                ),
+                DAGFlowStep(
+                    tool_name="tc",
+                    step_id="C",
+                    depends_on=["A"],
+                    input_mapping={"av": "av"},
+                ),
+                DAGFlowStep(
+                    tool_name="td",
+                    step_id="D",
+                    depends_on=["B", "C"],
+                    input_mapping={"bv": "bv", "cv": "cv"},
+                ),
+            ],
+        )
+        ex = _build_dag_executor(flow, ta, tb, tc, td)
+        result = ex.execute_flow("diamond_order", {"v": 0})
+
+        assert result.success is True
+        names = [r.tool_name for r in result.execution_log]
+        # A must come first; D must come last.
+        assert names[0] == "ta"
+        assert names[-1] == "td"
+        assert set(names[1:3]) == {"tb", "tc"}
+
+
+class TestMixedDepthDAG:
+    """Non-uniform depth: A → B → D, A → C → D (mixed depth chains)."""
+
+    def test_mixed_depth_all_steps_complete(self) -> None:
+        class S(BaseModel):
+            v: int
+
+        class BOut(BaseModel):
+            b_v: int
+
+        class COut(BaseModel):
+            c_v: int
+
+        class DOOut(BaseModel):
+            final: int
+
+        class DIInp(BaseModel):
+            b_v: int
+            c_v: int
+
+        ta = Tool(
+            name="ma",
+            description="a",
+            input_schema=S,
+            output_schema=S,
+            fn=lambda i: {"v": i.v + 1},
+        )
+        tb = Tool(
+            name="mb",
+            description="b",
+            input_schema=S,
+            output_schema=BOut,
+            fn=lambda i: {"b_v": i.v + 10},
+        )
+        tc = Tool(
+            name="mc",
+            description="c",
+            input_schema=S,
+            output_schema=COut,
+            fn=lambda i: {"c_v": i.v + 100},
+        )
+        td = Tool(
+            name="md",
+            description="d",
+            input_schema=DIInp,
+            output_schema=DOOut,
+            fn=lambda i: {"final": i.b_v + i.c_v},
+        )
+
+        flow = DAGFlow(
+            name="mixed_depth",
+            description="A → B, A → C, (B,C) → D with renamed keys",
+            steps=[
+                DAGFlowStep(tool_name="ma", step_id="A", depends_on=[]),
+                DAGFlowStep(
+                    tool_name="mb",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"v": "v"},
+                ),
+                DAGFlowStep(
+                    tool_name="mc",
+                    step_id="C",
+                    depends_on=["A"],
+                    input_mapping={"v": "v"},
+                ),
+                DAGFlowStep(
+                    tool_name="md",
+                    step_id="D",
+                    depends_on=["B", "C"],
+                    input_mapping={"b_v": "b_v", "c_v": "c_v"},
+                ),
+            ],
+        )
+
+        ex = _build_dag_executor(flow, ta, tb, tc, td)
+        result = ex.execute_flow("mixed_depth", {"v": 0})
+
+        # A: v=1, B: b_v=11, C: c_v=101, D: final=112
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["final"] == 112
+        assert len(result.execution_log) == 4
+
+
+class TestDAGSiblingKeyConflict:
+    """Two sibling steps producing the same output key → deterministic error."""
+
+    def test_sibling_conflict_fails_gracefully(self) -> None:
+        class Inp(BaseModel):
+            x: int
+
+        class Out(BaseModel):
+            v: int  # BOTH siblings write "v" → conflict
+
+        ta = Tool(
+            name="sa",
+            description="a",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"v": i.x},
+        )
+        tb = Tool(
+            name="sb",
+            description="b",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"v": i.x * 2},
+        )
+
+        flow = DAGFlow(
+            name="conflict_dag",
+            description="Two independent steps writing the same key.",
+            steps=[
+                DAGFlowStep(tool_name="sa", step_id="A", depends_on=[]),
+                DAGFlowStep(
+                    tool_name="sb",
+                    step_id="B",
+                    depends_on=[],
+                    input_mapping={"x": "x"},
+                ),
+            ],
+        )
+        ex = _build_dag_executor(flow, ta, tb)
+        result = ex.execute_flow("conflict_dag", {"x": 5})
+
+        assert result.success is False
+        assert any(isinstance(r.error, FlowExecutionError) for r in result.execution_log)
+
+    def test_non_conflicting_siblings_succeed(self) -> None:
+        class Inp(BaseModel):
+            x: int
+
+        class OutA(BaseModel):
+            left: int
+
+        class OutB(BaseModel):
+            right: int
+
+        ta = Tool(
+            name="nca",
+            description="a",
+            input_schema=Inp,
+            output_schema=OutA,
+            fn=lambda i: {"left": i.x},
+        )
+        tb = Tool(
+            name="ncb",
+            description="b",
+            input_schema=Inp,
+            output_schema=OutB,
+            fn=lambda i: {"right": i.x * 2},
+        )
+
+        flow = DAGFlow(
+            name="no_conflict_dag",
+            description="Two independent steps with distinct keys.",
+            steps=[
+                DAGFlowStep(tool_name="nca", step_id="A", depends_on=[]),
+                DAGFlowStep(
+                    tool_name="ncb",
+                    step_id="B",
+                    depends_on=[],
+                    input_mapping={"x": "x"},
+                ),
+            ],
+        )
+        ex = _build_dag_executor(flow, ta, tb)
+        result = ex.execute_flow("no_conflict_dag", {"x": 3})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["left"] == 3
+        assert result.final_output["right"] == 6
+
+
+class TestDAGFlowLevelSchemas:
+    """Optional input_schema / output_schema on DAGFlow."""
+
+    def test_valid_input_schema_passes(self) -> None:
+        class Inp(BaseModel):
+            n: int
+
+        class Out(BaseModel):
+            doubled: int
+
+        ta = Tool(
+            name="ds",
+            description="d",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"doubled": i.n * 2},
+        )
+
+        class OutSchema(BaseModel):
+            doubled: int
+
+        flow = DAGFlow(
+            name="schema_dag",
+            description="With schemas.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="ds",
+                    step_id="A",
+                    depends_on=[],
+                    input_mapping={"n": "n"},
+                )
+            ],
+            input_schema=Inp,
+            output_schema=OutSchema,
+        )
+        ex = _build_dag_executor(flow, ta)
+        result = ex.execute_flow("schema_dag", {"n": 4})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["doubled"] == 8
+
+    def test_invalid_input_schema_caught_before_execution(self) -> None:
+        class Inp(BaseModel):
+            n: int
+
+        class Out(BaseModel):
+            doubled: int
+
+        ta = Tool(
+            name="ds2",
+            description="d2",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"doubled": i.n * 2},
+        )
+        flow = DAGFlow(
+            name="guard_dag",
+            description="Guards input.",
+            steps=[DAGFlowStep(tool_name="ds2", step_id="A", depends_on=[])],
+            input_schema=Inp,
+        )
+        ex = _build_dag_executor(flow, ta)
+        result = ex.execute_flow("guard_dag", {"wrong": "value"})
+
+        assert result.success is False
+        assert len(result.execution_log) == 1
+        assert result.execution_log[0].step_index == -1
+        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+
+    def test_invalid_output_schema_caught_after_execution(self) -> None:
+        class Inp(BaseModel):
+            n: int
+
+        class Out(BaseModel):
+            doubled: int
+
+        class WrongOutputSchema(BaseModel):
+            missing_field: str  # context won't have this key
+
+        ta = Tool(
+            name="ds3",
+            description="d3",
+            input_schema=Inp,
+            output_schema=Out,
+            fn=lambda i: {"doubled": i.n * 2},
+        )
+        flow = DAGFlow(
+            name="bad_out_dag",
+            description="Output schema mismatch.",
+            steps=[DAGFlowStep(tool_name="ds3", step_id="A", depends_on=[])],
+            input_schema=Inp,
+            output_schema=WrongOutputSchema,
+        )
+        ex = _build_dag_executor(flow, ta)
+        result = ex.execute_flow("bad_out_dag", {"n": 4})
+
+        assert result.success is False
+        assert any(isinstance(r.error, SchemaValidationError) for r in result.execution_log)
+
+
+class TestDAGLinearBackwardCompat:
+    """Existing linear Flow must be completely unaffected by DAG changes."""
+
+    def test_linear_flow_still_works(self, executor: FlowExecutor) -> None:
+        result = executor.execute_flow("double_add_format", {"number": 5})
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["result"] == "Final value: 20"
+
+    def test_linear_flow_error_path_still_works(self, executor: FlowExecutor) -> None:
+        result = executor.execute_flow("double_add_format", {"number": "bad"})
+        assert result.success is False
+        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+
+
+class TestDAGMissingTool:
+    """A DAGFlow step that references an unregistered tool fails gracefully."""
+
+    def test_missing_tool_fails_step(self) -> None:
+        flow = DAGFlow(
+            name="missing_tool_dag",
+            description="Step references an unregistered tool.",
+            steps=[DAGFlowStep(tool_name="ghost", step_id="G", depends_on=[])],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        # No tools registered.
+        result = ex.execute_flow("missing_tool_dag", {})
+
+        assert result.success is False
+        assert len(result.execution_log) == 1
+        assert isinstance(result.execution_log[0].error, ToolNotFoundError)
+
+
+class TestDAGStepType:
+    """step_type field is present and defaults to 'tool'; capability_id is None."""
+
+    def test_step_type_default(self) -> None:
+        step = DAGFlowStep(tool_name="t", step_id="s", depends_on=[])
+        assert step.step_type == "tool"
+        assert step.capability_id is None
+
+    def test_step_type_capability_accepted(self) -> None:
+        step = DAGFlowStep(
+            tool_name="t",
+            step_id="s",
+            depends_on=[],
+            step_type="capability",
+            capability_id="org.example.my_cap",
+        )
+        assert step.step_type == "capability"
+        assert step.capability_id == "org.example.my_cap"
+
+    def test_tool_step_with_capability_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="capability_id must be None"):
+            DAGFlowStep(
+                tool_name="t",
+                step_id="s",
+                depends_on=[],
+                step_type="tool",
+                capability_id="org.example.invalid",
+            )
+
+    def test_capability_step_without_capability_id_accepted(self) -> None:
+        step = DAGFlowStep(
+            tool_name="t",
+            step_id="s",
+            depends_on=[],
+            step_type="capability",
+        )
+        assert step.step_type == "capability"
+        assert step.capability_id is None
+
+
+class TestDAGReverseOrderedSteps:
+    """Steps listed in reverse dependency order must still execute correctly."""
+
+    def test_reverse_ordered_steps_succeed(self) -> None:
+        class Inp(BaseModel):
+            x: int
+
+        class Mid(BaseModel):
+            y: int
+
+        class Out(BaseModel):
+            z: int
+
+        tool_a = Tool(
+            name="ta",
+            description="Doubles x.",
+            input_schema=Inp,
+            output_schema=Mid,
+            fn=lambda inp: {"y": inp.x * 2},
+        )
+        tool_b = Tool(
+            name="tb",
+            description="Adds 1 to y.",
+            input_schema=Mid,
+            output_schema=Out,
+            fn=lambda inp: {"z": inp.y + 1},
+        )
+        # B depends on A, but B is listed FIRST in steps.
+        flow = DAGFlow(
+            name="reverse_order",
+            description="B before A in list, A before B in deps.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="tb",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"y": "y"},
+                ),
+                DAGFlowStep(tool_name="ta", step_id="A", depends_on=[]),
+            ],
+        )
+        ex = _build_dag_executor(flow, tool_a, tool_b)
+        result = ex.execute_flow("reverse_order", {"x": 5})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["z"] == 11  # (5*2)+1
+
+
+class TestDAGCapabilityStepExecution:
+    """FlowExecutor must reject step_type='capability' with a clear error."""
+
+    def test_capability_step_rejected_at_execution(self) -> None:
+        flow = DAGFlow(
+            name="cap_dag",
+            description="One capability step.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="t",
+                    step_id="C",
+                    depends_on=[],
+                    step_type="capability",
+                    capability_id="org.example.cap",
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+
+        result = ex.execute_flow("cap_dag", {})
+        assert result.success is False
+        assert len(result.execution_log) == 1
+        assert isinstance(result.execution_log[0].error, FlowExecutionError)
+        assert "not supported by FlowExecutor" in str(result.execution_log[0].error)

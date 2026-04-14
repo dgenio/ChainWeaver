@@ -24,9 +24,9 @@ and tools, the same flow produces the same output every time.
 | `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
 | `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
-| `flow.py` | Define `FlowStep` and `Flow` as Pydantic models | Pure data definitions; no execution logic |
-| `registry.py` | Store and retrieve flows by name | In-memory; intentionally simple for later wrapping |
-| `executor.py` | Run flows step-by-step, validate I/O, merge context | **No LLM, no network I/O, no randomness** |
+| `flow.py` | Define `FlowStep`, `Flow` (linear), `DAGFlowStep`, `DAGFlow`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
+| `registry.py` | Store and retrieve `Flow` and `DAGFlow` by name; validates DAG topology at registration | In-memory; intentionally simple for later wrapping |
+| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context | **No LLM, no network I/O, no randomness** |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
@@ -37,11 +37,14 @@ and tools, the same flow produces the same output every time.
 
 | Decision | Rationale |
 |----------|-----------|
-| Sequential-only execution | Phase 1 MVP. DAG execution is planned for v0.2. |
+| Sequential-only execution for linear `Flow` | Phase 1 MVP. Unchanged. |
+| DAG execution for `DAGFlow` | Phase 2: topological level grouping. Parallel/async execution for independent levels is planned for v0.2. |
 | Pydantic for all schemas | Deterministic I/O contracts between steps. |
 | No LLM calls in executor | "Compiled, not interpreted." |
 | `from __future__ import annotations` | Forward-reference support; cleaner type hints. |
 | `dataclass` for `StepRecord`/`ExecutionResult` | They carry `Exception` instances; Pydantic cannot serialize these. |
+| `step_type` + `capability_id` on `DAGFlowStep` | Forward-compat slots for Weaver Stack kernel integration (weaver-spec I-07). Only `"tool"` is executed today; `"capability"` is reserved for `KernelBackedExecutor`. |
+| Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
 
 ---
 

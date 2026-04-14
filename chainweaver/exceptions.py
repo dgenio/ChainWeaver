@@ -80,3 +80,25 @@ class ToolDefinitionError(ChainWeaverError):
         self.function_name = function_name
         self.detail = detail
         super().__init__(f"Cannot define tool from function '{function_name}': {detail}")
+
+
+class DAGDefinitionError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.flow.DAGFlow` definition is invalid.
+
+    Attributes:
+        flow_name: Name of the flow that failed validation.
+        reason: Machine-readable reason code.  One of ``"cycle"``,
+            ``"duplicate_step_id"``, or ``"unknown_dependency"``.
+        detail: Human-readable explanation.
+    """
+
+    def __init__(
+        self,
+        flow_name: str,
+        reason: str,
+        detail: str,
+    ) -> None:
+        self.flow_name = flow_name
+        self.reason = reason
+        self.detail = detail
+        super().__init__(f"Invalid DAG flow '{flow_name}' ({reason}): {detail}")
