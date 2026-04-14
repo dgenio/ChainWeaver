@@ -52,8 +52,10 @@ class Flow(BaseModel):
         name: Unique identifier for the flow.
         description: Human-readable description of what the flow does.
         steps: Ordered list of :class:`FlowStep` objects.
-        deterministic: When ``True`` (the default) the executor guarantees
-            that no LLM calls are inserted between steps.
+        deterministic: Metadata annotation for downstream orchestrators.
+            When ``True`` (the default) this signals the flow is designed
+            to run without LLM calls.  ``FlowExecutor`` is unconditionally
+            LLM-free and does not evaluate this flag.
         trigger_conditions: Optional free-form metadata that an agent or
             higher-level orchestrator can use to decide when to invoke this
             flow.  ChainWeaver itself does not evaluate these conditions.

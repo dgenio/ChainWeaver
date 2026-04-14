@@ -1,5 +1,6 @@
 ---
 applyTo: "tests/**"
+excludeAgent: "code-review"
 ---
 # Tests
 
