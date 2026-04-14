@@ -680,7 +680,12 @@ class TestToolZeroDivisionError:
         record = result.execution_log[0]
         assert record.success is False
         assert isinstance(record.error, FlowExecutionError)
-        assert "integer division or modulo by zero" in str(record.error)
+        # Python <=3.13: "integer division or modulo by zero"
+        # Python  >=3.14: "division by zero"
+        assert any(
+            msg in str(record.error)
+            for msg in ("integer division or modulo by zero", "division by zero")
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ Python 3.10 or later is required.
 Run the full test suite:
 
 ```bash
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
 
 Run all four validation commands before every commit:
