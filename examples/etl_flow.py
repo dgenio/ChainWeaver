@@ -1,4 +1,4 @@
-"""Data pipeline flow example for ChainWeaver.
+"""ETL flow example for ChainWeaver.
 
 # What this demonstrates
 # -----------------------

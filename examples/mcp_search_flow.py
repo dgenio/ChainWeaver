@@ -124,7 +124,7 @@ _KNOWLEDGE_BASE: list[dict[str, Any]] = [
     {
         "id": "doc_004",
         "title": "Platform Architecture Overview",
-        "body": "The platform uses ChainWeaver for deterministic tool-chain execution.",
+        "body": "The platform uses ChainWeaver for deterministic flow execution.",
         "tags": ["architecture", "chainweaver"],
         "score": 0.78,
         "author": "architecture",

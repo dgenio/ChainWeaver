@@ -39,7 +39,7 @@ from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep, Tool
 # Simulated per-step LLM round-trip time (seconds).
 SIMULATED_LLM_DELAY_S: float = 0.3
 
-# Number of pipeline steps (also controls how many LLM calls the naive
+# Number of flow steps (also controls how many LLM calls the naive
 # approach makes — one per inter-step transition, i.e. N-1).
 # The flow below has exactly 5 steps → 4 simulated LLM calls in naive mode.
 
