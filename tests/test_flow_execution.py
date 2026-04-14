@@ -1313,3 +1313,100 @@ class TestDAGStepType:
         )
         assert step.step_type == "capability"
         assert step.capability_id == "org.example.my_cap"
+
+    def test_tool_step_with_capability_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="capability_id must be None"):
+            DAGFlowStep(
+                tool_name="t",
+                step_id="s",
+                depends_on=[],
+                step_type="tool",
+                capability_id="org.example.invalid",
+            )
+
+    def test_capability_step_without_capability_id_accepted(self) -> None:
+        step = DAGFlowStep(
+            tool_name="t",
+            step_id="s",
+            depends_on=[],
+            step_type="capability",
+        )
+        assert step.step_type == "capability"
+        assert step.capability_id is None
+
+
+class TestDAGReverseOrderedSteps:
+    """Steps listed in reverse dependency order must still execute correctly."""
+
+    def test_reverse_ordered_steps_succeed(self) -> None:
+        class Inp(BaseModel):
+            x: int
+
+        class Mid(BaseModel):
+            y: int
+
+        class Out(BaseModel):
+            z: int
+
+        tool_a = Tool(
+            name="ta",
+            description="Doubles x.",
+            input_schema=Inp,
+            output_schema=Mid,
+            fn=lambda inp: {"y": inp.x * 2},
+        )
+        tool_b = Tool(
+            name="tb",
+            description="Adds 1 to y.",
+            input_schema=Mid,
+            output_schema=Out,
+            fn=lambda inp: {"z": inp.y + 1},
+        )
+        # B depends on A, but B is listed FIRST in steps.
+        flow = DAGFlow(
+            name="reverse_order",
+            description="B before A in list, A before B in deps.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="tb",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"y": "y"},
+                ),
+                DAGFlowStep(tool_name="ta", step_id="A", depends_on=[]),
+            ],
+        )
+        ex = _build_dag_executor(flow, tool_a, tool_b)
+        result = ex.execute_flow("reverse_order", {"x": 5})
+
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["z"] == 11  # (5*2)+1
+
+
+class TestDAGCapabilityStepExecution:
+    """FlowExecutor must reject step_type='capability' with a clear error."""
+
+    def test_capability_step_rejected_at_execution(self) -> None:
+        flow = DAGFlow(
+            name="cap_dag",
+            description="One capability step.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="t",
+                    step_id="C",
+                    depends_on=[],
+                    step_type="capability",
+                    capability_id="org.example.cap",
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+
+        result = ex.execute_flow("cap_dag", {})
+        assert result.success is False
+        assert len(result.execution_log) == 1
+        assert isinstance(result.execution_log[0].error, FlowExecutionError)
+        assert "not supported by FlowExecutor" in str(result.execution_log[0].error)

@@ -37,7 +37,7 @@ and tools, the same flow produces the same output every time.
 | Decision | Rationale |
 |----------|-----------|
 | Sequential-only execution for linear `Flow` | Phase 1 MVP. Unchanged. |
-| DAG execution for `DAGFlow` | Phase 2: topological level grouping. Parallel execution of a level is a future v0.4 optimisation. |
+| DAG execution for `DAGFlow` | Phase 2: topological level grouping. Parallel/async execution for independent levels is planned for v0.2. |
 | Pydantic for all schemas | Deterministic I/O contracts between steps. |
 | No LLM calls in executor | "Compiled, not interpreted." |
 | `from __future__ import annotations` | Forward-reference support; cleaner type hints. |

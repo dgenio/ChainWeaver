@@ -8,6 +8,7 @@ structured and schema-validated via Pydantic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from graphlib import TopologicalSorter
 from typing import Any
 
 from pydantic import ValidationError
@@ -377,11 +378,15 @@ class FlowExecutor:
         Steps in the same level can conceptually run in parallel; today they
         run sequentially in list order.
 
-        The topology is already validated at registration time, so this
-        method cannot raise :class:`~chainweaver.exceptions.DAGDefinitionError`.
-        The ``validate_dag_topology`` call here is a belt-and-suspenders guard
+        Topology is normally validated at registration time.  This method
+        still calls ``validate_dag_topology`` as a belt-and-suspenders guard
         for flows that are created and executed without going through
-        :class:`~chainweaver.registry.FlowRegistry`.
+        :class:`~chainweaver.registry.FlowRegistry`, so invalid DAGs may
+        raise :class:`~chainweaver.exceptions.DAGDefinitionError` here.
+
+        Level computation uses :class:`graphlib.TopologicalSorter` to iterate
+        steps in dependency order, so the result is correct regardless of the
+        declaration order of steps in ``flow.steps``.
 
         Args:
             flow: A valid :class:`~chainweaver.flow.DAGFlow`.
@@ -392,18 +397,23 @@ class FlowExecutor:
         """
         validate_dag_topology(flow)
         step_by_id = {s.step_id: s for s in flow.steps}
+        graph: dict[str, set[str]] = {s.step_id: set(s.depends_on) for s in flow.steps}
+        sorter: TopologicalSorter[str] = TopologicalSorter(graph)
+        topo_order = list(sorter.static_order())
+
         # level[step_id] = 0-based level index
         levels: dict[str, int] = {}
-        for step in flow.steps:
+        for step_id in topo_order:
+            step = step_by_id[step_id]
             if not step.depends_on:
-                levels[step.step_id] = 0
+                levels[step_id] = 0
             else:
-                levels[step.step_id] = max(levels[dep] for dep in step.depends_on) + 1
+                levels[step_id] = max(levels[dep] for dep in step.depends_on) + 1
 
         max_level = max(levels.values(), default=-1)
         grouped: list[list[DAGFlowStep]] = [[] for _ in range(max_level + 1)]
-        for step in flow.steps:
-            grouped[levels[step.step_id]].append(step_by_id[step.step_id])
+        for step_id in topo_order:
+            grouped[levels[step_id]].append(step_by_id[step_id])
         return grouped
 
     def _execute_dag_flow(
@@ -462,6 +472,33 @@ class FlowExecutor:
             level_records: list[StepRecord] = []
 
             for step in level_steps:
+                # Reject non-tool step types until KernelBackedExecutor exists.
+                if step.step_type != "tool":
+                    err = FlowExecutionError(
+                        step.tool_name,
+                        flat_index,
+                        f"Step '{step.step_id}' has step_type='{step.step_type}' "
+                        f"which is not supported by FlowExecutor. "
+                        f"Only step_type='tool' can be executed.",
+                    )
+                    log_step_error(_logger, flat_index, step.tool_name, err)
+                    log.extend(level_records)
+                    log.append(
+                        StepRecord(
+                            step_index=flat_index,
+                            tool_name=step.tool_name,
+                            inputs={},
+                            error=err,
+                            success=False,
+                        )
+                    )
+                    return ExecutionResult(
+                        flow_name=flow.name,
+                        success=False,
+                        final_output=None,
+                        execution_log=log,
+                    )
+
                 # Build a lightweight FlowStep-compatible view so _execute_step
                 # can be reused without modification.
                 proxy = FlowStep(

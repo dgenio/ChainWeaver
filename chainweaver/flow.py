@@ -16,7 +16,7 @@ from __future__ import annotations
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from chainweaver.exceptions import DAGDefinitionError
 
@@ -153,14 +153,25 @@ class DAGFlowStep(FlowStep):
     step_type: Literal["tool", "capability"] = "tool"
     capability_id: str | None = None
 
+    @model_validator(mode="after")
+    def _check_tool_has_no_capability_id(self) -> DAGFlowStep:
+        """Ensure ``capability_id`` is ``None`` when ``step_type`` is ``'tool'``."""
+        if self.step_type == "tool" and self.capability_id is not None:
+            msg = (
+                f"Step '{self.step_id}' has step_type='tool' but capability_id="
+                f"'{self.capability_id}'. capability_id must be None for tool steps."
+            )
+            raise ValueError(msg)
+        return self
+
 
 class DAGFlow(BaseModel):
     """A deterministic, DAG-structured sequence of tool invocations.
 
     Steps are ordered by their ``depends_on`` declarations.  Independent
     steps (no unmet predecessors) form an execution *level* and run
-    sequentially within that level (parallel execution is a planned v0.4
-    optimisation).
+    sequentially within that level (parallel/async execution for independent
+    levels is planned for v0.2).
 
     Attributes:
         name: Unique identifier for the flow.
@@ -179,9 +190,9 @@ class DAGFlow(BaseModel):
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
-            ``step_id``, or unknown ``depends_on`` reference).  Raised at
-            model-validation time so callers learn about the error before any
-            execution attempt.
+            ``step_id``, or unknown ``depends_on`` reference) when
+            :func:`validate_dag_topology` is invoked, such as during flow
+            registration or before execution.
 
     Example::
 
