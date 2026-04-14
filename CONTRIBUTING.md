@@ -24,6 +24,13 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 git clone https://github.com/dgenio/ChainWeaver.git
 cd ChainWeaver
 
+# Create a virtual environment
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
+
 # Install with dev dependencies (editable mode)
 pip install -e ".[dev]"
 ```
@@ -58,7 +65,7 @@ CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.13
 - **Type annotations are required** on all function signatures.
 - **Pydantic `BaseModel`** for all data schemas (tool I/O, `Flow`, `FlowStep`).
 - `from __future__ import annotations` at the top of every module.
-- Single runtime dependency: `pydantic>=2.0`. Add new runtime dependencies only when strictly necessary.
+- Single runtime dependency: `pydantic>=2.0`. Add new runtime dependencies judiciously — only when they deliver clear value and are well-maintained. Always update `pyproject.toml` `[project.dependencies]`.
 - All public symbols must be exported in `chainweaver/__init__.py` `__all__`.
 - All exceptions must inherit from `ChainWeaverError`.
 - Ruff is the linter and formatter — run `ruff check` and `ruff format --check` before committing.
@@ -76,7 +83,7 @@ Use the canonical terms consistently in code, docs, and PR descriptions:
 
 ## PR process
 
-1. **One logical change per PR.** Split unrelated changes into separate PRs.
+1. **One logical change per PR.** A PR that implements a feature, adds tests, and updates docs is one logical change. Only split if changes are genuinely unrelated.
 2. **Link the relevant issue** in your PR description under _Related Issues_.
 3. **All tests must pass** before requesting review.
 4. **Branch naming:** `{type}/{issue_number}-{short-description}`
