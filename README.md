@@ -202,10 +202,10 @@ for record in result.execution_log:
 You can also run the bundled examples directly:
 
 ```bash
-python examples/simple_linear_flow.py   # simple arithmetic chain
-python examples/data_pipeline_flow.py   # ETL pipeline: fetch → validate → normalize → enrich → store
-python examples/mcp_search_flow.py      # MCP-style search → extract → format
-python examples/naive_vs_compiled.py    # timing comparison: naive LLM chaining vs ChainWeaver
+python examples/simple_linear_flow.py   # simple arithmetic flow
+python examples/etl_flow.py             # ETL flow: fetch → validate → normalize → enrich → store
+python examples/mcp_search_flow.py      # MCP-style search → extract → format flow
+python examples/naive_vs_compiled.py    # timing comparison: naive LLM calls vs ChainWeaver flow
 ```
 
 ### With the `@tool` decorator
@@ -452,12 +452,12 @@ All exceptions inherit from `ChainWeaverError`.
 pip install -e ".[dev]"
 
 # Run tests
-pytest
+python -m pytest tests/ -v
 
 # Run the examples
-python examples/simple_linear_flow.py   # simple arithmetic chain
-python examples/data_pipeline_flow.py   # ETL pipeline
-python examples/mcp_search_flow.py      # MCP-style search & summarize
+python examples/simple_linear_flow.py   # simple arithmetic flow
+python examples/etl_flow.py             # ETL flow
+python examples/mcp_search_flow.py      # MCP-style search & summarize flow
 python examples/naive_vs_compiled.py    # naive vs compiled timing comparison
 ```
 

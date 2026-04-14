@@ -9,7 +9,7 @@
 # In a naive agent implementation each transition would involve an LLM call to
 # decide what to do next.  Because the routing is deterministic (search always
 # feeds extract, extract always feeds format) ChainWeaver compiles the whole
-# chain into a single LLM-free executable flow.
+# flow into a single LLM-free executable flow.
 #
 # Execution trace (mock data, query="widget"):
 #
@@ -151,8 +151,9 @@ def search_knowledge_base_fn(inp: SearchInput) -> dict[str, Any]:
     """Return documents whose tags or title contain the query term."""
     term = inp.query.lower()
     hits = [doc for doc in _KNOWLEDGE_BASE if term in doc["title"].lower() or term in doc["tags"]]
+    total_hits = len(hits)
     hits = sorted(hits, key=lambda d: d["score"], reverse=True)[: inp.top_k]
-    return {"hits": hits, "query": inp.query, "total_hits": len(hits)}
+    return {"hits": hits, "query": inp.query, "total_hits": total_hits}
 
 
 def extract_relevant_fields_fn(inp: ExtractInput) -> dict[str, Any]:

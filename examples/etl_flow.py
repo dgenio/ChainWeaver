@@ -6,7 +6,7 @@
 #
 #   fetch_data → validate_records → normalize_fields → enrich_records → store_records
 #
-# This mirrors a common MCP tool-chain pattern where an agent fetches raw data
+# This mirrors a common MCP tool-invocation pattern where an agent fetches raw data
 # from a source, applies a series of transformations, and persists the result.
 # All processing is handled by ChainWeaver with zero LLM calls between steps.
 #
@@ -20,7 +20,7 @@
 
 Run this script from the repository root with::
 
-    python examples/data_pipeline_flow.py
+    python examples/etl_flow.py
 """
 
 from __future__ import annotations
@@ -238,9 +238,9 @@ store_tool = Tool(
 # Step 4 — Flow definition
 # ---------------------------------------------------------------------------
 
-pipeline_flow = Flow(
-    name="data_pipeline",
-    description="ETL pipeline: fetch → validate → normalize → enrich → store.",
+etl_flow = Flow(
+    name="data_etl",
+    description="ETL flow: fetch → validate → normalize → enrich → store.",
     steps=[
         FlowStep(
             tool_name="fetch_data",
@@ -275,16 +275,16 @@ pipeline_flow = Flow(
 
 def main() -> None:
     registry = FlowRegistry()
-    registry.register_flow(pipeline_flow)
+    registry.register_flow(etl_flow)
 
     executor = FlowExecutor(registry=registry)
     for t in (fetch_tool, validate_tool, normalize_tool, enrich_tool, store_tool):
         executor.register_tool(t)
 
     initial_input = {"source": "inventory_db", "limit": 5}
-    print(f"\nExecuting flow '{pipeline_flow.name}' with input: {initial_input}\n")
+    print(f"\nExecuting flow '{etl_flow.name}' with input: {initial_input}\n")
 
-    result = executor.execute_flow("data_pipeline", initial_input)
+    result = executor.execute_flow("data_etl", initial_input)
 
     print("\n--- Execution Summary ---")
     print(f"Flow      : {result.flow_name}")
@@ -298,13 +298,13 @@ def main() -> None:
             f"outputs={record.outputs}"
         )
 
-    assert result.success, "Pipeline flow failed!"
+    assert result.success, "ETL flow failed!"
     assert result.final_output is not None
     assert result.final_output["stored_count"] == 4, (
         f"Expected 4 stored records (1 invalid dropped), got {result.final_output['stored_count']}"
     )
     print(
-        f"\n✓ Pipeline complete: {result.final_output['stored_count']} records "
+        f"\n✓ ETL flow complete: {result.final_output['stored_count']} records "
         f"stored to '{result.final_output['destination']}' "
         f"(status: {result.final_output['status']})"
     )

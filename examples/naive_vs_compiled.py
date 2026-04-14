@@ -2,13 +2,13 @@
 
 # What this demonstrates
 # -----------------------
-# The same 5-step data-enrichment chain run two ways:
+# The same 5-step data-enrichment flow run two ways:
 #
 #   1. Naive   — each step is preceded by a simulated LLM call (time.sleep)
 #                to represent the overhead of asking a language model "what
 #                to do next".
 #
-#   2. Compiled — ChainWeaver executes the identical chain as a registered
+#   2. Compiled — ChainWeaver executes the identical flow as a registered
 #                Flow with zero LLM calls between steps.
 #
 # A timing table is printed at the end, making the latency and cost argument
@@ -259,7 +259,7 @@ enrichment_flow = Flow(
 
 
 def run_naive(record_id: str) -> tuple[dict[str, Any], float]:
-    """Run the same 5-step chain with simulated LLM overhead between steps.
+    """Run the same 5-step flow with simulated LLM overhead between steps.
 
     Returns (final_output, elapsed_seconds).
     """
@@ -311,8 +311,8 @@ def run_naive(record_id: str) -> tuple[dict[str, Any], float]:
 # ---------------------------------------------------------------------------
 
 
-def run_compiled(record_id: str) -> tuple[dict[str, Any] | None, float]:
-    """Run the same chain via a registered ChainWeaver Flow.
+def run_compiled(record_id: str) -> tuple[dict[str, Any], float]:
+    """Run the same flow via a registered ChainWeaver Flow.
 
     Returns (final_output, elapsed_seconds).
     """
@@ -326,6 +326,17 @@ def run_compiled(record_id: str) -> tuple[dict[str, Any] | None, float]:
     start = time.perf_counter()
     result = executor.execute_flow("record_enrichment", {"record_id": record_id})
     elapsed = time.perf_counter() - start
+
+    if not result.success:
+        failed = [s for s in result.execution_log if not s.success]
+        last = failed[-1] if failed else None
+        detail = ""
+        if last is not None:
+            detail = f": step {last.step_index} ('{last.tool_name}') failed with {last.error!r}"
+        raise AssertionError(f"Compiled flow execution failed{detail}")
+
+    if result.final_output is None:
+        raise AssertionError("Compiled flow execution succeeded but returned no final output")
 
     return result.final_output, elapsed
 
