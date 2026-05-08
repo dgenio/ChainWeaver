@@ -102,3 +102,14 @@ class DAGDefinitionError(ChainWeaverError):
         self.reason = reason
         self.detail = detail
         super().__init__(f"Invalid DAG flow '{flow_name}' ({reason}): {detail}")
+
+
+class FlowStatusError(ChainWeaverError):
+    """Raised when a flow cannot be executed due to its status."""
+
+    def __init__(self, flow_name: str, status: str) -> None:
+        self.flow_name = flow_name
+        self.status = status
+        super().__init__(
+            f"Flow '{flow_name}' has status '{status}'. Use force=True to execute anyway."
+        )
