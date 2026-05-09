@@ -16,6 +16,13 @@ They are non-negotiable.
 | 2 | **No network I/O** in `executor.py` | Network I/O belongs in tool functions, not the orchestrator. |
 | 3 | **No randomness** in `executor.py` | Random routing or jitter would break the "compiled, not interpreted" guarantee. |
 
+> **Jitter carve-out (since #76):** :class:`RetryPolicy` accepts an opt-in
+> ``jitter=True`` that multiplies its computed backoff by a uniform sample.
+> The :mod:`random` import lives in ``flow.py`` (inside
+> ``RetryPolicy.compute_delay``); ``executor.py`` itself never imports
+> :mod:`random`. The default ``jitter=False`` preserves full determinism;
+> users opt in per-step.
+
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 

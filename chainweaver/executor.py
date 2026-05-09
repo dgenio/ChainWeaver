@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from graphlib import TopologicalSorter
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.exceptions import (
@@ -30,7 +32,7 @@ from chainweaver.exceptions import (
     ToolOutputSizeError,
     ToolTimeoutError,
 )
-from chainweaver.flow import DAGFlow, DAGFlowStep, FlowStep, validate_dag_topology
+from chainweaver.flow import DAGFlow, DAGFlowStep, FlowStep, RetryPolicy, validate_dag_topology
 from chainweaver.log_utils import get_logger, log_step_end, log_step_error, log_step_start
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
@@ -71,11 +73,20 @@ class StepRecord(BaseModel):
             when the step failed, or ``None`` on success.
         error_message: Human-readable error message when the step failed,
             or ``None`` on success.
-        success: ``True`` when the step completed without error.
+        success: ``True`` when the step completed without error (including
+            steps that were retried successfully).
         started_at: UTC timestamp when the step began.
         ended_at: UTC timestamp when the step finished (success or failure).
         duration_ms: Wall-clock duration of the step in milliseconds,
             measured with :func:`time.perf_counter`.
+        retry_count: Number of retries beyond the initial invocation.  ``0``
+            when no retry policy is configured or the first attempt
+            succeeded.
+        retry_errors: Error messages from each failed attempt, in order.
+            Empty when no retries occurred.
+        skipped: ``True`` when the step exhausted its retries and the
+            configured ``on_error="skip"`` action let the flow continue
+            without merging any output.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -90,6 +101,9 @@ class StepRecord(BaseModel):
     started_at: datetime
     ended_at: datetime
     duration_ms: float
+    retry_count: int = 0
+    retry_errors: list[str] = Field(default_factory=list)
+    skipped: bool = False
 
 
 class ExecutionResult(BaseModel):
@@ -450,6 +464,11 @@ class FlowExecutor:
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
+        Honors any :class:`RetryPolicy` attached to *step* via
+        :mod:`tenacity` and applies the ``on_error`` policy
+        (``"fail"`` / ``"skip"`` / ``"fallback:<tool_name>"``) when all
+        attempts are exhausted.
+
         Args:
             step_index: Zero-based position of the step.
             step: The step to execute.
@@ -461,61 +480,230 @@ class FlowExecutor:
         started_at = _now_utc()
         t0 = time.perf_counter()
 
-        def _failed(inputs: dict[str, Any], exc: Exception) -> StepRecord:
-            err_type, err_msg = _exc_to_strings(exc)
+        def _record(
+            *,
+            inputs: dict[str, Any],
+            outputs: dict[str, Any] | None,
+            error: Exception | None,
+            success: bool,
+            skipped: bool,
+            retry_errors: list[str],
+        ) -> StepRecord:
+            err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
+            # On success after retries: every retry failure is in retry_errors
+            # (the successful attempt is not appended), so retry_count == len.
+            # On failure: retry_errors contains every failed attempt; the
+            # number of retries is len-1 (the first attempt is not a retry).
+            if success:
+                retry_count = len(retry_errors)
+            elif retry_errors:
+                retry_count = len(retry_errors) - 1
+            else:
+                retry_count = 0
             return StepRecord(
                 step_index=step_index,
                 tool_name=step.tool_name,
                 inputs=inputs,
+                outputs=outputs,
                 error_type=err_type,
                 error_message=err_msg,
-                success=False,
+                success=success,
                 started_at=started_at,
                 ended_at=_now_utc(),
                 duration_ms=(time.perf_counter() - t0) * 1000.0,
+                retry_count=retry_count,
+                retry_errors=list(retry_errors),
+                skipped=skipped,
             )
 
         try:
             tool = self.get_tool(step.tool_name)
         except ToolNotFoundError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _failed({}, exc)
+            return _record(
+                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            )
 
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _failed({}, exc)
+            return _record(
+                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            )
 
         log_step_start(_logger, step_index, step.tool_name, inputs)
 
-        try:
-            outputs = tool.run(inputs)
-        except ValidationError as exc:
-            schema_err = SchemaValidationError(step.tool_name, step_index, str(exc))
-            log_step_error(_logger, step_index, step.tool_name, schema_err)
-            return _failed(inputs, schema_err)
-        except (ToolTimeoutError, ToolOutputSizeError) as exc:
-            # Guardrail failures (#43) keep their specific error_type so the
-            # caller can distinguish a timeout / size violation from a generic
-            # execution error.
-            log_step_error(_logger, step_index, step.tool_name, exc)
-            return _failed(inputs, exc)
-        except Exception as exc:
-            exec_err = FlowExecutionError(step.tool_name, step_index, str(exc))
-            log_step_error(_logger, step_index, step.tool_name, exec_err)
-            return _failed(inputs, exec_err)
+        retry_errors: list[str] = []
+        outputs: dict[str, Any] | None = None
+        final_raw_exc: Exception | None = None
 
+        try:
+            outputs = self._invoke_tool(tool, inputs, step.retry, retry_errors)
+        except Exception as exc:
+            final_raw_exc = exc
+
+        if final_raw_exc is not None:
+            wrapped = self._wrap_tool_exception(step, step_index, final_raw_exc)
+            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            return self._apply_on_error(
+                step=step,
+                step_index=step_index,
+                inputs=inputs,
+                wrapped_error=wrapped,
+                retry_errors=retry_errors,
+                make_record=_record,
+            )
+
+        assert outputs is not None
         log_step_end(_logger, step_index, step.tool_name, outputs)
-        return StepRecord(
-            step_index=step_index,
-            tool_name=step.tool_name,
+        return _record(
             inputs=inputs,
             outputs=outputs,
+            error=None,
             success=True,
-            started_at=started_at,
-            ended_at=_now_utc(),
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
+            skipped=False,
+            retry_errors=retry_errors,
+        )
+
+    def _invoke_tool(
+        self,
+        tool: Tool,
+        inputs: dict[str, Any],
+        policy: RetryPolicy | None,
+        retry_errors: list[str],
+    ) -> dict[str, Any]:
+        """Invoke ``tool.run(inputs)``, optionally retrying via *policy*.
+
+        Each failed attempt's message is appended to *retry_errors* in order.
+        The final exception (after exhaustion or a non-retryable error) is
+        re-raised; the caller is responsible for wrapping it.
+        """
+        if policy is None:
+            try:
+                return tool.run(inputs)
+            except Exception as exc:
+                retry_errors.append(str(exc))
+                raise
+
+        def _wait_fn(retry_state: Any) -> float:
+            return policy.compute_delay(retry_state.attempt_number)
+
+        retryer = Retrying(
+            stop=stop_after_attempt(policy.max_retries + 1),
+            wait=_wait_fn if policy.max_retries > 0 else wait_fixed(0),
+            retry=retry_if_exception_type(policy.retryable_errors),
+            reraise=True,
+        )
+
+        def _wrapped() -> dict[str, Any]:
+            try:
+                return tool.run(inputs)
+            except Exception as exc:
+                retry_errors.append(str(exc))
+                raise
+
+        try:
+            return retryer(_wrapped)
+        except RetryError as exc:  # pragma: no cover — reraise=True avoids this
+            inner = exc.last_attempt.exception()
+            assert inner is not None
+            raise inner from exc
+
+    def _wrap_tool_exception(
+        self,
+        step: FlowStep,
+        step_index: int,
+        exc: Exception,
+    ) -> Exception:
+        """Convert a tool-side exception into the right ChainWeaver type.
+
+        - :class:`ValidationError` → :class:`SchemaValidationError`
+        - :class:`ToolTimeoutError` / :class:`ToolOutputSizeError` are passed
+          through (their ``error_type`` is preserved on the StepRecord).
+        - Any other exception → :class:`FlowExecutionError`.
+        """
+        if isinstance(exc, ValidationError):
+            return SchemaValidationError(step.tool_name, step_index, str(exc))
+        if isinstance(exc, (ToolTimeoutError, ToolOutputSizeError)):
+            return exc
+        return FlowExecutionError(step.tool_name, step_index, str(exc))
+
+    def _apply_on_error(
+        self,
+        *,
+        step: FlowStep,
+        step_index: int,
+        inputs: dict[str, Any],
+        wrapped_error: Exception,
+        retry_errors: list[str],
+        make_record: Callable[..., StepRecord],
+    ) -> StepRecord:
+        """Apply the step's ``on_error`` policy and return a final record.
+
+        - ``"fail"``: return a failed record (default).
+        - ``"skip"``: return a successful, ``skipped=True`` record with
+          empty outputs so the flow continues without merging anything.
+        - ``"fallback:<tool_name>"``: invoke the named tool with the same
+          inputs.  If it succeeds, return a successful record using its
+          outputs.  If it fails, return a failed record carrying the
+          fallback's exception (the original error stays in ``retry_errors``).
+        """
+        on_error = step.on_error
+        if on_error == "fail":
+            return make_record(
+                inputs=inputs,
+                outputs=None,
+                error=wrapped_error,
+                success=False,
+                skipped=False,
+                retry_errors=retry_errors,
+            )
+
+        if on_error == "skip":
+            return make_record(
+                inputs=inputs,
+                outputs={},
+                error=wrapped_error,
+                success=True,
+                skipped=True,
+                retry_errors=retry_errors,
+            )
+
+        # on_error == "fallback:<tool_name>"
+        fallback_name = on_error[len("fallback:") :]
+        try:
+            fallback_tool = self.get_tool(fallback_name)
+        except ToolNotFoundError as missing:
+            return make_record(
+                inputs=inputs,
+                outputs=None,
+                error=missing,
+                success=False,
+                skipped=False,
+                retry_errors=[*retry_errors, str(wrapped_error)],
+            )
+
+        try:
+            outputs = fallback_tool.run(inputs)
+        except Exception as fallback_exc:
+            wrapped = self._wrap_tool_exception(step, step_index, fallback_exc)
+            return make_record(
+                inputs=inputs,
+                outputs=None,
+                error=wrapped,
+                success=False,
+                skipped=False,
+                retry_errors=[*retry_errors, str(wrapped_error)],
+            )
+
+        return make_record(
+            inputs=inputs,
+            outputs=outputs,
+            error=None,
+            success=True,
+            skipped=False,
+            retry_errors=[*retry_errors, str(wrapped_error)],
         )
 
     # ------------------------------------------------------------------

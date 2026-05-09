@@ -43,7 +43,14 @@ from chainweaver.exceptions import (
     ToolTimeoutError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
-from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep, validate_dag_topology
+from chainweaver.flow import (
+    DAGFlow,
+    DAGFlowStep,
+    Flow,
+    FlowStep,
+    RetryPolicy,
+    validate_dag_topology,
+)
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -71,6 +78,7 @@ __all__ = [
     "FlowRegistry",
     "FlowStep",
     "InputMappingError",
+    "RetryPolicy",
     "SchemaValidationError",
     "StepRecord",
     "Tool",
