@@ -311,6 +311,12 @@ class ExecutionResult(BaseModel):
     cost_report: CostReport | None = None
     initial_input: dict[str, Any] = Field(default_factory=dict)
 
+    def to_mermaid(self, *, direction: str = "LR") -> str:
+        """Return a Mermaid graph overlaying this result on the flow (#79)."""
+        from chainweaver.viz import result_to_mermaid
+
+        return result_to_mermaid(self, direction=direction)
+
 
 class FlowExecutor:
     """Executes registered flows deterministically.

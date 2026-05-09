@@ -169,6 +169,18 @@ class Flow(BaseModel):
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
 
+    def to_ascii(self) -> str:
+        """Return a single-line ASCII pipeline diagram (issue #79)."""
+        from chainweaver.viz import flow_to_ascii
+
+        return flow_to_ascii(self)
+
+    def to_mermaid(self, *, direction: str = "LR", show_schemas: bool = False) -> str:
+        """Return a Mermaid ``graph <direction>`` rendering of this flow (#79)."""
+        from chainweaver.viz import flow_to_mermaid
+
+        return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
+
 
 # TODO (Phase 2): Add conditional branching — a step that inspects
 # context values and selects the next step(s) at runtime.
@@ -290,6 +302,18 @@ class DAGFlow(BaseModel):
     trigger_conditions: dict[str, Any] | None = None
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
+
+    def to_ascii(self) -> str:
+        """Return a multi-line ASCII rendering of this DAG (issue #79)."""
+        from chainweaver.viz import flow_to_ascii
+
+        return flow_to_ascii(self)
+
+    def to_mermaid(self, *, direction: str = "LR", show_schemas: bool = False) -> str:
+        """Return a Mermaid graph rendering of this DAG (issue #79)."""
+        from chainweaver.viz import flow_to_mermaid
+
+        return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
 
 
 # ---------------------------------------------------------------------------

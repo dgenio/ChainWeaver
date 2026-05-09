@@ -64,6 +64,7 @@ from chainweaver.log_utils import RedactionPolicy
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+from chainweaver.viz import flow_to_ascii, flow_to_mermaid, result_to_mermaid
 
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
@@ -106,6 +107,9 @@ __all__ = [
     "ToolOutputSizeError",
     "ToolTimeoutError",
     "TraceRecorder",
+    "flow_to_ascii",
+    "flow_to_mermaid",
+    "result_to_mermaid",
     "tool",
     "validate_dag_topology",
 ]
