@@ -17,6 +17,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Any
 
@@ -165,6 +166,56 @@ class ExecutionPlan(BaseModel):
         return "\n".join(lines)
 
 
+class ReplayMode(str, Enum):
+    """Modes accepted by :meth:`FlowExecutor.replay_flow`.
+
+    - ``VERIFY`` re-runs the flow and compares each step's outputs against
+      the recorded trace; differences are reported as :class:`StepDiff`
+      entries on the :class:`ReplayResult`.
+    - ``EXECUTE`` re-runs the flow with the recorded ``initial_input``
+      and returns the new result without comparing it to the original.
+    """
+
+    VERIFY = "verify"
+    EXECUTE = "execute"
+
+
+class StepDiff(BaseModel):
+    """A single field-level difference between an original and replayed step."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    step_index: int
+    tool_name: str
+    field: str
+    expected: Any
+    actual: Any
+
+
+class ReplayResult(BaseModel):
+    """Outcome of :meth:`FlowExecutor.replay_flow`.
+
+    Attributes:
+        original_trace_id: The ``trace_id`` of the :class:`ExecutionResult`
+            that was replayed.
+        new_result: The fresh :class:`ExecutionResult` produced by the
+            replay.
+        mode: The :class:`ReplayMode` requested.
+        diffs: Field-level differences (only populated in
+            :attr:`ReplayMode.VERIFY` mode).
+        all_steps_match: ``True`` when no diffs were detected (always
+            ``True`` for ``EXECUTE`` mode and for empty flows).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    original_trace_id: str
+    new_result: ExecutionResult
+    mode: ReplayMode
+    diffs: list[StepDiff] = Field(default_factory=list)
+    all_steps_match: bool = True
+
+
 class StepRecord(BaseModel):
     """Record of a single executed step.
 
@@ -242,6 +293,9 @@ class ExecutionResult(BaseModel):
             the LLM-call cost and latency avoided by running this compiled
             flow.  ``None`` unless the executor was constructed with a
             ``cost_profile``.
+        initial_input: The initial context dictionary that was passed to
+            ``execute_flow``.  Stored on the result so the trace can be
+            replayed deterministically by :meth:`FlowExecutor.replay_flow`.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -255,6 +309,7 @@ class ExecutionResult(BaseModel):
     ended_at: datetime
     total_duration_ms: float
     cost_report: CostReport | None = None
+    initial_input: dict[str, Any] = Field(default_factory=dict)
 
 
 class FlowExecutor:
@@ -341,6 +396,148 @@ class FlowExecutor:
         if name not in self._tools:
             raise ToolNotFoundError(name)
         return self._tools[name]
+
+    def replay_flow(
+        self,
+        result: ExecutionResult,
+        *,
+        mode: ReplayMode = ReplayMode.VERIFY,
+        resume_from_step: int = 0,
+    ) -> ReplayResult:
+        """Re-execute a flow from a previously recorded :class:`ExecutionResult`.
+
+        ``VERIFY`` re-runs the flow with ``result.initial_input`` and
+        diffs each step's outputs against the original.  ``EXECUTE`` only
+        re-runs and returns the new result without comparing.
+
+        ``resume_from_step`` (linear flows only) skips the first *N* steps
+        and rebuilds the cumulative context from those steps' recorded
+        outputs.  Flow-level input validation is skipped on resume since
+        the original execution already validated the input.
+
+        Args:
+            result: A previously produced :class:`ExecutionResult`.  Its
+                ``initial_input`` and ``execution_log`` drive the replay.
+            mode: One of :class:`ReplayMode`.
+            resume_from_step: Number of leading steps to skip (linear
+                flows only).  ``0`` (the default) replays from the start.
+
+        Returns:
+            A :class:`ReplayResult`.
+
+        Raises:
+            FlowNotFoundError: When ``result.flow_name`` is no longer
+                registered.
+            ValueError: When ``resume_from_step > 0`` is requested for a
+                ``DAGFlow`` (not yet supported).
+        """
+        flow = self._registry.get_flow(result.flow_name)
+
+        if resume_from_step <= 0:
+            new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
+        else:
+            if isinstance(flow, DAGFlow):
+                raise ValueError("resume_from_step is not supported for DAGFlow yet.")
+            new_result = self._replay_linear_from(flow, result, resume_from_step)
+
+        diffs: list[StepDiff] = []
+        if mode is ReplayMode.VERIFY:
+            diffs = self._compute_diffs(result, new_result, resume_from_step)
+
+        return ReplayResult(
+            original_trace_id=result.trace_id,
+            new_result=new_result,
+            mode=mode,
+            diffs=diffs,
+            all_steps_match=(len(diffs) == 0),
+        )
+
+    def _replay_linear_from(
+        self,
+        flow: Any,
+        result: ExecutionResult,
+        resume_from_step: int,
+    ) -> ExecutionResult:
+        """Re-run *flow* starting at index *resume_from_step* with a
+        context seeded from the original execution log.
+        """
+        if resume_from_step > len(flow.steps):
+            raise ValueError(
+                f"resume_from_step={resume_from_step} exceeds step count {len(flow.steps)}."
+            )
+        # Reconstruct the context that would have existed before the
+        # resume point by replaying the recorded outputs (no tool
+        # invocations).
+        context: dict[str, Any] = dict(result.initial_input)
+        for record in result.execution_log[:resume_from_step]:
+            if record.outputs:
+                context.update(record.outputs)
+
+        trace_id = _new_trace_id()
+        flow_started_at = _now_utc()
+        flow_t0 = time.perf_counter()
+        log: list[StepRecord] = []
+
+        for idx in range(resume_from_step, len(flow.steps)):
+            step = flow.steps[idx]
+            step_record = self._execute_step(idx, step, context)
+            log.append(step_record)
+
+            if not step_record.success:
+                return self._make_result(
+                    flow_name=flow.name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(result.initial_input),
+                )
+
+            assert step_record.outputs is not None
+            context.update(step_record.outputs)
+
+        return self._make_result(
+            flow_name=flow.name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=dict(result.initial_input),
+        )
+
+    def _compute_diffs(
+        self,
+        original: ExecutionResult,
+        new: ExecutionResult,
+        resume_from_step: int,
+    ) -> list[StepDiff]:
+        """Field-level diffs between the original and replayed step outputs."""
+        diffs: list[StepDiff] = []
+        for new_idx, new_step in enumerate(new.execution_log):
+            original_idx = new_idx + resume_from_step
+            if original_idx >= len(original.execution_log):
+                break
+            orig_step = original.execution_log[original_idx]
+            new_out = new_step.outputs or {}
+            orig_out = orig_step.outputs or {}
+            if new_out == orig_out:
+                continue
+            for key in set(new_out) | set(orig_out):
+                if new_out.get(key) != orig_out.get(key):
+                    diffs.append(
+                        StepDiff(
+                            step_index=new_step.step_index,
+                            tool_name=new_step.tool_name,
+                            field=key,
+                            expected=orig_out.get(key),
+                            actual=new_out.get(key),
+                        )
+                    )
+        return diffs
 
     def explain_flow(
         self,
@@ -506,6 +703,7 @@ class FlowExecutor:
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
+                    initial_input=initial_input,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -525,6 +723,7 @@ class FlowExecutor:
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
+                    initial_input=initial_input,
                 )
 
             # Merge step outputs into the shared context.
@@ -566,6 +765,7 @@ class FlowExecutor:
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
+                    initial_input=initial_input,
                 )
 
         _logger.info("Flow '%s' completed successfully | trace_id=%s", flow_name, trace_id)
@@ -577,6 +777,7 @@ class FlowExecutor:
             trace_id=trace_id,
             started_at=flow_started_at,
             perf_start=flow_t0,
+            initial_input=initial_input,
         )
 
     # ------------------------------------------------------------------
@@ -593,6 +794,7 @@ class FlowExecutor:
         trace_id: str,
         started_at: datetime,
         perf_start: float,
+        initial_input: dict[str, Any],
     ) -> ExecutionResult:
         """Build an :class:`ExecutionResult` and stamp the closing timestamps."""
         ended_at = _now_utc()
@@ -614,6 +816,7 @@ class FlowExecutor:
             ended_at=ended_at,
             total_duration_ms=total_ms,
             cost_report=cost_report,
+            initial_input=dict(initial_input),
         )
         if self._trace_recorder is not None:
             self._record_observed_trace(result)
@@ -1071,6 +1274,7 @@ class FlowExecutor:
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
+                    initial_input=initial_input,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -1118,6 +1322,7 @@ class FlowExecutor:
                         trace_id=trace_id,
                         started_at=flow_started_at,
                         perf_start=flow_t0,
+                        initial_input=initial_input,
                     )
 
                 # Build a lightweight FlowStep-compatible view so _execute_step
@@ -1146,6 +1351,7 @@ class FlowExecutor:
                         trace_id=trace_id,
                         started_at=flow_started_at,
                         perf_start=flow_t0,
+                        initial_input=initial_input,
                     )
 
                 assert record.outputs is not None  # success guarantees outputs
@@ -1186,6 +1392,7 @@ class FlowExecutor:
                             trace_id=trace_id,
                             started_at=flow_started_at,
                             perf_start=flow_t0,
+                            initial_input=initial_input,
                         )
                     level_outputs[key] = value
 
@@ -1223,6 +1430,7 @@ class FlowExecutor:
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
+                    initial_input=initial_input,
                 )
 
         _logger.info(
@@ -1238,4 +1446,5 @@ class FlowExecutor:
             trace_id=trace_id,
             started_at=flow_started_at,
             perf_start=flow_t0,
+            initial_input=initial_input,
         )
