@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver import cli
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
@@ -107,6 +108,7 @@ __all__ = [
     "ToolOutputSizeError",
     "ToolTimeoutError",
     "TraceRecorder",
+    "cli",
     "flow_to_ascii",
     "flow_to_mermaid",
     "result_to_mermaid",

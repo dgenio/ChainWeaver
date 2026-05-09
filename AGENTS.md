@@ -45,6 +45,7 @@ chainweaver/
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
+├── cli.py             typer-based 'chainweaver inspect' entry point
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)

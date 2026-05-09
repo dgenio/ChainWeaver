@@ -25,7 +25,11 @@ classifiers = [
 dependencies = [
     "pydantic>=2.0",
     "tenacity>=8.0",
+    "typer>=0.9",
 ]
+
+[project.scripts]
+chainweaver = "chainweaver.cli:main"
 
 [project.optional-dependencies]
 dev = [

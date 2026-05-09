@@ -32,6 +32,7 @@ and tools, the same flow produces the same output every time.
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
 | `observation.py` | `TraceRecorder` + `ObservedTrace` for ad-hoc tool sequence capture | In-memory storage only; persistence deferred |
 | `viz.py` | `flow_to_ascii`, `flow_to_mermaid`, `result_to_mermaid` pure renderers | No external dependencies — string generation only |
+| `cli.py` | typer-based `chainweaver inspect` entry point | Reads from a process-scoped default registry installed via `cli.set_default_registry` |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
 
 ---
@@ -95,7 +96,7 @@ files that conflict with these names:
 | `observer.py` | #78 | Runtime flow observer |
 | `compat.py` | #48 | Schema fingerprinting |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
-| `cli.py` | #44 | CLI interface |
+| ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
 | `mcp/` | #70, #72 | MCP adapter + flow server |
 | `integrations/` | #82 | LangChain/LlamaIndex bridge adapters |
 | `export/` | #25 | Flow export formats |
