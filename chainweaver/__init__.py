@@ -39,6 +39,8 @@ from chainweaver.exceptions import (
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
+    ToolOutputSizeError,
+    ToolTimeoutError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep, validate_dag_topology
@@ -74,6 +76,8 @@ __all__ = [
     "Tool",
     "ToolDefinitionError",
     "ToolNotFoundError",
+    "ToolOutputSizeError",
+    "ToolTimeoutError",
     "tool",
     "validate_dag_topology",
 ]

@@ -82,6 +82,36 @@ class ToolDefinitionError(ChainWeaverError):
         super().__init__(f"Cannot define tool from function '{function_name}': {detail}")
 
 
+class ToolTimeoutError(ChainWeaverError):
+    """Raised when a tool exceeds its configured execution timeout.
+
+    Attributes:
+        tool_name: Name of the tool that timed out.
+        timeout_seconds: The configured timeout that was exceeded.
+    """
+
+    def __init__(self, tool_name: str, timeout_seconds: float) -> None:
+        self.tool_name = tool_name
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"Tool '{tool_name}' exceeded timeout of {timeout_seconds}s.")
+
+
+class ToolOutputSizeError(ChainWeaverError):
+    """Raised when a tool's output exceeds the maximum allowed size.
+
+    Attributes:
+        tool_name: Name of the tool whose output was rejected.
+        size: Actual output size in bytes (UTF-8 encoded JSON length).
+        max_size: Configured maximum allowed size in bytes.
+    """
+
+    def __init__(self, tool_name: str, size: int, max_size: int) -> None:
+        self.tool_name = tool_name
+        self.size = size
+        self.max_size = max_size
+        super().__init__(f"Tool '{tool_name}' output size {size} exceeds max {max_size}.")
+
+
 class DAGDefinitionError(ChainWeaverError):
     """Raised when a :class:`~chainweaver.flow.DAGFlow` definition is invalid.
 

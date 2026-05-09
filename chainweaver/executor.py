@@ -27,6 +27,8 @@ from chainweaver.exceptions import (
     InputMappingError,
     SchemaValidationError,
     ToolNotFoundError,
+    ToolOutputSizeError,
+    ToolTimeoutError,
 )
 from chainweaver.flow import DAGFlow, DAGFlowStep, FlowStep, validate_dag_topology
 from chainweaver.log_utils import get_logger, log_step_end, log_step_error, log_step_start
@@ -493,6 +495,12 @@ class FlowExecutor:
             schema_err = SchemaValidationError(step.tool_name, step_index, str(exc))
             log_step_error(_logger, step_index, step.tool_name, schema_err)
             return _failed(inputs, schema_err)
+        except (ToolTimeoutError, ToolOutputSizeError) as exc:
+            # Guardrail failures (#43) keep their specific error_type so the
+            # caller can distinguish a timeout / size violation from a generic
+            # execution error.
+            log_step_error(_logger, step_index, step.tool_name, exc)
+            return _failed(inputs, exc)
         except Exception as exc:
             exec_err = FlowExecutionError(step.tool_name, step_index, str(exc))
             log_step_error(_logger, step_index, step.tool_name, exec_err)
