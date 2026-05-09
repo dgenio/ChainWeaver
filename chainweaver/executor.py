@@ -3,15 +3,23 @@
 The :class:`FlowExecutor` runs a registered :class:`~chainweaver.flow.Flow`
 step-by-step without any LLM involvement between steps.  All data passing is
 structured and schema-validated via Pydantic.
+
+Every :meth:`FlowExecutor.execute_flow` call produces a fully serializable
+:class:`ExecutionResult` that doubles as an execution trace: it carries a
+unique ``trace_id``, wall-clock timestamps, and per-step ``duration_ms``
+measurements.  Errors are stored as ``error_type`` / ``error_message``
+strings so the result is JSON-serializable end-to-end.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import time
+import uuid
+from datetime import datetime, timezone
 from graphlib import TopologicalSorter
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from chainweaver.exceptions import (
     FlowExecutionError,
@@ -27,8 +35,22 @@ from chainweaver.tools import Tool
 _logger = get_logger("chainweaver.executor")
 
 
-@dataclass
-class StepRecord:
+def _now_utc() -> datetime:
+    """Return the current UTC time as a timezone-aware ``datetime``."""
+    return datetime.now(timezone.utc)
+
+
+def _new_trace_id() -> str:
+    """Return a fresh UUID4 hex string for trace correlation."""
+    return uuid.uuid4().hex
+
+
+def _exc_to_strings(exc: Exception) -> tuple[str, str]:
+    """Render an exception as ``(error_type, error_message)`` strings."""
+    return type(exc).__name__, str(exc)
+
+
+class StepRecord(BaseModel):
     """Record of a single executed step.
 
     Attributes:
@@ -42,21 +64,37 @@ class StepRecord:
         inputs: The validated inputs that were passed to the tool.
         outputs: The validated outputs produced by the tool, or ``None`` if
             the step failed.
-        error: The exception that was raised, or ``None`` on success.
+        error_type: Exception class name (e.g. ``"FlowExecutionError"``)
+            when the step failed, or ``None`` on success.
+        error_message: Human-readable error message when the step failed,
+            or ``None`` on success.
         success: ``True`` when the step completed without error.
+        started_at: UTC timestamp when the step began.
+        ended_at: UTC timestamp when the step finished (success or failure).
+        duration_ms: Wall-clock duration of the step in milliseconds,
+            measured with :func:`time.perf_counter`.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     step_index: int
     tool_name: str
     inputs: dict[str, Any]
     outputs: dict[str, Any] | None = None
-    error: Exception | None = None
+    error_type: str | None = None
+    error_message: str | None = None
     success: bool = True
+    started_at: datetime
+    ended_at: datetime
+    duration_ms: float
 
 
-@dataclass
-class ExecutionResult:
+class ExecutionResult(BaseModel):
     """The final result of a :meth:`FlowExecutor.execute_flow` call.
+
+    ``ExecutionResult`` is a fully serializable execution trace: every field
+    round-trips through :meth:`pydantic.BaseModel.model_dump_json` and
+    :meth:`pydantic.BaseModel.model_validate_json`.
 
     Attributes:
         flow_name: Name of the flow that was executed.
@@ -67,12 +105,24 @@ class ExecutionResult:
             one entry per executed step, plus up to two additional entries
             for flow-level input/output schema validation when
             ``input_schema`` or ``output_schema`` are set on the flow.
+        trace_id: UUID4 hex string assigned at the start of the execution.
+            Use this to correlate the result with logs or external systems.
+        started_at: UTC timestamp when the execution began.
+        ended_at: UTC timestamp when the execution finished.
+        total_duration_ms: Wall-clock duration of the full execution in
+            milliseconds, measured with :func:`time.perf_counter`.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     flow_name: str
     success: bool
     final_output: dict[str, Any] | None
-    execution_log: list[StepRecord] = field(default_factory=list)
+    execution_log: list[StepRecord] = Field(default_factory=list)
+    trace_id: str
+    started_at: datetime
+    ended_at: datetime
+    total_duration_ms: float
 
 
 class FlowExecutor:
@@ -83,13 +133,14 @@ class FlowExecutor:
     On each :meth:`execute_flow` call it:
 
     1. Resolves the flow from the registry.
-    2. Iterates over steps sequentially.
+    2. Iterates over steps sequentially (or level-by-level for DAGs).
     3. Resolves each step's inputs by mapping context keys (or literal values).
     4. Validates inputs against the tool's *input_schema*.
     5. Calls the tool's callable.
     6. Validates outputs against the tool's *output_schema*.
     7. Merges the outputs into the shared context.
-    8. Records every step in an :class:`ExecutionResult`.
+    8. Records every step in an :class:`ExecutionResult` together with a
+       unique trace id, wall-clock timestamps, and per-step durations.
 
     There are **no LLM calls** at any point in this process.
 
@@ -106,12 +157,7 @@ class FlowExecutor:
 
         result = executor.execute_flow("double_add_format", {"number": 5})
         print(result.final_output)  # {"result": "Final value: 20"}
-
-    # TODO (Phase 2): Add async execution mode for I/O-bound tool chains.
-    # TODO (Phase 2): Support parallel/async execution for independent DAG
-    #   levels (currently steps within a level run sequentially).
-    # TODO (Phase 2): Add middleware hooks (before_step / after_step) for
-    #   observability and tracing integrations.
+        print(result.trace_id)      # e.g. "9b1c8e0d2a5f4..."
     """
 
     def __init__(self, registry: FlowRegistry) -> None:
@@ -152,9 +198,9 @@ class FlowExecutor:
 
         Returns:
             An :class:`ExecutionResult` describing the outcome and containing
-            the full execution log. Step-level validation, input-mapping, and
-            execution errors are recorded in the execution log and reported via
-            ``ExecutionResult.success`` instead of being raised.
+            the full execution log.  Step-level validation, input-mapping,
+            and execution errors are recorded in the execution log and
+            reported via ``ExecutionResult.success`` instead of being raised.
 
         Raises:
             FlowNotFoundError: When *flow_name* is not registered.
@@ -163,28 +209,39 @@ class FlowExecutor:
         if isinstance(flow, DAGFlow):
             return self._execute_dag_flow(flow, initial_input)
 
-        _logger.info("Flow '%s' started | steps=%d", flow_name, len(flow.steps))
+        trace_id = _new_trace_id()
+        flow_started_at = _now_utc()
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "Flow '%s' started | trace_id=%s | steps=%d",
+            flow_name,
+            trace_id,
+            len(flow.steps),
+        )
 
         # -- Flow-level input validation ------------------------------------
         if flow.input_schema is not None:
-            try:
-                flow.input_schema.model_validate(initial_input)
-            except ValidationError as exc:
-                wrapped = SchemaValidationError(flow_name, -1, str(exc), context="flow_input")
-                _logger.error("Flow '%s' input validation failed: %s", flow_name, wrapped)
-                return ExecutionResult(
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=initial_input,
+                schema=flow.input_schema,
+                step_index=-1,
+                context_label="flow_input",
+            )
+            if validation_record is not None:
+                _logger.error(
+                    "Flow '%s' input validation failed: %s",
+                    flow_name,
+                    validation_record.error_message,
+                )
+                return self._make_result(
                     flow_name=flow_name,
                     success=False,
                     final_output=None,
-                    execution_log=[
-                        StepRecord(
-                            step_index=-1,
-                            tool_name=flow_name,
-                            inputs=dict(initial_input),
-                            error=wrapped,
-                            success=False,
-                        )
-                    ],
+                    execution_log=[validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -196,11 +253,14 @@ class FlowExecutor:
 
             if not record.success:
                 _logger.error("Flow '%s' aborted at step %d", flow_name, idx)
-                return ExecutionResult(
+                return self._make_result(
                     flow_name=flow_name,
                     success=False,
                     final_output=None,
                     execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
                 )
 
             # Merge step outputs into the shared context.
@@ -221,40 +281,103 @@ class FlowExecutor:
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
-            try:
-                flow.output_schema.model_validate(context)
-            except ValidationError as exc:
-                wrapped = SchemaValidationError(
-                    flow_name, len(flow.steps), str(exc), context="flow_output"
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                _logger.error(
+                    "Flow '%s' output validation failed: %s",
+                    flow_name,
+                    validation_record.error_message,
                 )
-                _logger.error("Flow '%s' output validation failed: %s", flow_name, wrapped)
-                return ExecutionResult(
+                return self._make_result(
                     flow_name=flow_name,
                     success=False,
                     final_output=None,
-                    execution_log=[
-                        *log,
-                        StepRecord(
-                            step_index=len(flow.steps),
-                            tool_name=flow_name,
-                            inputs=dict(context),
-                            error=wrapped,
-                            success=False,
-                        ),
-                    ],
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
                 )
 
-        _logger.info("Flow '%s' completed successfully", flow_name)
-        return ExecutionResult(
+        _logger.info("Flow '%s' completed successfully | trace_id=%s", flow_name, trace_id)
+        return self._make_result(
             flow_name=flow_name,
             success=True,
             final_output=context,
             execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _make_result(
+        self,
+        *,
+        flow_name: str,
+        success: bool,
+        final_output: dict[str, Any] | None,
+        execution_log: list[StepRecord],
+        trace_id: str,
+        started_at: datetime,
+        perf_start: float,
+    ) -> ExecutionResult:
+        """Build an :class:`ExecutionResult` and stamp the closing timestamps."""
+        ended_at = _now_utc()
+        total_ms = (time.perf_counter() - perf_start) * 1000.0
+        return ExecutionResult(
+            flow_name=flow_name,
+            success=success,
+            final_output=final_output,
+            execution_log=execution_log,
+            trace_id=trace_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            total_duration_ms=total_ms,
+        )
+
+    def _validate_flow_schema(
+        self,
+        *,
+        flow_name: str,
+        payload: dict[str, Any],
+        schema: type[BaseModel],
+        step_index: int,
+        context_label: str,
+    ) -> StepRecord | None:
+        """Validate flow-level input or output against *schema*.
+
+        Returns ``None`` on success, or a failed :class:`StepRecord` on
+        validation error.
+        """
+        started_at = _now_utc()
+        t0 = time.perf_counter()
+        try:
+            schema.model_validate(payload)
+        except ValidationError as exc:
+            wrapped = SchemaValidationError(flow_name, step_index, str(exc), context=context_label)
+            err_type, err_msg = _exc_to_strings(wrapped)
+            ended_at = _now_utc()
+            return StepRecord(
+                step_index=step_index,
+                tool_name=flow_name,
+                inputs=dict(payload),
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=ended_at,
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+            )
+        return None
 
     def _resolve_inputs(
         self,
@@ -307,31 +430,36 @@ class FlowExecutor:
             context: The current accumulated context.
 
         Returns:
-            A :class:`StepRecord` describing the outcome.
+            A :class:`StepRecord` describing the outcome with full timing.
         """
+        started_at = _now_utc()
+        t0 = time.perf_counter()
+
+        def _failed(inputs: dict[str, Any], exc: Exception) -> StepRecord:
+            err_type, err_msg = _exc_to_strings(exc)
+            return StepRecord(
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs=inputs,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=_now_utc(),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+            )
+
         try:
             tool = self.get_tool(step.tool_name)
         except ToolNotFoundError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return StepRecord(
-                step_index=step_index,
-                tool_name=step.tool_name,
-                inputs={},
-                error=exc,
-                success=False,
-            )
+            return _failed({}, exc)
 
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return StepRecord(
-                step_index=step_index,
-                tool_name=step.tool_name,
-                inputs={},
-                error=exc,
-                success=False,
-            )
+            return _failed({}, exc)
 
         log_step_start(_logger, step_index, step.tool_name, inputs)
 
@@ -340,23 +468,11 @@ class FlowExecutor:
         except ValidationError as exc:
             schema_err = SchemaValidationError(step.tool_name, step_index, str(exc))
             log_step_error(_logger, step_index, step.tool_name, schema_err)
-            return StepRecord(
-                step_index=step_index,
-                tool_name=step.tool_name,
-                inputs=inputs,
-                error=schema_err,
-                success=False,
-            )
+            return _failed(inputs, schema_err)
         except Exception as exc:
             exec_err = FlowExecutionError(step.tool_name, step_index, str(exc))
             log_step_error(_logger, step_index, step.tool_name, exec_err)
-            return StepRecord(
-                step_index=step_index,
-                tool_name=step.tool_name,
-                inputs=inputs,
-                error=exec_err,
-                success=False,
-            )
+            return _failed(inputs, exec_err)
 
         log_step_end(_logger, step_index, step.tool_name, outputs)
         return StepRecord(
@@ -365,6 +481,9 @@ class FlowExecutor:
             inputs=inputs,
             outputs=outputs,
             success=True,
+            started_at=started_at,
+            ended_at=_now_utc(),
+            duration_ms=(time.perf_counter() - t0) * 1000.0,
         )
 
     # ------------------------------------------------------------------
@@ -437,28 +556,39 @@ class FlowExecutor:
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
-        _logger.info("DAGFlow '%s' started | steps=%d", flow.name, len(flow.steps))
+        trace_id = _new_trace_id()
+        flow_started_at = _now_utc()
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "DAGFlow '%s' started | trace_id=%s | steps=%d",
+            flow.name,
+            trace_id,
+            len(flow.steps),
+        )
 
         # -- Flow-level input validation ------------------------------------
         if flow.input_schema is not None:
-            try:
-                flow.input_schema.model_validate(initial_input)
-            except ValidationError as exc:
-                wrapped = SchemaValidationError(flow.name, -1, str(exc), context="flow_input")
-                _logger.error("DAGFlow '%s' input validation failed: %s", flow.name, wrapped)
-                return ExecutionResult(
+            validation_record = self._validate_flow_schema(
+                flow_name=flow.name,
+                payload=initial_input,
+                schema=flow.input_schema,
+                step_index=-1,
+                context_label="flow_input",
+            )
+            if validation_record is not None:
+                _logger.error(
+                    "DAGFlow '%s' input validation failed: %s",
+                    flow.name,
+                    validation_record.error_message,
+                )
+                return self._make_result(
                     flow_name=flow.name,
                     success=False,
                     final_output=None,
-                    execution_log=[
-                        StepRecord(
-                            step_index=-1,
-                            tool_name=flow.name,
-                            inputs=dict(initial_input),
-                            error=wrapped,
-                            success=False,
-                        )
-                    ],
+                    execution_log=[validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -482,21 +612,30 @@ class FlowExecutor:
                         f"Only step_type='tool' can be executed.",
                     )
                     log_step_error(_logger, flat_index, step.tool_name, err)
+                    err_type, err_msg = _exc_to_strings(err)
+                    now = _now_utc()
                     log.extend(level_records)
                     log.append(
                         StepRecord(
                             step_index=flat_index,
                             tool_name=step.tool_name,
                             inputs={},
-                            error=err,
+                            error_type=err_type,
+                            error_message=err_msg,
                             success=False,
+                            started_at=now,
+                            ended_at=now,
+                            duration_ms=0.0,
                         )
                     )
-                    return ExecutionResult(
+                    return self._make_result(
                         flow_name=flow.name,
                         success=False,
                         final_output=None,
                         execution_log=log,
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
                     )
 
                 # Build a lightweight FlowStep-compatible view so _execute_step
@@ -517,11 +656,14 @@ class FlowExecutor:
                         record.step_index,
                         step.tool_name,
                     )
-                    return ExecutionResult(
+                    return self._make_result(
                         flow_name=flow.name,
                         success=False,
                         final_output=None,
                         execution_log=log,
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
                     )
 
                 assert record.outputs is not None  # success guarantees outputs
@@ -535,21 +677,33 @@ class FlowExecutor:
                             f"sibling step in the same DAG level. "
                             f"Use distinct output keys or sequential steps.",
                         )
+                        err_type, err_msg = _exc_to_strings(conflict_err)
                         record_conflict = StepRecord(
                             step_index=record.step_index,
                             tool_name=step.tool_name,
                             inputs=record.inputs,
-                            error=conflict_err,
+                            error_type=err_type,
+                            error_message=err_msg,
                             success=False,
+                            started_at=record.started_at,
+                            ended_at=_now_utc(),
+                            duration_ms=record.duration_ms,
                         )
                         log.extend(level_records[:-1])
                         log.append(record_conflict)
-                        _logger.error("DAGFlow '%s': sibling key conflict on '%s'", flow.name, key)
-                        return ExecutionResult(
+                        _logger.error(
+                            "DAGFlow '%s': sibling key conflict on '%s'",
+                            flow.name,
+                            key,
+                        )
+                        return self._make_result(
                             flow_name=flow.name,
                             success=False,
                             final_output=None,
                             execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
                         )
                     level_outputs[key] = value
 
@@ -566,33 +720,40 @@ class FlowExecutor:
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
-            try:
-                flow.output_schema.model_validate(context)
-            except ValidationError as exc:
-                wrapped = SchemaValidationError(
-                    flow.name, len(flow.steps), str(exc), context="flow_output"
+            validation_record = self._validate_flow_schema(
+                flow_name=flow.name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                _logger.error(
+                    "DAGFlow '%s' output validation failed: %s",
+                    flow.name,
+                    validation_record.error_message,
                 )
-                _logger.error("DAGFlow '%s' output validation failed: %s", flow.name, wrapped)
-                return ExecutionResult(
+                return self._make_result(
                     flow_name=flow.name,
                     success=False,
                     final_output=None,
-                    execution_log=[
-                        *log,
-                        StepRecord(
-                            step_index=len(flow.steps),
-                            tool_name=flow.name,
-                            inputs=dict(context),
-                            error=wrapped,
-                            success=False,
-                        ),
-                    ],
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
                 )
 
-        _logger.info("DAGFlow '%s' completed successfully", flow.name)
-        return ExecutionResult(
+        _logger.info(
+            "DAGFlow '%s' completed successfully | trace_id=%s",
+            flow.name,
+            trace_id,
+        )
+        return self._make_result(
             flow_name=flow.name,
             success=True,
             final_output=context,
             execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
         )

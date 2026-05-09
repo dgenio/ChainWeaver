@@ -13,13 +13,7 @@ from helpers import (
 )
 from pydantic import BaseModel, ValidationError
 
-from chainweaver.exceptions import (
-    FlowExecutionError,
-    FlowNotFoundError,
-    InputMappingError,
-    SchemaValidationError,
-    ToolNotFoundError,
-)
+from chainweaver.exceptions import FlowNotFoundError
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
@@ -90,7 +84,7 @@ class TestMissingTool:
         result = ex.execute_flow("double_add_format", {"number": 5})
         assert result.success is False
         assert len(result.execution_log) == 1
-        assert isinstance(result.execution_log[0].error, ToolNotFoundError)
+        assert result.execution_log[0].error_type == "ToolNotFoundError"
         assert result.execution_log[0].success is False
 
 
@@ -110,7 +104,7 @@ class TestSchemaValidation:
         assert result.success is False
         assert result.final_output is None
         assert len(result.execution_log) == 1
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_schema_error_recorded_in_log(
         self,
@@ -119,7 +113,7 @@ class TestSchemaValidation:
         result = executor.execute_flow("double_add_format", {"number": "bad"})
         record = result.execution_log[0]
         assert record.success is False
-        assert record.error is not None
+        assert record.error_type is not None
 
     def test_tool_output_schema_validated(self) -> None:
         """A tool that returns invalid output is caught by the executor."""
@@ -154,7 +148,7 @@ class TestSchemaValidation:
 
         result = ex.execute_flow("bad_flow", {"number": 3})
         assert result.success is False
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +190,7 @@ class TestInputMapping:
 
         result = ex.execute_flow("bad_mapping", {"number": 5})
         assert result.success is False
-        assert isinstance(result.execution_log[0].error, InputMappingError)
+        assert result.execution_log[0].error_type == "InputMappingError"
 
     def test_literal_constant_in_mapping(self) -> None:
         """A literal value in the mapping is passed directly to the tool."""
@@ -313,8 +307,9 @@ class TestFlowExecutionError:
         assert result.success is False
         record = result.execution_log[0]
         assert record.success is False
-        assert isinstance(record.error, FlowExecutionError)
-        assert "something went wrong" in str(record.error)
+        assert record.error_type == "FlowExecutionError"
+        assert record.error_message is not None
+        assert "something went wrong" in record.error_message
 
     def test_value_error_wrapped(self) -> None:
         class InSchema(BaseModel):
@@ -345,7 +340,7 @@ class TestFlowExecutionError:
 
         result = ex.execute_flow("bad_flow", {"x": 1})
         assert result.success is False
-        assert isinstance(result.execution_log[0].error, FlowExecutionError)
+        assert result.execution_log[0].error_type == "FlowExecutionError"
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +478,7 @@ class TestFlowLevelSchemas:
         # The only record should be the flow-level input validation failure.
         assert len(result.execution_log) == 1
         assert result.execution_log[0].step_index == -1
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_invalid_output_caught_after_execution(
         self,
@@ -514,7 +509,7 @@ class TestFlowLevelSchemas:
         assert len(result.execution_log) == 2
         output_record = result.execution_log[-1]
         assert output_record.step_index == len(flow.steps)
-        assert isinstance(output_record.error, SchemaValidationError)
+        assert output_record.error_type == "SchemaValidationError"
 
     def test_none_schemas_behave_unchanged(
         self,
@@ -571,7 +566,7 @@ class TestFlowLevelSchemas:
         assert result.final_output is None
         assert len(result.execution_log) == 1
         assert result.execution_log[0].step_index == 0  # len(steps) == 0
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
 
 # ---------------------------------------------------------------------------
@@ -681,11 +676,12 @@ class TestToolZeroDivisionError:
         assert result.success is False
         record = result.execution_log[0]
         assert record.success is False
-        assert isinstance(record.error, FlowExecutionError)
-        assert record.error.detail in {
-            "integer division or modulo by zero",  # Python <= 3.13
-            "division by zero",  # Python 3.14+
-        }
+        assert record.error_type == "FlowExecutionError"
+        assert record.error_message is not None
+        assert (
+            "integer division or modulo by zero" in record.error_message
+            or "division by zero" in record.error_message
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1121,7 @@ class TestDAGSiblingKeyConflict:
         result = ex.execute_flow("conflict_dag", {"x": 5})
 
         assert result.success is False
-        assert any(isinstance(r.error, FlowExecutionError) for r in result.execution_log)
+        assert any(r.error_type == "FlowExecutionError" for r in result.execution_log)
 
     def test_non_conflicting_siblings_succeed(self) -> None:
         class Inp(BaseModel):
@@ -1242,7 +1238,7 @@ class TestDAGFlowLevelSchemas:
         assert result.success is False
         assert len(result.execution_log) == 1
         assert result.execution_log[0].step_index == -1
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_invalid_output_schema_caught_after_execution(self) -> None:
         class Inp(BaseModel):
@@ -1272,7 +1268,7 @@ class TestDAGFlowLevelSchemas:
         result = ex.execute_flow("bad_out_dag", {"n": 4})
 
         assert result.success is False
-        assert any(isinstance(r.error, SchemaValidationError) for r in result.execution_log)
+        assert any(r.error_type == "SchemaValidationError" for r in result.execution_log)
 
 
 class TestDAGLinearBackwardCompat:
@@ -1287,7 +1283,7 @@ class TestDAGLinearBackwardCompat:
     def test_linear_flow_error_path_still_works(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": "bad"})
         assert result.success is False
-        assert isinstance(result.execution_log[0].error, SchemaValidationError)
+        assert result.execution_log[0].error_type == "SchemaValidationError"
 
 
 class TestDAGMissingTool:
@@ -1307,7 +1303,7 @@ class TestDAGMissingTool:
 
         assert result.success is False
         assert len(result.execution_log) == 1
-        assert isinstance(result.execution_log[0].error, ToolNotFoundError)
+        assert result.execution_log[0].error_type == "ToolNotFoundError"
 
 
 class TestDAGStepType:
@@ -1423,5 +1419,6 @@ class TestDAGCapabilityStepExecution:
         result = ex.execute_flow("cap_dag", {})
         assert result.success is False
         assert len(result.execution_log) == 1
-        assert isinstance(result.execution_log[0].error, FlowExecutionError)
-        assert "not supported by FlowExecutor" in str(result.execution_log[0].error)
+        assert result.execution_log[0].error_type == "FlowExecutionError"
+        assert result.execution_log[0].error_message is not None
+        assert "not supported by FlowExecutor" in result.execution_log[0].error_message

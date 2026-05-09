@@ -42,7 +42,7 @@ and tools, the same flow produces the same output every time.
 | Pydantic for all schemas | Deterministic I/O contracts between steps. |
 | No LLM calls in executor | "Compiled, not interpreted." |
 | `from __future__ import annotations` | Forward-reference support; cleaner type hints. |
-| `dataclass` for `StepRecord`/`ExecutionResult` | They carry `Exception` instances; Pydantic cannot serialize these. |
+| Pydantic `BaseModel` for `StepRecord`/`ExecutionResult` (since #20) | Errors are stored as `error_type` / `error_message` strings instead of live `Exception` instances, so the trace round-trips through JSON. |
 | `step_type` + `capability_id` on `DAGFlowStep` | Forward-compat slots for Weaver Stack kernel integration (weaver-spec I-07). Only `"tool"` is executed today; `"capability"` is reserved for `KernelBackedExecutor`. |
 | Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
 
@@ -53,11 +53,17 @@ and tools, the same flow produces the same output every time.
 Things that look wrong but are intentional. Do not "fix" these without a
 solution for the underlying constraint.
 
-### `StepRecord` and `ExecutionResult` are dataclasses, not Pydantic
+### `StepRecord` and `ExecutionResult` errors are stored as strings
 
-The `error` field holds an `Exception` instance. Pydantic's serialization
-cannot handle arbitrary exception objects. These may migrate to Pydantic if a
-serialization solution is found, but until then agents must not convert them.
+These types are Pydantic models (since #20). The previous design trap — using
+`dataclass` because Pydantic could not serialize an `Exception` — was resolved
+by replacing the live `error: Exception | None` field with two string fields:
+`error_type: str | None` (the exception class name) and
+`error_message: str | None` (the formatted message). This keeps the entire
+execution trace JSON-serializable end-to-end.
+
+Do **not** add a live `Exception` field back to either model; the
+`error_type` / `error_message` pair is the contract.
 
 ### `log_utils.py`, not `logging.py`
 

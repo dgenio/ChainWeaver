@@ -48,7 +48,7 @@ Never generate these in ChainWeaver code:
 | Relative imports from `chainweaver` internals outside the package | Breaks package boundaries |
 | Adding deps without updating `pyproject.toml` `[project.dependencies]` | Invisible dependency |
 | Secrets, API keys, or credentials in code | Security invariant |
-| Converting `StepRecord`/`ExecutionResult` to Pydantic `BaseModel` | They carry `Exception`; see [architecture.md § Design traps](architecture.md#design-traps) |
+| Re-introducing a live `Exception` field on `StepRecord`/`ExecutionResult` | Both are Pydantic models since #20; errors are stored as `error_type` / `error_message` strings so the trace is JSON-serializable. See [architecture.md § Design traps](architecture.md#design-traps) |
 | Renaming `log_utils.py` back to `logging.py` | Stdlib shadowing; see [architecture.md § Design traps](architecture.md#design-traps) |
 | Merging `tests/helpers.py` into `conftest.py` | Intentional split; see [architecture.md § Design traps](architecture.md#design-traps) |
 | Adding agent-kernel or weaver-spec imports to `executor.py` | Weaver Stack goes in `KernelBackedExecutor`; see [architecture.md § Weaver Stack](architecture.md#weaver-stack-guardrail) |
@@ -64,7 +64,7 @@ Never generate these in ChainWeaver code:
 | Refactor tests to use shared fixtures | ✅ Yes | Put new schemas in `helpers.py`, fixtures in `conftest.py` |
 | Remove an unused import | ✅ Yes | Ruff already flags these |
 | Inline a private helper | ✅ Yes | If it reduces complexity |
-| Convert `StepRecord`/`ExecutionResult` to Pydantic | ❌ No | See forbidden patterns |
+| Convert `StepRecord`/`ExecutionResult` to Pydantic | ✅ Done in #20 | Errors are now `error_type` / `error_message` strings |
 | Add a new field to `Flow` or `FlowStep` | ⚠️ Careful | Check `model_dump()` serialization; update tests |
 | Change exception hierarchy | ⚠️ Careful | May break downstream `except` clauses |
 | Add network I/O to executor.py | ❌ No | Hard invariant |

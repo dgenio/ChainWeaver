@@ -332,7 +332,10 @@ def run_compiled(record_id: str) -> tuple[dict[str, Any], float]:
         last = failed[-1] if failed else None
         detail = ""
         if last is not None:
-            detail = f": step {last.step_index} ('{last.tool_name}') failed with {last.error!r}"
+            detail = (
+                f": step {last.step_index} ('{last.tool_name}') failed with "
+                f"{last.error_type}: {last.error_message}"
+            )
         raise AssertionError(f"Compiled flow execution failed{detail}")
 
     if result.final_output is None:
