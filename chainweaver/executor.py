@@ -61,6 +61,109 @@ def _exc_to_strings(exc: Exception) -> tuple[str, str]:
     return type(exc).__name__, str(exc)
 
 
+def _schema_field_shape(schema: type[BaseModel]) -> dict[str, str]:
+    """Return ``{field_name: type_repr}`` for a Pydantic schema.
+
+    Used by :meth:`FlowExecutor.explain_flow` to project per-step input and
+    output shapes without instantiating the model.
+    """
+    shape: dict[str, str] = {}
+    for name, info in schema.model_fields.items():
+        annotation = info.annotation
+        type_repr = getattr(annotation, "__name__", None) or str(annotation)
+        shape[name] = type_repr
+    return shape
+
+
+class StepPlan(BaseModel):
+    """Static plan for a single step (issue #73).
+
+    Captures everything :meth:`FlowExecutor.explain_flow` knows about a step
+    *without* calling its tool function.  Schema fields are reported as
+    ``{field_name: type_str}`` pairs derived from
+    ``BaseModel.model_fields``.
+
+    Attributes:
+        step_index: Zero-based position of the step in the flow.
+        tool_name: Name of the tool the step would invoke.
+        input_sources: For each tool input field, a human-readable
+            description of where the value would come from
+            (``"context['key']"``, ``"literal(<value>)"``, or
+            ``"context (full)"`` for an empty mapping).
+        input_schema: ``{field_name: type_str}`` for the tool's
+            ``input_schema``.  Empty when the tool is unresolved.
+        output_schema: ``{field_name: type_str}`` for the tool's
+            ``output_schema``.  Empty when the tool is unresolved.
+        unresolved_keys: Mapping keys that would not resolve against the
+            current cumulative context (warnings, not errors).
+        warnings: Free-form warnings flagged for this step (e.g. the
+            tool is not registered).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    step_index: int
+    tool_name: str
+    input_sources: dict[str, str]
+    input_schema: dict[str, str] = Field(default_factory=dict)
+    output_schema: dict[str, str] = Field(default_factory=dict)
+    unresolved_keys: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ExecutionPlan(BaseModel):
+    """A read-only execution plan returned by :meth:`FlowExecutor.explain_flow`.
+
+    The plan never calls any tool functions; it only inspects the flow,
+    its registered tools, and Pydantic schemas.  Any unresolvable input
+    mappings are flagged as warnings instead of raising exceptions.
+
+    Attributes:
+        flow_name: Name of the flow that was explained.
+        step_count: Number of steps in the flow.
+        steps: Per-step :class:`StepPlan` records, in order.
+        final_context_shape: ``{field_name: type_str}`` for the keys that
+            would be present in the cumulative context after all steps,
+            assuming every tool succeeded.
+        all_resolvable: ``True`` when no step has unresolved mapping keys
+            or warnings.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    flow_name: str
+    step_count: int
+    steps: list[StepPlan] = Field(default_factory=list)
+    final_context_shape: dict[str, str] = Field(default_factory=dict)
+    all_resolvable: bool = True
+
+    def __str__(self) -> str:
+        check = "OK" if self.all_resolvable else "WARN"
+        lines = [
+            f"Flow: {self.flow_name} ({self.step_count} steps) [{check}]",
+            "─" * 40,
+        ]
+        for plan in self.steps:
+            lines.append(f"Step {plan.step_index}: {plan.tool_name}")
+            for tgt, src in plan.input_sources.items():
+                lines.append(f"  in  {tgt}: {src}")
+            if plan.output_schema:
+                shape = ", ".join(f"{k}: {v}" for k, v in plan.output_schema.items())
+                lines.append(f"  out {{{shape}}}")
+            for warn in plan.warnings:
+                lines.append(f"  ! {warn}")
+            lines.append("")
+        if self.final_context_shape:
+            shape = ", ".join(f"{k}: {v}" for k, v in self.final_context_shape.items())
+            lines.append(f"Final context: {{{shape}}}")
+        lines.append(
+            "✓ All input mappings resolvable"
+            if self.all_resolvable
+            else "⚠ Unresolved mappings present"
+        )
+        return "\n".join(lines)
+
+
 class StepRecord(BaseModel):
     """Record of a single executed step.
 
@@ -230,6 +333,113 @@ class FlowExecutor:
         if name not in self._tools:
             raise ToolNotFoundError(name)
         return self._tools[name]
+
+    def explain_flow(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+    ) -> ExecutionPlan:
+        """Build a static execution plan for *flow_name* without calling any tool.
+
+        Resolves each step's input mapping against a *projected* cumulative
+        context (initial input + every previous step's output schema), reports
+        the schema shapes pulled from each tool's Pydantic models, and flags
+        any unresolvable mapping keys as warnings.  Tool functions are
+        **not** invoked.
+
+        Args:
+            flow_name: Name of the flow to explain.
+            initial_input: The initial context the caller would pass to
+                :meth:`execute_flow`.
+
+        Returns:
+            A populated :class:`ExecutionPlan`.
+
+        Raises:
+            FlowNotFoundError: When *flow_name* is not registered.
+        """
+        flow = self._registry.get_flow(flow_name)
+        steps: list[FlowStep | DAGFlowStep]
+        if isinstance(flow, DAGFlow):
+            # Flatten DAG levels so the plan still reports a deterministic order.
+            ordered: list[DAGFlowStep] = []
+            for level in self._compute_dag_levels(flow):
+                ordered.extend(level)
+            steps = list(ordered)
+        else:
+            steps = list(flow.steps)
+
+        projected_context: dict[str, str] = {k: type(v).__name__ for k, v in initial_input.items()}
+        plans: list[StepPlan] = []
+        any_warnings = False
+
+        for idx, step in enumerate(steps):
+            warnings: list[str] = []
+            unresolved: list[str] = []
+
+            try:
+                tool = self.get_tool(step.tool_name)
+            except ToolNotFoundError:
+                tool = None
+                warnings.append(f"Tool '{step.tool_name}' is not registered.")
+
+            input_sources = self._describe_input_sources(step, projected_context, unresolved)
+            input_schema_shape: dict[str, str] = {}
+            output_schema_shape: dict[str, str] = {}
+
+            if tool is not None:
+                input_schema_shape = _schema_field_shape(tool.input_schema)
+                output_schema_shape = _schema_field_shape(tool.output_schema)
+                # Merge the projected output keys into the cumulative context.
+                for field_name, field_type in output_schema_shape.items():
+                    projected_context[field_name] = field_type
+
+            if unresolved:
+                any_warnings = True
+            if warnings:
+                any_warnings = True
+
+            plans.append(
+                StepPlan(
+                    step_index=idx,
+                    tool_name=step.tool_name,
+                    input_sources=input_sources,
+                    input_schema=input_schema_shape,
+                    output_schema=output_schema_shape,
+                    unresolved_keys=unresolved,
+                    warnings=warnings,
+                )
+            )
+
+        return ExecutionPlan(
+            flow_name=flow_name,
+            step_count=len(steps),
+            steps=plans,
+            final_context_shape=dict(projected_context),
+            all_resolvable=not any_warnings,
+        )
+
+    def _describe_input_sources(
+        self,
+        step: FlowStep,
+        projected_context: dict[str, str],
+        unresolved: list[str],
+    ) -> dict[str, str]:
+        """Return a per-input-field description of the resolved value source."""
+        if not step.input_mapping:
+            return {"<all>": "context (full)"}
+
+        sources: dict[str, str] = {}
+        for target_key, raw in step.input_mapping.items():
+            if isinstance(raw, str):
+                if raw in projected_context:
+                    sources[target_key] = f"context['{raw}']"
+                else:
+                    sources[target_key] = f"context['{raw}'] (UNRESOLVED)"
+                    unresolved.append(raw)
+            else:
+                sources[target_key] = f"literal({raw!r})"
+        return sources
 
     def execute_flow(
         self,

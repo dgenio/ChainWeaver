@@ -42,7 +42,13 @@ from chainweaver.exceptions import (
     ToolOutputSizeError,
     ToolTimeoutError,
 )
-from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
+from chainweaver.executor import (
+    ExecutionPlan,
+    ExecutionResult,
+    FlowExecutor,
+    StepPlan,
+    StepRecord,
+)
 from chainweaver.flow import (
     DAGFlow,
     DAGFlowStep,
@@ -68,6 +74,7 @@ __all__ = [
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "ExecutionPlan",
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",
@@ -82,6 +89,7 @@ __all__ = [
     "RedactionPolicy",
     "RetryPolicy",
     "SchemaValidationError",
+    "StepPlan",
     "StepRecord",
     "Tool",
     "ToolDefinitionError",
