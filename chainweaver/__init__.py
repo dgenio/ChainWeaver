@@ -51,6 +51,7 @@ from chainweaver.flow import (
     RetryPolicy,
     validate_dag_topology,
 )
+from chainweaver.log_utils import RedactionPolicy
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -78,6 +79,7 @@ __all__ = [
     "FlowRegistry",
     "FlowStep",
     "InputMappingError",
+    "RedactionPolicy",
     "RetryPolicy",
     "SchemaValidationError",
     "StepRecord",

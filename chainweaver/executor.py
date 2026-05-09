@@ -33,7 +33,13 @@ from chainweaver.exceptions import (
     ToolTimeoutError,
 )
 from chainweaver.flow import DAGFlow, DAGFlowStep, FlowStep, RetryPolicy, validate_dag_topology
-from chainweaver.log_utils import get_logger, log_step_end, log_step_error, log_step_start
+from chainweaver.log_utils import (
+    RedactionPolicy,
+    get_logger,
+    log_step_end,
+    log_step_error,
+    log_step_start,
+)
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -173,6 +179,12 @@ class FlowExecutor:
             per-execution cost-avoided estimation.  When set, every
             :class:`ExecutionResult` carries a populated ``cost_report``;
             when ``None`` (the default), ``cost_report`` stays ``None``.
+        redaction_policy: Optional
+            :class:`~chainweaver.log_utils.RedactionPolicy` applied to log
+            output for every step.  When ``None`` (the default), inputs and
+            outputs are logged verbatim.  The trace itself
+            (``ExecutionResult.execution_log``) always stores raw values —
+            redaction is for logs and display only.
 
     Example::
 
@@ -191,10 +203,12 @@ class FlowExecutor:
         registry: FlowRegistry,
         *,
         cost_profile: CostProfile | None = None,
+        redaction_policy: RedactionPolicy | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
         self._cost_profile = cost_profile
+        self._redaction_policy = redaction_policy
 
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
@@ -532,7 +546,13 @@ class FlowExecutor:
                 inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
             )
 
-        log_step_start(_logger, step_index, step.tool_name, inputs)
+        log_step_start(
+            _logger,
+            step_index,
+            step.tool_name,
+            inputs,
+            redaction=self._redaction_policy,
+        )
 
         retry_errors: list[str] = []
         outputs: dict[str, Any] | None = None
@@ -556,7 +576,13 @@ class FlowExecutor:
             )
 
         assert outputs is not None
-        log_step_end(_logger, step_index, step.tool_name, outputs)
+        log_step_end(
+            _logger,
+            step_index,
+            step.tool_name,
+            outputs,
+            redaction=self._redaction_policy,
+        )
         return _record(
             inputs=inputs,
             outputs=outputs,
