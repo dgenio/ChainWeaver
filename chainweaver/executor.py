@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.exceptions import (
     FlowExecutionError,
     InputMappingError,
@@ -111,6 +112,10 @@ class ExecutionResult(BaseModel):
         ended_at: UTC timestamp when the execution finished.
         total_duration_ms: Wall-clock duration of the full execution in
             milliseconds, measured with :func:`time.perf_counter`.
+        cost_report: Optional :class:`~chainweaver.cost.CostReport` estimating
+            the LLM-call cost and latency avoided by running this compiled
+            flow.  ``None`` unless the executor was constructed with a
+            ``cost_profile``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -123,6 +128,7 @@ class ExecutionResult(BaseModel):
     started_at: datetime
     ended_at: datetime
     total_duration_ms: float
+    cost_report: CostReport | None = None
 
 
 class FlowExecutor:
@@ -147,6 +153,10 @@ class FlowExecutor:
     Args:
         registry: The :class:`~chainweaver.registry.FlowRegistry` that holds
             the flows to execute.
+        cost_profile: Optional :class:`~chainweaver.cost.CostProfile` enabling
+            per-execution cost-avoided estimation.  When set, every
+            :class:`ExecutionResult` carries a populated ``cost_report``;
+            when ``None`` (the default), ``cost_report`` stays ``None``.
 
     Example::
 
@@ -160,9 +170,15 @@ class FlowExecutor:
         print(result.trace_id)      # e.g. "9b1c8e0d2a5f4..."
     """
 
-    def __init__(self, registry: FlowRegistry) -> None:
+    def __init__(
+        self,
+        registry: FlowRegistry,
+        *,
+        cost_profile: CostProfile | None = None,
+    ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
+        self._cost_profile = cost_profile
 
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
@@ -333,6 +349,13 @@ class FlowExecutor:
         """Build an :class:`ExecutionResult` and stamp the closing timestamps."""
         ended_at = _now_utc()
         total_ms = (time.perf_counter() - perf_start) * 1000.0
+        cost_report: CostReport | None = None
+        if self._cost_profile is not None:
+            cost_report = compute_cost_report(
+                steps_executed=len(execution_log),
+                actual_execution_ms=total_ms,
+                profile=self._cost_profile,
+            )
         return ExecutionResult(
             flow_name=flow_name,
             success=success,
@@ -342,6 +365,7 @@ class FlowExecutor:
             started_at=started_at,
             ended_at=ended_at,
             total_duration_ms=total_ms,
+            cost_report=cost_report,
         )
 
     def _validate_flow_schema(

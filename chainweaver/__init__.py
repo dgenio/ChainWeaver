@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver.builder import FlowBuilder, FlowBuilderError
+from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -52,6 +53,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ChainWeaverError",
+    "CostProfile",
+    "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
