@@ -38,8 +38,6 @@ class FlowRegistry:
         flow = registry.get_flow("my_flow")
 
     # TODO (Phase 2): Persist and reload flows from JSON/YAML storage.
-    # TODO (Phase 2): Add runtime chain observation — record ad-hoc tool
-    #   call sequences emitted by agents and suggest new flows automatically.
     """
 
     def __init__(self) -> None:

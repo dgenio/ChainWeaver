@@ -30,6 +30,7 @@ and tools, the same flow produces the same output every time.
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
+| `observation.py` | `TraceRecorder` + `ObservedTrace` for ad-hoc tool sequence capture | In-memory storage only; persistence deferred |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
 
 ---

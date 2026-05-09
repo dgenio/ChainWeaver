@@ -43,6 +43,7 @@ chainweaver/
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
+├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)

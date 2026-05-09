@@ -40,6 +40,7 @@ from chainweaver.log_utils import (
     log_step_error,
     log_step_start,
 )
+from chainweaver.observation import TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -288,6 +289,11 @@ class FlowExecutor:
             outputs are logged verbatim.  The trace itself
             (``ExecutionResult.execution_log``) always stores raw values —
             redaction is for logs and display only.
+        trace_recorder: Optional
+            :class:`~chainweaver.observation.TraceRecorder` that captures
+            an :class:`~chainweaver.observation.ObservedTrace` for every
+            ``execute_flow`` call so ad-hoc agent sequences and compiled
+            flow runs share a uniform observation store.
 
     Example::
 
@@ -307,11 +313,13 @@ class FlowExecutor:
         *,
         cost_profile: CostProfile | None = None,
         redaction_policy: RedactionPolicy | None = None,
+        trace_recorder: TraceRecorder | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
         self._cost_profile = cost_profile
         self._redaction_policy = redaction_policy
+        self._trace_recorder = trace_recorder
 
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
@@ -596,7 +604,7 @@ class FlowExecutor:
                 actual_execution_ms=total_ms,
                 profile=self._cost_profile,
             )
-        return ExecutionResult(
+        result = ExecutionResult(
             flow_name=flow_name,
             success=success,
             final_output=final_output,
@@ -607,6 +615,24 @@ class FlowExecutor:
             total_duration_ms=total_ms,
             cost_report=cost_report,
         )
+        if self._trace_recorder is not None:
+            self._record_observed_trace(result)
+        return result
+
+    def _record_observed_trace(self, result: ExecutionResult) -> None:
+        """Mirror an :class:`ExecutionResult` into the configured TraceRecorder."""
+        recorder = self._trace_recorder
+        assert recorder is not None
+        ad_hoc_id = recorder.start_trace(source=f"executor:{result.flow_name}")
+        for record in result.execution_log:
+            recorder.record_step(
+                ad_hoc_id,
+                record.tool_name,
+                inputs=record.inputs,
+                outputs=record.outputs,
+                duration_ms=record.duration_ms,
+            )
+        recorder.end_trace(ad_hoc_id)
 
     def _validate_flow_schema(
         self,

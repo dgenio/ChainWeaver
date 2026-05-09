@@ -58,6 +58,7 @@ from chainweaver.flow import (
     validate_dag_topology,
 )
 from chainweaver.log_utils import RedactionPolicy
+from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -86,6 +87,8 @@ __all__ = [
     "FlowRegistry",
     "FlowStep",
     "InputMappingError",
+    "ObservedStep",
+    "ObservedTrace",
     "RedactionPolicy",
     "RetryPolicy",
     "SchemaValidationError",
@@ -96,6 +99,7 @@ __all__ = [
     "ToolNotFoundError",
     "ToolOutputSizeError",
     "ToolTimeoutError",
+    "TraceRecorder",
     "tool",
     "validate_dag_topology",
 ]
