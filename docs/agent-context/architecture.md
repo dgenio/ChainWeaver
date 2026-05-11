@@ -22,11 +22,13 @@ and tools, the same flow produces the same output every time.
 | Module | Responsibility | Key constraint |
 |--------|---------------|----------------|
 | `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
+| `compat.py` | `schema_fingerprint()`, `CompatibilityIssue`, `check_flow_compatibility()` | Pure utility; no execution or I/O |
+| `compiler.py` | `compile_flow()`: static schema flow validation pre-execution | Returns `CompilationResult`; no execution logic |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
-| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
-| `flow.py` | Define `FlowStep`, `Flow` (linear), `DAGFlowStep`, `DAGFlow`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
-| `registry.py` | Store and retrieve `Flow` and `DAGFlow` by name; validates DAG topology at registration | In-memory; intentionally simple for later wrapping |
-| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context | **No LLM, no network I/O, no randomness** |
+| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
+| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
+| `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | In-memory; intentionally simple for later wrapping |
+| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection | **No LLM, no network I/O, no randomness** |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
@@ -81,10 +83,8 @@ files that conflict with these names:
 
 | Reserved name | Issue | Purpose |
 |---------------|-------|---------|
-| `compiler.py` | #71 | Compile-time schema flow validation |
 | `analyzer.py` | #77 | Offline flow analyzer |
 | `observer.py` | #78 | Runtime flow observer |
-| `compat.py` | #48 | Schema fingerprinting |
 | `viz.py` | #79 | Flow visualization |
 | `cli.py` | #44 | CLI interface |
 | `mcp/` | #70, #72 | MCP adapter + flow server |

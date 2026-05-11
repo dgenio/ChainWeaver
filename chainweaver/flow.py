@@ -13,12 +13,28 @@ registration time via :func:`validate_dag_topology`.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from chainweaver.exceptions import DAGDefinitionError
+
+
+class FlowStatus(str, Enum):
+    """Lifecycle status of a flow.
+
+    Attributes:
+        ACTIVE: Normal operation — the flow can be executed.
+        NEEDS_REVIEW: Flagged by drift detection or manual review.
+        DISABLED: Manually disabled — excluded from execution.
+    """
+
+    ACTIVE = "active"
+    NEEDS_REVIEW = "needs_review"
+    DISABLED = "disabled"
 
 
 class FlowStep(BaseModel):
@@ -98,12 +114,15 @@ class Flow(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
+    version: str = "0.0.0"
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
+    status: FlowStatus = FlowStatus.ACTIVE
     trigger_conditions: dict[str, Any] | None = None
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
+    tool_schema_hashes: dict[str, str] | None = None
 
 
 # TODO (Phase 2): Add conditional branching — a step that inspects
@@ -111,6 +130,23 @@ class Flow(BaseModel):
 
 # TODO (Phase 2): Add determinism scoring so that partially
 # deterministic flows can be marked and handled appropriately.
+
+
+@dataclass
+class DriftInfo:
+    """Describes a schema drift between a flow's stored hash and a tool's current hash.
+
+    Attributes:
+        flow_name: Name of the affected flow.
+        tool_name: Name of the tool whose schema drifted.
+        expected_hash: The hash stored in the flow's ``tool_schema_hashes``.
+        actual_hash: The tool's current ``schema_hash``.
+    """
+
+    flow_name: str
+    tool_name: str
+    expected_hash: str
+    actual_hash: str
 
 
 # ---------------------------------------------------------------------------
@@ -220,12 +256,15 @@ class DAGFlow(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
+    version: str = "0.0.0"
     description: str
     steps: list[DAGFlowStep]
     deterministic: bool = True
+    status: FlowStatus = FlowStatus.ACTIVE
     trigger_conditions: dict[str, Any] | None = None
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
+    tool_schema_hashes: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------
