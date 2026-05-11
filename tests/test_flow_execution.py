@@ -690,7 +690,7 @@ class TestToolZeroDivisionError:
 
 
 class TestBoundaryValues:
-    """Negative numbers and zero through the double\u2192add\u2192format chain."""
+    """Negative numbers and zero through the double\u2192add\u2192format flow."""
 
     def test_negative_input(self, executor: FlowExecutor) -> None:
         result = executor.execute_flow("double_add_format", {"number": -3})
@@ -995,7 +995,7 @@ class TestDiamondDAG:
 
 
 class TestMixedDepthDAG:
-    """Non-uniform depth: A → B → D, A → C → D (mixed depth chains)."""
+    """Non-uniform depth: A → B → D, A → C → D (mixed depth flows)."""
 
     def test_mixed_depth_all_steps_complete(self) -> None:
         class S(BaseModel):

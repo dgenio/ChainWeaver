@@ -23,6 +23,16 @@ They are non-negotiable.
 > :mod:`random`. The default ``jitter=False`` preserves full determinism;
 > users opt in per-step.
 
+> **Trace-id carve-out (since #20):** :class:`FlowExecutor` calls
+> ``uuid.uuid4().hex`` (via the private ``_new_trace_id`` helper) to mint
+> an opaque correlation identifier on every ``execute_flow`` call. The
+> ``uuid`` module uses OS entropy, but the trace id is recorded as
+> metadata only — it does not influence which tools run, the order they
+> run in, or any value passed between them. ``ExecutionResult.trace_id``
+> changes between runs by design (so logs can be correlated across
+> systems); every other field is fully deterministic given the same
+> input and tools.
+
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 

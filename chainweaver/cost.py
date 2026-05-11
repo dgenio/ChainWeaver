@@ -46,7 +46,13 @@ class CostReport(BaseModel):
     would *additionally* spend.  ChainWeaver itself never calls an LLM.
 
     Attributes:
-        steps_executed: Total number of steps recorded in the execution log.
+        steps_executed: Number of *tool* steps that ran during the
+            execution (excludes the synthetic flow-level
+            schema-validation records that may be appended on input or
+            output validation failure).  Threaded through from
+            ``FlowExecutor._make_result``; falls back to
+            ``len(execution_log)`` only when the caller didn't supply a
+            tool-step count.
         llm_calls_avoided: ``max(0, steps_executed - 1)`` — one LLM call is
             assumed avoided per inter-step transition.
         latency_saved_ms: ``llm_calls_avoided *profile.avg_llm_latency_ms``.
@@ -91,7 +97,10 @@ def compute_cost_report(
     """Compute a :class:`CostReport` from execution metadata and a profile.
 
     Args:
-        steps_executed: Number of steps recorded in the execution log.
+        steps_executed: Number of *tool* steps executed (excluding any
+            flow-level schema-validation records).  This matches the
+            ``tool_step_count`` threaded by
+            ``FlowExecutor._make_result``.
         actual_execution_ms: Wall-clock duration of the execution.
         profile: The :class:`CostProfile` providing per-call assumptions.
 
