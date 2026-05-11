@@ -41,7 +41,7 @@ def _node_id(prefix: str, idx: int) -> str:
 
 
 def flow_to_ascii(flow: Flow | DAGFlow) -> str:
-    """Render *flow* as a single-line ASCII pipeline.
+    """Render *flow* as a single-line ASCII flow diagram.
 
     Linear flows produce ``[a] --> [b] --> [c]``; DAG flows render each
     dependency as a separate line ``[a] --> [b]`` so that branching is

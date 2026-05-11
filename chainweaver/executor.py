@@ -289,9 +289,13 @@ class ExecutionResult(BaseModel):
         final_output: The merged execution context (initial input combined
             with all step outputs), or ``None`` on failure.
         execution_log: Ordered list of :class:`StepRecord` objects.  Contains
-            one entry per executed step, plus up to two additional entries
-            for flow-level input/output schema validation when
-            ``input_schema`` or ``output_schema`` are set on the flow.
+            one entry per executed tool step.  When ``input_schema`` or
+            ``output_schema`` is set on the flow and the corresponding
+            validation **fails**, a synthetic record is appended carrying
+            the validation error (``step_index == -1`` for input failures,
+            ``step_index == len(steps)`` for output failures); successful
+            validations do not produce records, so the log is unchanged
+            on the happy path.
         trace_id: UUID4 hex string assigned at the start of the execution.
             Use this to correlate the result with logs or external systems.
         started_at: UTC timestamp when the execution began.
@@ -800,6 +804,7 @@ class FlowExecutor:
                     started_at=flow_started_at,
                     perf_start=flow_t0,
                     initial_input=initial_input,
+                    tool_step_count=0,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -810,7 +815,9 @@ class FlowExecutor:
             log.append(record)
 
             if not record.success:
-                _logger.error("Flow '%s' aborted at step %d", flow_name, idx)
+                _logger.error(
+                    "Flow '%s' aborted at step %d | trace_id=%s", flow_name, idx, trace_id
+                )
                 return self._make_result(
                     flow_name=flow_name,
                     success=False,
@@ -862,6 +869,7 @@ class FlowExecutor:
                     started_at=flow_started_at,
                     perf_start=flow_t0,
                     initial_input=initial_input,
+                    tool_step_count=len(log),
                 )
 
         _logger.info("Flow '%s' completed successfully | trace_id=%s", flow_name, trace_id)
@@ -891,14 +899,28 @@ class FlowExecutor:
         started_at: datetime,
         perf_start: float,
         initial_input: dict[str, Any],
+        tool_step_count: int | None = None,
     ) -> ExecutionResult:
-        """Build an :class:`ExecutionResult` and stamp the closing timestamps."""
+        """Build an :class:`ExecutionResult` and stamp the closing timestamps.
+
+        Args:
+            tool_step_count: Number of *tool* step records in
+                ``execution_log`` (excluding the synthetic flow-level
+                schema-validation records that may carry ``step_index ==
+                -1`` or ``step_index == len(steps)``).  Used to compute
+                ``cost_report.llm_calls_avoided`` so validation records
+                don't inflate the estimate.  When ``None`` (the default),
+                falls back to ``len(execution_log)`` for callers that do
+                not append validation records.
+        """
         ended_at = _now_utc()
         total_ms = (time.perf_counter() - perf_start) * 1000.0
         cost_report: CostReport | None = None
         if self._cost_profile is not None:
             cost_report = compute_cost_report(
-                steps_executed=len(execution_log),
+                steps_executed=(
+                    tool_step_count if tool_step_count is not None else len(execution_log)
+                ),
                 actual_execution_ms=total_ms,
                 profile=self._cost_profile,
             )
@@ -1028,6 +1050,12 @@ class FlowExecutor:
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Mutable holder so ``_invoke_tool`` can report how many times the
+        # primary tool was actually called.  Threading this through (instead
+        # of deriving from ``len(retry_errors)``) keeps ``retry_count``
+        # accurate when ``on_error="skip"`` or ``on_error="fallback:…"``
+        # appends extra entries to ``retry_errors`` for context.
+        tool_attempts = [0]
 
         def _record(
             *,
@@ -1039,16 +1067,11 @@ class FlowExecutor:
             retry_errors: list[str],
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
-            # On success after retries: every retry failure is in retry_errors
-            # (the successful attempt is not appended), so retry_count == len.
-            # On failure: retry_errors contains every failed attempt; the
-            # number of retries is len-1 (the first attempt is not a retry).
-            if success:
-                retry_count = len(retry_errors)
-            elif retry_errors:
-                retry_count = len(retry_errors) - 1
-            else:
-                retry_count = 0
+            # ``retry_count`` = retries beyond the initial invocation.
+            # Derive from the actual primary-tool attempt count so that
+            # ``on_error="skip"`` / ``on_error="fallback:…"`` paths (which
+            # may decorate ``retry_errors``) don't distort the value.
+            retry_count = max(0, tool_attempts[0] - 1)
             return StepRecord(
                 step_index=step_index,
                 tool_name=step.tool_name,
@@ -1094,7 +1117,7 @@ class FlowExecutor:
         final_raw_exc: Exception | None = None
 
         try:
-            outputs = self._invoke_tool(tool, inputs, step.retry, retry_errors)
+            outputs = self._invoke_tool(tool, inputs, step.retry, retry_errors, tool_attempts)
         except Exception as exc:
             final_raw_exc = exc
 
@@ -1133,14 +1156,19 @@ class FlowExecutor:
         inputs: dict[str, Any],
         policy: RetryPolicy | None,
         retry_errors: list[str],
+        attempts: list[int],
     ) -> dict[str, Any]:
         """Invoke ``tool.run(inputs)``, optionally retrying via *policy*.
 
         Each failed attempt's message is appended to *retry_errors* in order.
-        The final exception (after exhaustion or a non-retryable error) is
-        re-raised; the caller is responsible for wrapping it.
+        Every primary-tool invocation increments ``attempts[0]`` (a mutable
+        single-element holder), so the caller can compute ``retry_count``
+        without conflating it with on-error decorations.  The final
+        exception (after exhaustion or a non-retryable error) is re-raised;
+        the caller is responsible for wrapping it.
         """
         if policy is None:
+            attempts[0] += 1
             try:
                 return tool.run(inputs)
             except Exception as exc:
@@ -1158,6 +1186,7 @@ class FlowExecutor:
         )
 
         def _wrapped() -> dict[str, Any]:
+            attempts[0] += 1
             try:
                 return tool.run(inputs)
             except Exception as exc:
@@ -1371,6 +1400,7 @@ class FlowExecutor:
                     started_at=flow_started_at,
                     perf_start=flow_t0,
                     initial_input=initial_input,
+                    tool_step_count=0,
                 )
 
         context: dict[str, Any] = dict(initial_input)
@@ -1434,10 +1464,11 @@ class FlowExecutor:
                 if not record.success:
                     log.extend(level_records)
                     _logger.error(
-                        "DAGFlow '%s' aborted at step %d (%s)",
+                        "DAGFlow '%s' aborted at step %d (%s) | trace_id=%s",
                         flow.name,
                         record.step_index,
                         step.tool_name,
+                        trace_id,
                     )
                     return self._make_result(
                         flow_name=flow.name,
@@ -1527,6 +1558,7 @@ class FlowExecutor:
                     started_at=flow_started_at,
                     perf_start=flow_t0,
                     initial_input=initial_input,
+                    tool_step_count=len(log),
                 )
 
         _logger.info(

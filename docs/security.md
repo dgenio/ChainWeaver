@@ -18,7 +18,7 @@ omits behaviours that would expand its security surface:
 | Use randomness in `executor.py` | Hard executor invariant 3 (jitter is opt-in inside `flow.py`'s `RetryPolicy`) |
 | Persist data, logs, or traces by default | The library is in-memory; persistence is the application's choice |
 | Send telemetry | The library has no outbound calls |
-| Pull additional dependencies at runtime | The runtime deps are limited to `pydantic` and `tenacity` |
+| Pull additional dependencies at runtime | The runtime deps are limited to `pydantic`, `tenacity`, `typer`, and `packaging` |
 
 Network I/O — when needed — happens inside individual `Tool.fn` callables
 that the application registers, not in the executor itself.
@@ -95,9 +95,9 @@ applied recursively to nested dicts and lists.
    Apply your own least-privilege practices to tool implementations —
    limit credentials they can read, don't log secrets inside the
    function body, prefer scoped service accounts.
-6. **Pin runtime dependencies.**  `pydantic` and `tenacity` are the only
-   runtime dependencies; both are well-maintained, but pinning protects
-   against supply-chain regressions.
+6. **Pin runtime dependencies.**  `pydantic`, `tenacity`, `typer`, and
+   `packaging` are the runtime dependencies; all four are well-maintained,
+   but pinning protects against supply-chain regressions.
 
 ---
 

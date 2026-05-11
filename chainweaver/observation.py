@@ -1,4 +1,4 @@
-"""Runtime chain observation and trace capture (issue #11).
+"""Runtime flow observation and trace capture (issue #11).
 
 While ``ExecutionResult`` (issue #20) records *every* compiled flow run,
 many tool sequences happen *outside* of registered flows: agents call tools

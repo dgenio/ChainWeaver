@@ -189,7 +189,7 @@ class Flow(BaseModel):
     tool_schema_hashes: dict[str, str] | None = None
 
     def to_ascii(self) -> str:
-        """Return a single-line ASCII pipeline diagram (issue #79)."""
+        """Return a single-line ASCII flow diagram (issue #79)."""
         from chainweaver.viz import flow_to_ascii
 
         return flow_to_ascii(self)

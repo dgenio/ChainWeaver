@@ -1,4 +1,4 @@
-"""Tests for runtime chain observation (issue #11)."""
+"""Tests for runtime flow observation (issue #11)."""
 
 from __future__ import annotations
 
