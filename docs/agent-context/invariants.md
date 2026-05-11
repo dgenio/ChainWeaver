@@ -16,6 +16,23 @@ They are non-negotiable.
 | 2 | **No network I/O** in `executor.py` | Network I/O belongs in tool functions, not the orchestrator. |
 | 3 | **No randomness** in `executor.py` | Random routing or jitter would break the "compiled, not interpreted" guarantee. |
 
+> **Jitter carve-out (since #76):** :class:`RetryPolicy` accepts an opt-in
+> ``jitter=True`` that multiplies its computed backoff by a uniform sample.
+> The :mod:`random` import lives in ``flow.py`` (inside
+> ``RetryPolicy.compute_delay``); ``executor.py`` itself never imports
+> :mod:`random`. The default ``jitter=False`` preserves full determinism;
+> users opt in per-step.
+
+> **Trace-id carve-out (since #20):** :class:`FlowExecutor` calls
+> ``uuid.uuid4().hex`` (via the private ``_new_trace_id`` helper) to mint
+> an opaque correlation identifier on every ``execute_flow`` call. The
+> ``uuid`` module uses OS entropy, but the trace id is recorded as
+> metadata only — it does not influence which tools run, the order they
+> run in, or any value passed between them. ``ExecutionResult.trace_id``
+> changes between runs by design (so logs can be correlated across
+> systems); every other field is fully deterministic given the same
+> input and tools.
+
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 
@@ -48,7 +65,7 @@ Never generate these in ChainWeaver code:
 | Relative imports from `chainweaver` internals outside the package | Breaks package boundaries |
 | Adding deps without updating `pyproject.toml` `[project.dependencies]` | Invisible dependency |
 | Secrets, API keys, or credentials in code | Security invariant |
-| Converting `StepRecord`/`ExecutionResult` to Pydantic `BaseModel` | They carry `Exception`; see [architecture.md § Design traps](architecture.md#design-traps) |
+| Re-introducing a live `Exception` field on `StepRecord`/`ExecutionResult` | Both are Pydantic models since #20; errors are stored as `error_type` / `error_message` strings so the trace is JSON-serializable. See [architecture.md § Design traps](architecture.md#design-traps) |
 | Renaming `log_utils.py` back to `logging.py` | Stdlib shadowing; see [architecture.md § Design traps](architecture.md#design-traps) |
 | Merging `tests/helpers.py` into `conftest.py` | Intentional split; see [architecture.md § Design traps](architecture.md#design-traps) |
 | Adding agent-kernel or weaver-spec imports to `executor.py` | Weaver Stack goes in `KernelBackedExecutor`; see [architecture.md § Weaver Stack](architecture.md#weaver-stack-guardrail) |
@@ -64,7 +81,7 @@ Never generate these in ChainWeaver code:
 | Refactor tests to use shared fixtures | ✅ Yes | Put new schemas in `helpers.py`, fixtures in `conftest.py` |
 | Remove an unused import | ✅ Yes | Ruff already flags these |
 | Inline a private helper | ✅ Yes | If it reduces complexity |
-| Convert `StepRecord`/`ExecutionResult` to Pydantic | ❌ No | See forbidden patterns |
+| Convert `StepRecord`/`ExecutionResult` to Pydantic | ✅ Done in #20 | Errors are now `error_type` / `error_message` strings |
 | Add a new field to `Flow` or `FlowStep` | ⚠️ Careful | Check `model_dump()` serialization; update tests |
 | Change exception hierarchy | ⚠️ Careful | May break downstream `except` clauses |
 | Add network I/O to executor.py | ❌ No | Hard invariant |

@@ -442,6 +442,8 @@ All errors are typed and traceable:
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 | `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
+| `ToolTimeoutError` | A `Tool` with `timeout_seconds` set exceeds the configured wall-clock cap |
+| `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 
 All exceptions inherit from `ChainWeaverError`.

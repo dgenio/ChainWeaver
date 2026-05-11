@@ -5,12 +5,90 @@ handlers or configure log levels.  A :class:`logging.NullHandler` is added to
 the ``chainweaver`` package logger in ``__init__.py`` so that applications can
 configure logging centrally (e.g. via :func:`logging.basicConfig` or
 :func:`logging.config.dictConfig`).
+
+The module also provides :class:`RedactionPolicy` (issue #36): an opt-in
+filter that masks sensitive keys, applies regex-based value redaction, and
+truncates long values before they reach a log record.  Redaction is applied
+to **logs and display only** — the raw inputs/outputs are still captured in
+the :class:`~chainweaver.executor.StepRecord` so the trace remains
+inspectable when a caller has the right authorization.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+DEFAULT_REDACT_KEYS: frozenset[str] = frozenset(
+    {"password", "token", "api_key", "apikey", "secret", "authorization"}
+)
+"""Common sensitive field names redacted by default."""
+
+
+class RedactionPolicy(BaseModel):
+    """Configurable redaction rules for structured log records.
+
+    Attributes:
+        redact_keys: Lower-cased dict-key names whose values should be
+            replaced with ``redact_replacement``.  Matching is case-insensitive
+            and recursive into nested dicts and lists.
+        redact_pattern: Optional compiled regex applied to *string* values;
+            substring matches are replaced with ``redact_replacement``.
+        max_value_length: When set, string values are truncated to at most
+            this many characters; truncated strings get a ``"…(truncated)"``
+            suffix.
+        redact_replacement: The placeholder substituted for redacted values.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    redact_keys: frozenset[str] = Field(default=DEFAULT_REDACT_KEYS)
+    redact_pattern: re.Pattern[str] | None = None
+    max_value_length: int | None = None
+    redact_replacement: str = "***REDACTED***"
+
+    def redact(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Return a deep copy of *data* with sensitive values masked."""
+        result = self._apply(data)
+        assert isinstance(result, dict)
+        return result
+
+    # ------------------------------------------------------------------
+    # Internal recursive helpers
+    # ------------------------------------------------------------------
+
+    def _apply(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                k: (
+                    self.redact_replacement
+                    if isinstance(k, str) and k.lower() in self._normalized_keys
+                    else self._apply(v)
+                )
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._apply(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._apply(item) for item in value)
+        if isinstance(value, str):
+            return self._apply_string(value)
+        return value
+
+    def _apply_string(self, value: str) -> str:
+        result = value
+        if self.redact_pattern is not None:
+            result = self.redact_pattern.sub(self.redact_replacement, result)
+        if self.max_value_length is not None and len(result) > self.max_value_length:
+            result = result[: self.max_value_length] + "…(truncated)"
+        return result
+
+    @property
+    def _normalized_keys(self) -> frozenset[str]:
+        return frozenset(k.lower() for k in self.redact_keys)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -37,6 +115,8 @@ def log_step_start(
     step_index: int,
     tool_name: str,
     inputs: dict[str, Any],
+    *,
+    redaction: RedactionPolicy | None = None,
 ) -> None:
     """Emit a structured log entry at the start of a flow step.
 
@@ -45,12 +125,16 @@ def log_step_start(
         step_index: Zero-based index of the current step.
         tool_name: Name of the tool being executed.
         inputs: Resolved input values for the step.
+        redaction: Optional policy that masks sensitive values before they
+            reach the log line.  ``None`` (the default) leaves *inputs*
+            untouched.
     """
+    display_inputs = redaction.redact(inputs) if redaction is not None else inputs
     logger.info(
         "Step %d START | tool=%s | inputs=%s",
         step_index,
         tool_name,
-        inputs,
+        display_inputs,
     )
 
 
@@ -59,6 +143,8 @@ def log_step_end(
     step_index: int,
     tool_name: str,
     outputs: dict[str, Any],
+    *,
+    redaction: RedactionPolicy | None = None,
 ) -> None:
     """Emit a structured log entry at the end of a flow step.
 
@@ -67,12 +153,16 @@ def log_step_end(
         step_index: Zero-based index of the current step.
         tool_name: Name of the tool being executed.
         outputs: Output values produced by the step.
+        redaction: Optional policy that masks sensitive values before they
+            reach the log line.  ``None`` (the default) leaves *outputs*
+            untouched.
     """
+    display_outputs = redaction.redact(outputs) if redaction is not None else outputs
     logger.info(
         "Step %d END   | tool=%s | outputs=%s",
         step_index,
         tool_name,
-        outputs,
+        display_outputs,
     )
 
 

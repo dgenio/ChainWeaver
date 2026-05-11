@@ -44,6 +44,10 @@ chainweaver/
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
+├── cost.py            CostProfile + CostReport for cost-avoided estimation
+├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
+├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
+├── cli.py             typer-based 'chainweaver inspect' entry point
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
@@ -116,7 +120,7 @@ For the full prohibited-actions list and anti-patterns, see
 | Non-string (`int`, `float`, `bool`, …) | Used as a literal constant. |
 | Empty `{}` (default) | The tool receives the full current context. |
 
-### `ExecutionResult` (dataclass)
+### `ExecutionResult` (Pydantic `BaseModel`)
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -124,8 +128,12 @@ For the full prohibited-actions list and anti-patterns, see
 | `success` | `bool` | `True` when all steps completed without error. |
 | `final_output` | `dict \| None` | Merged execution context, or `None` on failure. |
 | `execution_log` | `list[StepRecord]` | Ordered per-step records. |
+| `trace_id` | `str` | UUID4 hex string assigned at the start of execution; correlates with logs. |
+| `started_at` | `datetime` | UTC timestamp when execution began. |
+| `ended_at` | `datetime` | UTC timestamp when execution finished. |
+| `total_duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
 
-### `StepRecord` (dataclass)
+### `StepRecord` (Pydantic `BaseModel`)
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -133,12 +141,18 @@ For the full prohibited-actions list and anti-patterns, see
 | `tool_name` | `str` | Tool invoked (or flow name for validation records). |
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |
-| `error` | `Exception \| None` | Exception raised, or `None` on success. |
+| `error_type` | `str \| None` | Exception class name (e.g. `"FlowExecutionError"`) when the step failed; `None` on success. |
+| `error_message` | `str \| None` | Human-readable error text when the step failed; `None` on success. |
 | `success` | `bool` | `True` when the step completed without error. |
+| `started_at` | `datetime` | UTC timestamp when the step began. |
+| `ended_at` | `datetime` | UTC timestamp when the step finished. |
+| `duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
 
-> **Design note:** `StepRecord` and `ExecutionResult` are intentionally
-> `dataclass`, not `BaseModel`. They carry `Exception` instances that Pydantic
-> cannot serialize. See [architecture.md § Design traps](docs/agent-context/architecture.md#design-traps).
+> **Serialization:** `ExecutionResult` and `StepRecord` are Pydantic models;
+> `result.model_dump_json()` and `ExecutionResult.model_validate_json(...)`
+> round-trip cleanly. Errors are stored as `error_type` / `error_message`
+> strings rather than live `Exception` instances so the trace is fully
+> JSON-serializable.
 
 ---
 

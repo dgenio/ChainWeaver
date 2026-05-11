@@ -7,9 +7,15 @@ Public API
 
     from chainweaver import (
         Tool, Flow, FlowStep, FlowStatus, DAGFlow, DAGFlowStep, DriftInfo,
-        FlowBuilder, FlowRegistry, FlowExecutor, validate_dag_topology,
+        FlowBuilder, FlowRegistry, FlowExecutor, RetryPolicy,
+        ExecutionPlan, ExecutionResult, ReplayMode, ReplayResult,
+        StepDiff, StepPlan, StepRecord,
+        RedactionPolicy, TraceRecorder, ObservedStep, ObservedTrace,
+        CostProfile, CostReport,
+        validate_dag_topology,
         schema_fingerprint, check_flow_compatibility, CompatibilityIssue,
         compile_flow, CompilationResult, CompilationError, CompilationWarning,
+        flow_to_ascii, flow_to_mermaid, result_to_mermaid,
     )
     from chainweaver.exceptions import (
         ChainWeaverError,
@@ -30,6 +36,7 @@ from __future__ import annotations
 
 import logging
 
+from chainweaver import cli
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
 from chainweaver.compiler import (
@@ -38,6 +45,7 @@ from chainweaver.compiler import (
     CompilationWarning,
     compile_flow,
 )
+from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -51,8 +59,19 @@ from chainweaver.exceptions import (
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
+    ToolOutputSizeError,
+    ToolTimeoutError,
 )
-from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
+from chainweaver.executor import (
+    ExecutionPlan,
+    ExecutionResult,
+    FlowExecutor,
+    ReplayMode,
+    ReplayResult,
+    StepDiff,
+    StepPlan,
+    StepRecord,
+)
 from chainweaver.flow import (
     DAGFlow,
     DAGFlowStep,
@@ -60,10 +79,14 @@ from chainweaver.flow import (
     Flow,
     FlowStatus,
     FlowStep,
+    RetryPolicy,
     validate_dag_topology,
 )
+from chainweaver.log_utils import RedactionPolicy
+from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+from chainweaver.viz import flow_to_ascii, flow_to_mermaid, result_to_mermaid
 
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
@@ -77,10 +100,13 @@ __all__ = [
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "CostProfile",
+    "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
     "DriftInfo",
+    "ExecutionPlan",
     "ExecutionResult",
     "Flow",
     "FlowAlreadyExistsError",
@@ -95,13 +121,28 @@ __all__ = [
     "FlowStep",
     "InputMappingError",
     "InvalidFlowVersionError",
+    "ObservedStep",
+    "ObservedTrace",
+    "RedactionPolicy",
+    "ReplayMode",
+    "ReplayResult",
+    "RetryPolicy",
     "SchemaValidationError",
+    "StepDiff",
+    "StepPlan",
     "StepRecord",
     "Tool",
     "ToolDefinitionError",
     "ToolNotFoundError",
+    "ToolOutputSizeError",
+    "ToolTimeoutError",
+    "TraceRecorder",
     "check_flow_compatibility",
+    "cli",
     "compile_flow",
+    "flow_to_ascii",
+    "flow_to_mermaid",
+    "result_to_mermaid",
     "schema_fingerprint",
     "tool",
     "validate_dag_topology",

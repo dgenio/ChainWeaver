@@ -31,6 +31,10 @@ and tools, the same flow produces the same output every time.
 | `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection | **No LLM, no network I/O, no randomness** |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
+| `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
+| `observation.py` | `TraceRecorder` + `ObservedTrace` for ad-hoc tool sequence capture | In-memory storage only; persistence deferred |
+| `viz.py` | `flow_to_ascii`, `flow_to_mermaid`, `result_to_mermaid` pure renderers | No external dependencies — string generation only |
+| `cli.py` | typer-based `chainweaver inspect` entry point | Reads from a process-scoped default registry installed via `cli.set_default_registry` |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
 
 ---
@@ -44,7 +48,7 @@ and tools, the same flow produces the same output every time.
 | Pydantic for all schemas | Deterministic I/O contracts between steps. |
 | No LLM calls in executor | "Compiled, not interpreted." |
 | `from __future__ import annotations` | Forward-reference support; cleaner type hints. |
-| `dataclass` for `StepRecord`/`ExecutionResult` | They carry `Exception` instances; Pydantic cannot serialize these. |
+| Pydantic `BaseModel` for `StepRecord`/`ExecutionResult` (since #20) | Errors are stored as `error_type` / `error_message` strings instead of live `Exception` instances, so the trace round-trips through JSON. |
 | `step_type` + `capability_id` on `DAGFlowStep` | Forward-compat slots for Weaver Stack kernel integration (weaver-spec I-07). Only `"tool"` is executed today; `"capability"` is reserved for `KernelBackedExecutor`. |
 | Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
 
@@ -55,11 +59,17 @@ and tools, the same flow produces the same output every time.
 Things that look wrong but are intentional. Do not "fix" these without a
 solution for the underlying constraint.
 
-### `StepRecord` and `ExecutionResult` are dataclasses, not Pydantic
+### `StepRecord` and `ExecutionResult` errors are stored as strings
 
-The `error` field holds an `Exception` instance. Pydantic's serialization
-cannot handle arbitrary exception objects. These may migrate to Pydantic if a
-serialization solution is found, but until then agents must not convert them.
+These types are Pydantic models (since #20). The previous design trap — using
+`dataclass` because Pydantic could not serialize an `Exception` — was resolved
+by replacing the live `error: Exception | None` field with two string fields:
+`error_type: str | None` (the exception class name) and
+`error_message: str | None` (the formatted message). This keeps the entire
+execution trace JSON-serializable end-to-end.
+
+Do **not** add a live `Exception` field back to either model; the
+`error_type` / `error_message` pair is the contract.
 
 ### `log_utils.py`, not `logging.py`
 
@@ -85,8 +95,8 @@ files that conflict with these names:
 |---------------|-------|---------|
 | `analyzer.py` | #77 | Offline flow analyzer |
 | `observer.py` | #78 | Runtime flow observer |
-| `viz.py` | #79 | Flow visualization |
-| `cli.py` | #44 | CLI interface |
+| ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
+| ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
 | `mcp/` | #70, #72 | MCP adapter + flow server |
 | `integrations/` | #82 | LangChain/LlamaIndex bridge adapters |
 | `export/` | #25 | Flow export formats |

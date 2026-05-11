@@ -23,9 +23,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pydantic>=2.0",
     "packaging>=21.0",
+    "pydantic>=2.0",
+    "tenacity>=8.0",
+    "typer>=0.9",
 ]
+
+[project.scripts]
+chainweaver = "chainweaver.cli:main"
 
 [project.optional-dependencies]
 dev = [

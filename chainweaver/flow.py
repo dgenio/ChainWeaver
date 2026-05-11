@@ -13,12 +13,13 @@ registration time via :func:`validate_dag_topology`.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from chainweaver.exceptions import DAGDefinitionError
 
@@ -35,6 +36,56 @@ class FlowStatus(str, Enum):
     ACTIVE = "active"
     NEEDS_REVIEW = "needs_review"
     DISABLED = "disabled"
+
+
+class RetryPolicy(BaseModel):
+    """Per-step retry configuration (issue #76).
+
+    Drives the retry behaviour of :class:`~chainweaver.executor.FlowExecutor`
+    when attached to a :class:`FlowStep`.  Backoff is exponential and
+    deterministic by default: the first retry waits ``backoff_seconds``, the
+    second waits ``backoff_seconds * backoff_multiplier``, and so on.
+
+    Setting ``jitter=True`` opts a single retry loop into uniform jitter
+    (multiplier in ``[0.5, 1.5)``).  This is the only place in the package
+    where :mod:`random` is used; ``executor.py`` itself never imports it.
+    See ``docs/agent-context/invariants.md`` for the carve-out.
+
+    Attributes:
+        max_retries: Number of retry attempts after the initial call (so
+            ``max_retries=3`` allows up to 4 invocations total).
+        backoff_seconds: Initial delay before the first retry, in seconds.
+        backoff_multiplier: Geometric multiplier applied to ``backoff_seconds``
+            between retries.  Must be ``>= 1.0``.
+        jitter: When ``True``, multiply each computed delay by a uniform
+            sample in ``[0.5, 1.5)``.
+        retryable_errors: Exception types that trigger a retry.  Anything
+            else fails immediately.  Defaults to ``(Exception,)`` — retry on
+            any error.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    max_retries: int = Field(default=3, ge=0)
+    backoff_seconds: float = Field(default=1.0, ge=0.0)
+    backoff_multiplier: float = Field(default=2.0, ge=1.0)
+    jitter: bool = False
+    retryable_errors: tuple[type[BaseException], ...] = (Exception,)
+
+    def compute_delay(self, attempt_number: int) -> float:
+        """Return the wait, in seconds, before retry attempt *attempt_number*.
+
+        ``attempt_number`` is 1-indexed: ``1`` is the delay before the first
+        retry (i.e. the second total invocation).  When ``jitter`` is set,
+        the deterministic delay is multiplied by a uniform sample in
+        ``[0.5, 1.5)``.
+        """
+        if attempt_number < 1:
+            return 0.0
+        delay = self.backoff_seconds * (self.backoff_multiplier ** (attempt_number - 1))
+        if self.jitter:
+            delay *= 0.5 + random.random()
+        return delay
 
 
 class FlowStep(BaseModel):
@@ -67,6 +118,19 @@ class FlowStep(BaseModel):
 
     tool_name: str
     input_mapping: dict[str, Any] = Field(default_factory=dict)
+    retry: RetryPolicy | None = None
+    on_error: str = "fail"
+
+    @field_validator("on_error")
+    @classmethod
+    def _validate_on_error(cls, value: str) -> str:
+        if value in {"fail", "skip"}:
+            return value
+        if value.startswith("fallback:") and len(value) > len("fallback:"):
+            return value
+        raise ValueError(
+            f"on_error must be 'fail', 'skip', or 'fallback:<tool_name>'; got '{value}'."
+        )
 
 
 class Flow(BaseModel):
@@ -123,6 +187,18 @@ class Flow(BaseModel):
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
     tool_schema_hashes: dict[str, str] | None = None
+
+    def to_ascii(self) -> str:
+        """Return a single-line ASCII flow diagram (issue #79)."""
+        from chainweaver.viz import flow_to_ascii
+
+        return flow_to_ascii(self)
+
+    def to_mermaid(self, *, direction: str = "LR", show_schemas: bool = False) -> str:
+        """Return a Mermaid ``graph <direction>`` rendering of this flow (#79)."""
+        from chainweaver.viz import flow_to_mermaid
+
+        return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
 
 
 # TODO (Phase 2): Add conditional branching — a step that inspects
@@ -265,6 +341,18 @@ class DAGFlow(BaseModel):
     input_schema: type[BaseModel] | None = None
     output_schema: type[BaseModel] | None = None
     tool_schema_hashes: dict[str, str] | None = None
+
+    def to_ascii(self) -> str:
+        """Return a multi-line ASCII rendering of this DAG (issue #79)."""
+        from chainweaver.viz import flow_to_ascii
+
+        return flow_to_ascii(self)
+
+    def to_mermaid(self, *, direction: str = "LR", show_schemas: bool = False) -> str:
+        """Return a Mermaid graph rendering of this DAG (issue #79)."""
+        from chainweaver.viz import flow_to_mermaid
+
+        return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
 
 
 # ---------------------------------------------------------------------------
