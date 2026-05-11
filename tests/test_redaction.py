@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 import pytest
-from helpers import (
-    NumberInput,
-    ValueOutput,
-    _double_fn,
-)
+from pydantic import BaseModel
 
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import Flow, FlowStep
@@ -165,10 +162,24 @@ class TestExecutorIntegration:
     def test_trace_keeps_raw_values_logs_get_redacted(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        # Use a tool whose resolved input key is in DEFAULT_REDACT_KEYS so
+        # the executor's redaction policy actually fires when the START log
+        # line is composed.  An empty input_mapping means the full context
+        # ({"password": "s3cret"}) flows straight into the tool's inputs,
+        # preserving the redactable key name.
+        class _CredInput(BaseModel):
+            password: str
+
+        class _CredOutput(BaseModel):
+            ok: bool
+
+        def _check_password(inp: _CredInput) -> dict[str, Any]:
+            return {"ok": bool(inp.password)}
+
         flow = Flow(
             name="redact_flow",
             description="Single-step flow.",
-            steps=[FlowStep(tool_name="double", input_mapping={"number": "password"})],
+            steps=[FlowStep(tool_name="check_password")],
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -178,22 +189,26 @@ class TestExecutorIntegration:
         )
         ex.register_tool(
             Tool(
-                name="double",
-                description="Doubles.",
-                input_schema=NumberInput,
-                output_schema=ValueOutput,
-                fn=_double_fn,
+                name="check_password",
+                description="Checks a password.",
+                input_schema=_CredInput,
+                output_schema=_CredOutput,
+                fn=_check_password,
             )
         )
 
         with caplog.at_level(logging.INFO, logger="chainweaver.executor"):
-            result = ex.execute_flow("redact_flow", {"password": 9})
+            result = ex.execute_flow("redact_flow", {"password": "s3cret"})
 
-        # Trace itself stores raw inputs/outputs (audit-grade).
-        assert result.execution_log[0].inputs == {"number": 9}
+        # Trace itself stores the raw inputs (audit-grade contract).
+        assert result.execution_log[0].inputs == {"password": "s3cret"}
 
-        # Logs must not contain the raw value tied to the redacted key.
-        # We check the "inputs=" log line specifically.
-        start_lines = [r for r in caplog.records if "Step 0 START" in r.getMessage()]
-        assert start_lines, "expected START log line"
-        assert "***REDACTED***" not in result.execution_log[0].model_dump_json() or True
+        # Log lines must mask the redacted key — raw value absent,
+        # replacement marker present.
+        start_messages = [
+            r.getMessage() for r in caplog.records if "Step 0 START" in r.getMessage()
+        ]
+        assert start_messages, "expected a START log line"
+        start_message = start_messages[0]
+        assert "s3cret" not in start_message
+        assert "***REDACTED***" in start_message
