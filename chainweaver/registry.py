@@ -13,12 +13,24 @@ performed at registration time via
 
 from __future__ import annotations
 
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
-from chainweaver.exceptions import FlowAlreadyExistsError, FlowNotFoundError
+from chainweaver.exceptions import (
+    FlowAlreadyExistsError,
+    FlowNotFoundError,
+    InvalidFlowVersionError,
+)
 from chainweaver.flow import DAGFlow, Flow, FlowStatus, validate_dag_topology
 
 AnyFlow = Flow | DAGFlow
+
+
+def _parse_version(flow_name: str, version: str) -> Version:
+    """Parse *version* as PEP 440, wrapping `InvalidVersion` in `InvalidFlowVersionError`."""
+    try:
+        return Version(version)
+    except InvalidVersion as exc:
+        raise InvalidFlowVersionError(flow_name, version, str(exc)) from exc
 
 
 class FlowRegistry:
@@ -67,7 +79,11 @@ class FlowRegistry:
                 is already registered and *overwrite* is ``False``.
             DAGDefinitionError: When *flow* is a :class:`~chainweaver.flow.DAGFlow`
                 with an invalid topology.
+            InvalidFlowVersionError: When ``flow.version`` is not a valid
+                PEP 440 version string.
         """
+        # Validate version up-front so callers always see a ChainWeaverError.
+        new_version = _parse_version(flow.name, flow.version)
         key = (flow.name, flow.version)
         if key in self._flows and not overwrite:
             raise FlowAlreadyExistsError(flow.name)
@@ -76,7 +92,7 @@ class FlowRegistry:
         self._flows[key] = flow
         # Update latest pointer.
         current_latest = self._latest.get(flow.name)
-        if current_latest is None or Version(flow.version) >= Version(current_latest):
+        if current_latest is None or new_version >= _parse_version(flow.name, current_latest):
             self._latest[flow.name] = flow.version
 
     def get_flow(self, name: str, *, version: str | None = None) -> AnyFlow:
@@ -105,7 +121,7 @@ class FlowRegistry:
         try:
             return self._flows[key]
         except KeyError:
-            raise FlowNotFoundError(name) from None
+            raise FlowNotFoundError(name, version=version) from None
 
     def list_flows(
         self,
@@ -113,17 +129,21 @@ class FlowRegistry:
         status: FlowStatus | None = None,
         exclude_status: set[FlowStatus] | None = None,
     ) -> list[AnyFlow]:
-        """Return all registered flows, optionally filtered by status.
+        """Return every registered flow object, optionally filtered by status.
 
-        Only returns the latest version of each flow name unless multiple
-        versions have different statuses that match the filter.
+        All registered ``(name, version)`` flows are returned — not just the
+        latest version per name. Drift detection and other multi-version
+        callers rely on seeing every version. For a single flow's latest
+        version use :meth:`get_flow`; for the version list of a single name
+        use :meth:`list_flow_versions`.
 
         Args:
             status: If provided, only return flows with this status.
             exclude_status: If provided, exclude flows with any of these statuses.
 
         Returns:
-            A list of flow objects.
+            A list of flow objects across all registered ``(name, version)``
+            pairs, after applying the optional status filters.
         """
         results: list[AnyFlow] = []
         for flow in self._flows.values():
@@ -170,7 +190,7 @@ class FlowRegistry:
         versions = [ver for (n, ver) in self._flows if n == name]
         if not versions:
             raise FlowNotFoundError(name)
-        return sorted(versions, key=Version)
+        return sorted(versions, key=lambda v: _parse_version(name, v))
 
     def match_flow_by_intent(self, intent: str) -> AnyFlow | None:
         """Return the first flow whose name or description contains *intent*.

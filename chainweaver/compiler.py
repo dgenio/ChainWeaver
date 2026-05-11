@@ -1,14 +1,15 @@
-"""Compile-time schema chain validation for ChainWeaver.
+"""Compile-time schema flow validation for ChainWeaver.
 
-Provides static validation of a flow's entire step chain before execution,
+Provides static validation of a flow's entire step sequence before execution,
 catching wiring errors (missing tools, unmapped keys, type mismatches) at
 "compile time" rather than at runtime.
 """
 
 from __future__ import annotations
 
+import types
 from dataclasses import dataclass, field
-from typing import cast, get_origin
+from typing import Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -74,13 +75,29 @@ class CompilationResult:
 
 
 def _get_field_type(field_info: FieldInfo) -> type | None:
-    """Extract the base type from a Pydantic FieldInfo annotation."""
+    """Extract the base type from a Pydantic FieldInfo annotation.
+
+    Handles ``Optional[T]`` (``Union[T, None]`` / ``T | None``) by returning
+    the single non-``None`` argument. Other unions are treated as unknown and
+    return ``None`` (skipping downstream type-compatibility checks rather than
+    producing false positives).
+    """
     annotation = field_info.annotation
     if annotation is None:
         return None
     origin = get_origin(annotation)
+    # Union / Optional handling. typing.Union and PEP 604 X | Y both surface
+    # as Union origins; types.UnionType covers the PEP 604 case explicitly.
+    if origin is Union or origin is types.UnionType:
+        non_none = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(non_none) == 1 and isinstance(non_none[0], type):
+            return non_none[0]
+        return None
     if origin is not None:
-        return cast(type, origin)
+        # Generic container (list, dict, ...). Return the origin type.
+        if isinstance(origin, type):
+            return origin
+        return None
     if isinstance(annotation, type):
         return annotation
     return None
@@ -113,14 +130,19 @@ def _get_model_fields(model: type[BaseModel]) -> dict[str, FieldInfo]:
 
 
 def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
-    """Perform static validation of a flow's step chain.
+    """Perform static validation of a flow's step sequence.
 
     Checks performed (in order):
     1. Tool existence — every step references a registered tool.
     2. Input mapping resolution — every mapping source key exists in upstream
        outputs or the initial input schema.
-    3. Type compatibility — mapped field types are assignment-compatible.
-    4. Output coverage — if the flow has an output_schema, the accumulated
+    3. Mapping target validity — every ``target_key`` in ``input_mapping`` is
+       a declared input field on the referenced tool.
+    4. Type compatibility — mapped field types are assignment-compatible.
+    5. Required input coverage — every required tool input field is supplied
+       either by an explicit mapping or, when ``input_mapping`` is empty, by
+       the accumulated context.
+    6. Output coverage — if the flow has an output_schema, the accumulated
        context satisfies it.
 
     Args:
@@ -157,9 +179,25 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
         tool = tools[step.tool_name]
         tool_input_fields = _get_model_fields(tool.input_schema)
 
-        # 2. Input mapping resolution.
+        # 2. + 3. Input mapping resolution and target validity.
         if step.input_mapping:
             for target_key, source in step.input_mapping.items():
+                # 3. Mapping target must be a real input field on the tool.
+                if target_key not in tool_input_fields:
+                    errors.append(
+                        CompilationError(
+                            step_index=idx,
+                            tool_name=step.tool_name,
+                            field_name=target_key,
+                            issue_type="unknown_target_key",
+                            detail=(
+                                f"Step {idx} ('{step.tool_name}'): mapping target "
+                                f"'{target_key}' is not a declared input field "
+                                f"{set(tool_input_fields.keys())}."
+                            ),
+                        )
+                    )
+
                 if isinstance(source, str):
                     if source not in context_fields:
                         errors.append(
@@ -175,7 +213,7 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                             )
                         )
                     else:
-                        # 3. Type compatibility.
+                        # 4. Type compatibility.
                         source_type = context_fields.get(source)
                         target_field = tool_input_fields.get(target_key)
                         if target_field is not None:
@@ -212,6 +250,31 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                                 ),
                             )
                         )
+
+        # 5. Required input coverage.
+        # A field is satisfied if it appears as a mapping target, or — when no
+        # mapping is given — as a key in the accumulated context.
+        for field_name, finfo in tool_input_fields.items():
+            if not finfo.is_required():
+                continue
+            if step.input_mapping:
+                if field_name in step.input_mapping:
+                    continue
+            elif field_name in context_fields:
+                continue
+            errors.append(
+                CompilationError(
+                    step_index=idx,
+                    tool_name=step.tool_name,
+                    field_name=field_name,
+                    issue_type="missing_required_input",
+                    detail=(
+                        f"Step {idx} ('{step.tool_name}'): required input field "
+                        f"'{field_name}' is not satisfied by input_mapping or "
+                        f"the accumulated context."
+                    ),
+                )
+            )
 
         # Update context with this tool's output fields.
         tool_output_fields = _get_model_fields(tool.output_schema)

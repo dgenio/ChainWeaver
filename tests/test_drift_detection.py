@@ -200,3 +200,51 @@ class TestAcceptDrift:
         assert len(ex.get_drift_report()) == 1
         ex.accept_drift("my_flow")
         assert ex.get_drift_report() == []
+
+
+class TestMultiVersionDrift:
+    """Drift detection must target the actually-affected version, not the latest."""
+
+    def _versioned_flow(self, tool: Tool, version: str) -> Flow:
+        return Flow(
+            name="my_flow",
+            version=version,
+            description=f"my_flow v{version}.",
+            steps=[FlowStep(tool_name="proc", input_mapping={"value": "value"})],
+            tool_schema_hashes={"proc": tool.schema_hash},
+        )
+
+    def test_drift_marks_older_version_when_only_older_matches(self) -> None:
+        tool_v1 = _make_tool_v1()
+        tool_v2 = _make_tool_v2()
+        registry = FlowRegistry()
+        # Older flow references v1 schema; newer flow references v2 schema.
+        registry.register_flow(self._versioned_flow(tool_v1, "1.0.0"))
+        registry.register_flow(self._versioned_flow(tool_v2, "2.0.0"))
+        ex = FlowExecutor(registry=registry)
+        # Initialize with v1 (matches flow 1.0.0; differs from flow 2.0.0
+        # so 2.0.0 already has drift wrt v1 before any re-registration).
+        ex.register_tool(tool_v1)
+        # Now re-register with v2 — flow 1.0.0 drifts; flow 2.0.0 becomes in-sync.
+        ex.register_tool(tool_v2)
+        # Affected version (1.0.0) must be flagged.
+        assert registry.get_flow("my_flow", version="1.0.0").status == FlowStatus.NEEDS_REVIEW
+        # Latest version (2.0.0) should remain ACTIVE — it was never the affected one.
+        assert registry.get_flow("my_flow", version="2.0.0").status == FlowStatus.ACTIVE
+
+    def test_accept_drift_with_version_targets_specified_version(self) -> None:
+        tool_v1 = _make_tool_v1()
+        registry = FlowRegistry()
+        registry.register_flow(self._versioned_flow(tool_v1, "1.0.0"))
+        registry.register_flow(self._versioned_flow(tool_v1, "2.0.0"))
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(tool_v1)
+        # Trigger drift on both versions by registering a new schema.
+        tool_v2 = _make_tool_v2()
+        ex.register_tool(tool_v2)
+        assert registry.get_flow("my_flow", version="1.0.0").status == FlowStatus.NEEDS_REVIEW
+        assert registry.get_flow("my_flow", version="2.0.0").status == FlowStatus.NEEDS_REVIEW
+        # Accept drift on the older version only.
+        ex.accept_drift("my_flow", version="1.0.0")
+        assert registry.get_flow("my_flow", version="1.0.0").status == FlowStatus.ACTIVE
+        assert registry.get_flow("my_flow", version="2.0.0").status == FlowStatus.NEEDS_REVIEW

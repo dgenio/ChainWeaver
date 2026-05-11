@@ -23,7 +23,7 @@ and tools, the same flow produces the same output every time.
 |--------|---------------|----------------|
 | `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
 | `compat.py` | `schema_fingerprint()`, `CompatibilityIssue`, `check_flow_compatibility()` | Pure utility; no execution or I/O |
-| `compiler.py` | `compile_flow()`: static schema chain validation pre-execution | Returns `CompilationResult`; no execution logic |
+| `compiler.py` | `compile_flow()`: static schema flow validation pre-execution | Returns `CompilationResult`; no execution logic |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
 | `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
 | `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from functools import cached_property
 from typing import Any
 
 from pydantic import BaseModel
@@ -71,19 +72,19 @@ class Tool:
         self.fn = fn
         self.schema_version = schema_version
 
-    @property
+    @cached_property
     def input_schema_hash(self) -> str:
-        """SHA-256 fingerprint of the input schema."""
+        """SHA-256 fingerprint of the input schema (cached per instance)."""
         return schema_fingerprint(self.input_schema)
 
-    @property
+    @cached_property
     def output_schema_hash(self) -> str:
-        """SHA-256 fingerprint of the output schema."""
+        """SHA-256 fingerprint of the output schema (cached per instance)."""
         return schema_fingerprint(self.output_schema)
 
-    @property
+    @cached_property
     def schema_hash(self) -> str:
-        """Combined hash of input + output schemas."""
+        """Combined hash of input + output schemas (cached per instance)."""
         combined = self.input_schema_hash + self.output_schema_hash
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 

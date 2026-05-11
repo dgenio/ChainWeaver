@@ -136,6 +136,30 @@ class TestToolSchemaHash:
         assert tool.input_schema_hash == schema_fingerprint(SimpleInput)
         assert tool.output_schema_hash == schema_fingerprint(SimpleOutput)
 
+    def test_schema_hashes_are_cached_per_instance(self) -> None:
+        """`cached_property` should memoize the hash on first access."""
+        tool = Tool(
+            name="cached",
+            description="Cached.",
+            input_schema=SimpleInput,
+            output_schema=SimpleOutput,
+            fn=_noop,
+        )
+        # Before first access the descriptor has not stored anything yet.
+        assert "input_schema_hash" not in tool.__dict__
+        assert "output_schema_hash" not in tool.__dict__
+        assert "schema_hash" not in tool.__dict__
+        # Touch all three.
+        h1, h2, h3 = tool.input_schema_hash, tool.output_schema_hash, tool.schema_hash
+        # After first access the values live in the instance __dict__.
+        assert tool.__dict__["input_schema_hash"] == h1
+        assert tool.__dict__["output_schema_hash"] == h2
+        assert tool.__dict__["schema_hash"] == h3
+        # Repeated accesses return the same string object (cache hit).
+        assert tool.input_schema_hash is h1
+        assert tool.output_schema_hash is h2
+        assert tool.schema_hash is h3
+
 
 # ---------------------------------------------------------------------------
 # check_flow_compatibility tests

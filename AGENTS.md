@@ -36,7 +36,7 @@ chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
-├── compiler.py        compile_flow(): static schema chain validation (CompilationResult)
+├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass

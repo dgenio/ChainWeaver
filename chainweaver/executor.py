@@ -178,16 +178,20 @@ class FlowExecutor:
                         )
         return report
 
-    def accept_drift(self, flow_name: str) -> None:
+    def accept_drift(self, flow_name: str, *, version: str | None = None) -> None:
         """Re-snapshot tool_schema_hashes for a flow and set status back to ACTIVE.
 
         Args:
             flow_name: The name of the flow to accept drift for.
+            version: If provided, target the given version. Otherwise target the
+                latest registered version. Mirrors
+                :meth:`~chainweaver.registry.FlowRegistry.get_flow`.
 
         Raises:
-            FlowNotFoundError: When no flow with *flow_name* is registered.
+            FlowNotFoundError: When no flow with *flow_name* (and *version*) is
+                registered.
         """
-        flow = self._registry.get_flow(flow_name)
+        flow = self._registry.get_flow(flow_name, version=version)
         new_hashes: dict[str, str] = {}
         for step in flow.steps:
             if step.tool_name in self._tools:
@@ -203,12 +207,15 @@ class FlowExecutor:
             if new_tool.name not in flow.tool_schema_hashes:
                 continue
             if flow.tool_schema_hashes[new_tool.name] != new_tool.schema_hash:
-                self._registry.set_flow_status(flow.name, FlowStatus.NEEDS_REVIEW)
+                self._registry.set_flow_status(
+                    flow.name, FlowStatus.NEEDS_REVIEW, version=flow.version
+                )
                 _logger.warning(
                     "Schema drift detected: tool '%s' schema changed. "
-                    "Flow '%s' marked as NEEDS_REVIEW.",
+                    "Flow '%s' version '%s' marked as NEEDS_REVIEW.",
                     new_tool.name,
                     flow.name,
+                    flow.version,
                 )
 
     def execute_flow(

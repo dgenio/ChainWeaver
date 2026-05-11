@@ -1,8 +1,8 @@
-"""Tests for compile-time schema chain validation."""
+"""Tests for compile-time schema flow validation."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 
 from pydantic import BaseModel
 
@@ -274,3 +274,219 @@ class TestCompilationResult:
         assert result.success is True
         assert result.errors == []
         assert result.warnings == []
+
+
+class TestOptionalTypeCompatibility:
+    """Optional[T] / Union handling in `_get_field_type`."""
+
+    def test_optional_int_accepts_int_source(self) -> None:
+        # `Union[int, None]` is the canonical form of `Optional[int]`; both
+        # surface as Union origins and exercise the same code path. Using the
+        # Union spelling here avoids ruff UP045 on `Optional[...]`.
+        class OptionalIntInput(BaseModel):
+            value: Union[int, None] = None  # noqa: UP007 — explicit Union for the test
+
+        class OutSchema(BaseModel):
+            ok: bool
+
+        def _fn(inp: OptionalIntInput) -> dict[str, Any]:
+            return {"ok": True}
+
+        opt_tool = Tool(
+            name="opt",
+            description="Accepts optional int.",
+            input_schema=OptionalIntInput,
+            output_schema=OutSchema,
+            fn=_fn,
+        )
+        tools = {"opt": opt_tool, **_make_tools()}
+        flow = Flow(
+            name="opt_flow",
+            description="Map int into Optional[int].",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="opt", input_mapping={"value": "value"}),
+            ],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is True
+        assert not any(e.issue_type == "type_mismatch" for e in result.errors)
+
+    def test_pep604_union_int_or_none_accepts_int_source(self) -> None:
+        class PEP604Input(BaseModel):
+            value: int | None = None
+
+        class OutSchema(BaseModel):
+            ok: bool
+
+        def _fn(inp: PEP604Input) -> dict[str, Any]:
+            return {"ok": True}
+
+        tool = Tool(
+            name="pep604",
+            description="Accepts int | None.",
+            input_schema=PEP604Input,
+            output_schema=OutSchema,
+            fn=_fn,
+        )
+        tools = {"pep604": tool, **_make_tools()}
+        flow = Flow(
+            name="pep604_flow",
+            description="Map int into int | None.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="pep604", input_mapping={"value": "value"}),
+            ],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is True
+
+    def test_multi_arm_union_treated_as_unknown(self) -> None:
+        class MultiArmInput(BaseModel):
+            value: Union[int, str] = 0  # noqa: UP007 — multi-arm union by design
+
+        class OutSchema(BaseModel):
+            ok: bool
+
+        def _fn(inp: MultiArmInput) -> dict[str, Any]:
+            return {"ok": True}
+
+        tool = Tool(
+            name="multi",
+            description="Accepts int | str.",
+            input_schema=MultiArmInput,
+            output_schema=OutSchema,
+            fn=_fn,
+        )
+        tools = {"multi": tool, **_make_tools()}
+        # Map an int source — should pass (unknown target treats as compatible).
+        flow = Flow(
+            name="multi_flow",
+            description="Map int into Union[int, str].",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="multi", input_mapping={"value": "value"}),
+            ],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        # Multi-arm Union[int, str] is unknown → no false-positive type_mismatch.
+        assert not any(e.issue_type == "type_mismatch" for e in result.errors)
+
+
+class TestUnknownTargetKey:
+    def test_unknown_target_key_is_error(self) -> None:
+        tools = _make_tools()
+        flow = Flow(
+            name="bad_target",
+            description="Maps to a field the tool does not declare.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number", "ghost": "number"},
+                ),
+            ],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is False
+        unknown_errors = [e for e in result.errors if e.issue_type == "unknown_target_key"]
+        assert len(unknown_errors) == 1
+        assert unknown_errors[0].field_name == "ghost"
+
+
+class TestMissingRequiredInput:
+    def test_missing_required_input_detected(self) -> None:
+        class TwoFieldInput(BaseModel):
+            a: int
+            b: int
+
+        class OutSchema(BaseModel):
+            sum: int
+
+        def _fn(inp: TwoFieldInput) -> dict[str, Any]:
+            return {"sum": inp.a + inp.b}
+
+        tools = {
+            "two": Tool(
+                name="two",
+                description="Needs both a and b.",
+                input_schema=TwoFieldInput,
+                output_schema=OutSchema,
+                fn=_fn,
+            )
+        }
+        # Provide only `a` via mapping — `b` is required but missing.
+        flow = Flow(
+            name="missing_required",
+            description="Only `a` is mapped.",
+            steps=[FlowStep(tool_name="two", input_mapping={"a": "number"})],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is False
+        missing = [e for e in result.errors if e.issue_type == "missing_required_input"]
+        assert len(missing) == 1
+        assert missing[0].field_name == "b"
+
+    def test_empty_mapping_satisfied_by_context(self) -> None:
+        class SingleFieldInput(BaseModel):
+            number: int
+
+        class OutSchema(BaseModel):
+            ok: bool
+
+        def _fn(inp: SingleFieldInput) -> dict[str, Any]:
+            return {"ok": True}
+
+        tools = {
+            "one": Tool(
+                name="one",
+                description="Needs `number`.",
+                input_schema=SingleFieldInput,
+                output_schema=OutSchema,
+                fn=_fn,
+            )
+        }
+        # Empty mapping — `number` is in the input_schema context, so it is satisfied.
+        flow = Flow(
+            name="empty_map",
+            description="Empty mapping satisfied by context.",
+            steps=[FlowStep(tool_name="one")],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is True
+
+    def test_optional_input_not_flagged_as_missing(self) -> None:
+        class OptionalFieldInput(BaseModel):
+            value: int | None = None
+
+        class OutSchema(BaseModel):
+            ok: bool
+
+        def _fn(inp: OptionalFieldInput) -> dict[str, Any]:
+            return {"ok": True}
+
+        tools = {
+            "opt": Tool(
+                name="opt",
+                description="Optional input.",
+                input_schema=OptionalFieldInput,
+                output_schema=OutSchema,
+                fn=_fn,
+            )
+        }
+        # No mapping for "value", and "value" not in context — but it's optional.
+        flow = Flow(
+            name="optional_unmapped",
+            description="Optional input deliberately unmapped.",
+            steps=[FlowStep(tool_name="opt", input_mapping={"_dummy": "number"})],
+            input_schema=NumberInput,
+        )
+        result = compile_flow(flow, tools)
+        # Optional input field `value` should not produce a missing_required_input
+        # error — but the `_dummy` mapping target is unknown.
+        assert not any(e.issue_type == "missing_required_input" for e in result.errors)

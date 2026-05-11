@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from chainweaver.exceptions import FlowNotFoundError
+from chainweaver.exceptions import FlowNotFoundError, InvalidFlowVersionError
 from chainweaver.flow import Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
@@ -142,3 +142,53 @@ class TestMultiVersionRegistry:
         flow = Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])
         registry.register_flow(flow)
         assert registry.get_flow("f").version == "0.0.0"
+
+
+class TestFlowNotFoundErrorIncludesVersion:
+    def test_missing_unversioned_lookup_omits_version(self) -> None:
+        registry = FlowRegistry()
+        with pytest.raises(FlowNotFoundError) as exc_info:
+            registry.get_flow("ghost")
+        err = exc_info.value
+        assert err.flow_name == "ghost"
+        assert err.version is None
+        assert "version" not in str(err)
+
+    def test_missing_specific_version_surfaces_version(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(_make_flow("f", "1.0.0"))
+        with pytest.raises(FlowNotFoundError) as exc_info:
+            registry.get_flow("f", version="9.9.9")
+        err = exc_info.value
+        assert err.flow_name == "f"
+        assert err.version == "9.9.9"
+        assert "9.9.9" in str(err)
+
+
+class TestInvalidFlowVersion:
+    def test_register_invalid_version_raises_chainweaver_error(self) -> None:
+        bad = Flow(
+            name="bad_ver",
+            version="not-a-version",
+            description="D.",
+            steps=[FlowStep(tool_name="x")],
+        )
+        registry = FlowRegistry()
+        with pytest.raises(InvalidFlowVersionError) as exc_info:
+            registry.register_flow(bad)
+        assert exc_info.value.flow_name == "bad_ver"
+        assert exc_info.value.version == "not-a-version"
+
+    def test_register_invalid_version_does_not_store_flow(self) -> None:
+        bad = Flow(
+            name="bad_ver",
+            version="not-a-version",
+            description="D.",
+            steps=[FlowStep(tool_name="x")],
+        )
+        registry = FlowRegistry()
+        with pytest.raises(InvalidFlowVersionError):
+            registry.register_flow(bad)
+        # Subsequent lookup should not find the flow.
+        with pytest.raises(FlowNotFoundError):
+            registry.get_flow("bad_ver")
