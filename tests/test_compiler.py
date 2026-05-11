@@ -153,8 +153,8 @@ class TestMissingMappingKey:
     def test_mapping_to_upstream_output_succeeds(self) -> None:
         tools = _make_tools()
         flow = Flow(
-            name="chained",
-            description="Chained flow.",
+            name="multi_step",
+            description="Multi-step flow.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
