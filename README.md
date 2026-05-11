@@ -301,10 +301,12 @@ flow = (
 chainweaver/
 ├── __init__.py       # Public API
 ├── builder.py        # FlowBuilder — fluent API for flow construction
+├── compat.py         # schema_fingerprint, check_flow_compatibility
+├── compiler.py       # compile_flow — static schema flow validation
 ├── decorators.py     # @tool decorator for zero-boilerplate tool definition
 ├── tools.py          # Tool — named callable with Pydantic schemas
-├── flow.py           # FlowStep + Flow — ordered step definitions
-├── registry.py       # FlowRegistry — in-memory flow catalogue
+├── flow.py           # FlowStep + Flow + FlowStatus — ordered step definitions
+├── registry.py       # FlowRegistry — multi-version flow catalogue
 ├── executor.py       # FlowExecutor — deterministic, LLM-free runner
 ├── exceptions.py     # Typed exceptions with traceable context
 └── log_utils.py      # Structured per-step logging
@@ -433,6 +435,8 @@ All errors are typed and traceable:
 | `ToolNotFoundError` | A step references an unregistered tool |
 | `FlowNotFoundError` | The requested flow is not registered |
 | `FlowAlreadyExistsError` | Registering a flow that already exists (without `overwrite=True`) |
+| `FlowStatusError` | Executing a flow whose status is not `ACTIVE` (without `force=True`) |
+| `InvalidFlowVersionError` | A flow is registered with a version string that is not valid PEP 440 |
 | `SchemaValidationError` | Input or output fails Pydantic validation |
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |

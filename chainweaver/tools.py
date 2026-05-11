@@ -18,14 +18,17 @@ misbehaving tools:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+from functools import cached_property
 from typing import Any
 
 from pydantic import BaseModel
 
+from chainweaver.compat import schema_fingerprint
 from chainweaver.exceptions import ToolOutputSizeError, ToolTimeoutError
 
 
@@ -86,6 +89,7 @@ class Tool:
         fn: Callable[[Any], dict[str, Any]],
         timeout_seconds: float | None = None,
         max_output_size: int | None = None,
+        schema_version: str = "0.0.0",
     ) -> None:
         self.name = name
         self.description = description
@@ -94,6 +98,23 @@ class Tool:
         self.fn = fn
         self.timeout_seconds = timeout_seconds
         self.max_output_size = max_output_size
+        self.schema_version = schema_version
+
+    @cached_property
+    def input_schema_hash(self) -> str:
+        """SHA-256 fingerprint of the input schema (cached per instance)."""
+        return schema_fingerprint(self.input_schema)
+
+    @cached_property
+    def output_schema_hash(self) -> str:
+        """SHA-256 fingerprint of the output schema (cached per instance)."""
+        return schema_fingerprint(self.output_schema)
+
+    @cached_property
+    def schema_hash(self) -> str:
+        """Combined hash of input + output schemas (cached per instance)."""
+        combined = self.input_schema_hash + self.output_schema_hash
+        return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def run(self, raw_inputs: dict[str, Any]) -> dict[str, Any]:
         """Validate *raw_inputs*, execute the tool, and validate the output.

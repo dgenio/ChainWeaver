@@ -31,14 +31,15 @@ class TestFlowRegistration:
         registry = FlowRegistry()
         flow = _make_flow("alpha")
         registry.register_flow(flow)
-        assert "alpha" in registry.list_flows()
+        assert flow in registry.list_flows()
 
     def test_list_multiple_flows_preserves_order(self) -> None:
         registry = FlowRegistry()
         names = ["first", "second", "third"]
         for n in names:
             registry.register_flow(_make_flow(n))
-        assert registry.list_flows() == names
+        result_names = [f.name for f in registry.list_flows()]
+        assert result_names == names
 
     def test_register_duplicate_raises(self) -> None:
         registry = FlowRegistry()
@@ -167,13 +168,13 @@ class TestDAGFlowRegistration:
     def test_valid_dag_registers(self) -> None:
         registry = FlowRegistry()
         registry.register_flow(_make_dag("valid"))
-        assert "valid" in registry.list_flows()
+        assert "valid" in [f.name for f in registry.list_flows()]
 
     def test_dag_and_linear_coexist(self) -> None:
         registry = FlowRegistry()
         registry.register_flow(_make_flow("linear"))
         registry.register_flow(_make_dag("dag"))
-        assert set(registry.list_flows()) == {"linear", "dag"}
+        assert {f.name for f in registry.list_flows()} == {"linear", "dag"}
 
     def test_dag_duplicate_step_id_raises(self) -> None:
         steps = [
@@ -228,7 +229,7 @@ class TestDAGFlowRegistration:
         with pytest.raises(DAGDefinitionError):
             registry.register_flow(bad_dag, overwrite=True)
         # Original should still be present (overwrite never committed).
-        assert "dag_v1" in registry.list_flows()
+        assert "dag_v1" in [f.name for f in registry.list_flows()]
 
     def test_dag_get_flow_returns_dag_instance(self) -> None:
         registry = FlowRegistry()

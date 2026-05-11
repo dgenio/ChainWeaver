@@ -16,11 +16,15 @@ class ToolNotFoundError(ChainWeaverError):
 
 
 class FlowNotFoundError(ChainWeaverError):
-    """Raised when a referenced flow is not registered."""
+    """Raised when a referenced flow (and optionally a specific version) is not registered."""
 
-    def __init__(self, flow_name: str) -> None:
+    def __init__(self, flow_name: str, *, version: str | None = None) -> None:
         self.flow_name = flow_name
-        super().__init__(f"Flow '{flow_name}' is not registered.")
+        self.version = version
+        if version is None:
+            super().__init__(f"Flow '{flow_name}' is not registered.")
+        else:
+            super().__init__(f"Flow '{flow_name}' version '{version}' is not registered.")
 
 
 class FlowAlreadyExistsError(ChainWeaverError):
@@ -132,3 +136,24 @@ class DAGDefinitionError(ChainWeaverError):
         self.reason = reason
         self.detail = detail
         super().__init__(f"Invalid DAG flow '{flow_name}' ({reason}): {detail}")
+
+
+class FlowStatusError(ChainWeaverError):
+    """Raised when a flow cannot be executed due to its status."""
+
+    def __init__(self, flow_name: str, status: str) -> None:
+        self.flow_name = flow_name
+        self.status = status
+        super().__init__(
+            f"Flow '{flow_name}' has status '{status}'. Use force=True to execute anyway."
+        )
+
+
+class InvalidFlowVersionError(ChainWeaverError):
+    """Raised when a flow's version string cannot be parsed as a PEP 440 version."""
+
+    def __init__(self, flow_name: str, version: str, detail: str) -> None:
+        self.flow_name = flow_name
+        self.version = version
+        self.detail = detail
+        super().__init__(f"Flow '{flow_name}' has invalid version '{version}': {detail}.")

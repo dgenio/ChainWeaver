@@ -6,8 +6,16 @@ Public API
 .. code-block:: python
 
     from chainweaver import (
-        Tool, Flow, FlowStep, DAGFlow, DAGFlowStep,
-        FlowBuilder, FlowRegistry, FlowExecutor, validate_dag_topology,
+        Tool, Flow, FlowStep, FlowStatus, DAGFlow, DAGFlowStep, DriftInfo,
+        FlowBuilder, FlowRegistry, FlowExecutor, RetryPolicy,
+        ExecutionPlan, ExecutionResult, ReplayMode, ReplayResult,
+        StepDiff, StepPlan, StepRecord,
+        RedactionPolicy, TraceRecorder, ObservedStep, ObservedTrace,
+        CostProfile, CostReport,
+        validate_dag_topology,
+        schema_fingerprint, check_flow_compatibility, CompatibilityIssue,
+        compile_flow, CompilationResult, CompilationError, CompilationWarning,
+        flow_to_ascii, flow_to_mermaid, result_to_mermaid,
     )
     from chainweaver.exceptions import (
         ChainWeaverError,
@@ -15,6 +23,8 @@ Public API
         ToolNotFoundError,
         FlowNotFoundError,
         FlowAlreadyExistsError,
+        FlowStatusError,
+        InvalidFlowVersionError,
         SchemaValidationError,
         InputMappingError,
         FlowExecutionError,
@@ -28,6 +38,13 @@ import logging
 
 from chainweaver import cli
 from chainweaver.builder import FlowBuilder, FlowBuilderError
+from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
+from chainweaver.compiler import (
+    CompilationError,
+    CompilationResult,
+    CompilationWarning,
+    compile_flow,
+)
 from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
 from chainweaver.exceptions import (
@@ -36,7 +53,9 @@ from chainweaver.exceptions import (
     FlowAlreadyExistsError,
     FlowExecutionError,
     FlowNotFoundError,
+    FlowStatusError,
     InputMappingError,
+    InvalidFlowVersionError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -56,7 +75,9 @@ from chainweaver.executor import (
 from chainweaver.flow import (
     DAGFlow,
     DAGFlowStep,
+    DriftInfo,
     Flow,
+    FlowStatus,
     FlowStep,
     RetryPolicy,
     validate_dag_topology,
@@ -75,11 +96,16 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ChainWeaverError",
+    "CompatibilityIssue",
+    "CompilationError",
+    "CompilationResult",
+    "CompilationWarning",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
     "Flow",
@@ -90,8 +116,11 @@ __all__ = [
     "FlowExecutor",
     "FlowNotFoundError",
     "FlowRegistry",
+    "FlowStatus",
+    "FlowStatusError",
     "FlowStep",
     "InputMappingError",
+    "InvalidFlowVersionError",
     "ObservedStep",
     "ObservedTrace",
     "RedactionPolicy",
@@ -108,10 +137,13 @@ __all__ = [
     "ToolOutputSizeError",
     "ToolTimeoutError",
     "TraceRecorder",
+    "check_flow_compatibility",
     "cli",
+    "compile_flow",
     "flow_to_ascii",
     "flow_to_mermaid",
     "result_to_mermaid",
+    "schema_fingerprint",
     "tool",
     "validate_dag_topology",
 ]

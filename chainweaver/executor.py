@@ -27,13 +27,22 @@ from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_a
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.exceptions import (
     FlowExecutionError,
+    FlowStatusError,
     InputMappingError,
     SchemaValidationError,
     ToolNotFoundError,
     ToolOutputSizeError,
     ToolTimeoutError,
 )
-from chainweaver.flow import DAGFlow, DAGFlowStep, FlowStep, RetryPolicy, validate_dag_topology
+from chainweaver.flow import (
+    DAGFlow,
+    DAGFlowStep,
+    DriftInfo,
+    FlowStatus,
+    FlowStep,
+    RetryPolicy,
+    validate_dag_topology,
+)
 from chainweaver.log_utils import (
     RedactionPolicy,
     get_logger,
@@ -385,9 +394,16 @@ class FlowExecutor:
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
 
+        If a tool with the same name already exists and its schema has changed,
+        affected flows are marked ``NEEDS_REVIEW``.
+
         Args:
             tool: The tool to register.
         """
+        if tool.name in self._tools:
+            old_tool = self._tools[tool.name]
+            if old_tool.schema_hash != tool.schema_hash:
+                self._handle_schema_drift(old_tool, tool)
         self._tools[tool.name] = tool
 
     def get_tool(self, name: str) -> Tool:
@@ -402,6 +418,70 @@ class FlowExecutor:
         if name not in self._tools:
             raise ToolNotFoundError(name)
         return self._tools[name]
+
+    def get_drift_report(self) -> list[DriftInfo]:
+        """Compare registered tools' current schema hashes against each flow's snapshot.
+
+        Returns:
+            A list of :class:`~chainweaver.flow.DriftInfo` objects for each mismatch.
+        """
+        report: list[DriftInfo] = []
+        for flow in self._registry.list_flows():
+            if flow.tool_schema_hashes is None:
+                continue
+            for tool_name, expected_hash in flow.tool_schema_hashes.items():
+                if tool_name in self._tools:
+                    actual_hash = self._tools[tool_name].schema_hash
+                    if expected_hash != actual_hash:
+                        report.append(
+                            DriftInfo(
+                                flow_name=flow.name,
+                                tool_name=tool_name,
+                                expected_hash=expected_hash,
+                                actual_hash=actual_hash,
+                            )
+                        )
+        return report
+
+    def accept_drift(self, flow_name: str, *, version: str | None = None) -> None:
+        """Re-snapshot tool_schema_hashes for a flow and set status back to ACTIVE.
+
+        Args:
+            flow_name: The name of the flow to accept drift for.
+            version: If provided, target the given version. Otherwise target the
+                latest registered version. Mirrors
+                :meth:`~chainweaver.registry.FlowRegistry.get_flow`.
+
+        Raises:
+            FlowNotFoundError: When no flow with *flow_name* (and *version*) is
+                registered.
+        """
+        flow = self._registry.get_flow(flow_name, version=version)
+        new_hashes: dict[str, str] = {}
+        for step in flow.steps:
+            if step.tool_name in self._tools:
+                new_hashes[step.tool_name] = self._tools[step.tool_name].schema_hash
+        flow.tool_schema_hashes = new_hashes
+        flow.status = FlowStatus.ACTIVE
+
+    def _handle_schema_drift(self, old_tool: Tool, new_tool: Tool) -> None:
+        """Mark affected flows as NEEDS_REVIEW when a tool's schema changes."""
+        for flow in self._registry.list_flows():
+            if flow.tool_schema_hashes is None:
+                continue
+            if new_tool.name not in flow.tool_schema_hashes:
+                continue
+            if flow.tool_schema_hashes[new_tool.name] != new_tool.schema_hash:
+                self._registry.set_flow_status(
+                    flow.name, FlowStatus.NEEDS_REVIEW, version=flow.version
+                )
+                _logger.warning(
+                    "Schema drift detected: tool '%s' schema changed. "
+                    "Flow '%s' version '%s' marked as NEEDS_REVIEW.",
+                    new_tool.name,
+                    flow.name,
+                    flow.version,
+                )
 
     def replay_flow(
         self,
@@ -656,12 +736,16 @@ class FlowExecutor:
         self,
         flow_name: str,
         initial_input: dict[str, Any],
+        *,
+        force: bool = False,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
 
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
+            force: When ``True``, bypass the status guard and execute even if
+                the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
 
         Returns:
             An :class:`ExecutionResult` describing the outcome and containing
@@ -671,8 +755,14 @@ class FlowExecutor:
 
         Raises:
             FlowNotFoundError: When *flow_name* is not registered.
+            FlowStatusError: When the flow's status is not ``ACTIVE`` and
+                *force* is ``False``.
         """
         flow = self._registry.get_flow(flow_name)
+
+        if not force and flow.status != FlowStatus.ACTIVE:
+            raise FlowStatusError(flow_name, flow.status.value)
+
         if isinstance(flow, DAGFlow):
             return self._execute_dag_flow(flow, initial_input)
 

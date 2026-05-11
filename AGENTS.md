@@ -35,11 +35,13 @@ Use these terms consistently in code, docs, comments, and PR descriptions.
 chainweaver/
 ├── __init__.py        Public API surface; all exports in __all__
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
+├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
+├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas
-├── flow.py            FlowStep + Flow (linear) + DAGFlowStep + DAGFlow + validate_dag_topology
-├── registry.py        FlowRegistry: in-memory catalogue of Flow and DAGFlow
-├── executor.py        FlowExecutor: sequential/DAG runner (main entry point)
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash
+├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
@@ -59,9 +61,13 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 
 ### Key entry points
 
-- `FlowExecutor.execute_flow(flow_name, initial_input)` → `ExecutionResult`
+- `FlowExecutor.execute_flow(flow_name, initial_input, *, force=False)` → `ExecutionResult`
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow
-- `FlowExecutor.register_tool(tool)` → register a tool for use in flows
+- `FlowRegistry.get_flow(name, *, version=None)` → latest or specific version
+- `FlowExecutor.register_tool(tool)` → register a tool; triggers drift detection on schema change
+- `FlowExecutor.get_drift_report()` → `list[DriftInfo]`
+- `FlowExecutor.accept_drift(flow_name)` → re-snapshot hashes, restore ACTIVE status
+- `compile_flow(flow, tools)` → `CompilationResult`
 
 ---
 
