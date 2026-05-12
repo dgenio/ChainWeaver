@@ -34,7 +34,7 @@ python -m pytest tests/ -v
 
 | Workflow | Trigger | Steps |
 |----------|---------|-------|
-| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 only); pytest across 3.10, 3.11, 3.12, 3.13 |
+| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13}` |
 | `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
 
 ---

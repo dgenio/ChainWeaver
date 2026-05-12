@@ -1181,7 +1181,7 @@ class FlowExecutor:
         retryer = Retrying(
             stop=stop_after_attempt(policy.max_retries + 1),
             wait=_wait_fn if policy.max_retries > 0 else wait_fixed(0),
-            retry=retry_if_exception_type(policy.retryable_errors),
+            retry=retry_if_exception_type(policy.resolved_retryable_errors()),
             reraise=True,
         )
 

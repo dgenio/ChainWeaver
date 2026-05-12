@@ -223,6 +223,7 @@ format_tool = Tool(
 
 search_flow = Flow(
     name="mcp_search",
+    version="0.1.0",
     description="MCP-style search: search → extract → format.",
     steps=[
         FlowStep(
@@ -238,8 +239,8 @@ search_flow = Flow(
             input_mapping={"extracted_items": "extracted_items", "query": "query"},
         ),
     ],
-    input_schema=SearchInput,
-    output_schema=FormatOutput,
+    input_schema_ref=Flow.schema_ref_from(SearchInput),
+    output_schema_ref=Flow.schema_ref_from(FormatOutput),
 )
 
 

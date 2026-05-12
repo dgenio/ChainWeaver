@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.2.0"
+version = "0.4.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -33,11 +33,16 @@ dependencies = [
 chainweaver = "chainweaver.cli:main"
 
 [project.optional-dependencies]
+yaml = [
+    "pyyaml>=6.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.8",
     "mypy>=1.0",
+    "pyyaml>=6.0",
+    "types-pyyaml>=6.0",
 ]
 
 [project.urls]

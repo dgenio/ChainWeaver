@@ -111,6 +111,7 @@ def _build_executor(
 ) -> FlowExecutor:
     flow = Flow(
         name="retry_flow",
+        version="0.1.0",
         description="Single-step flow used to assert retry behaviour.",
         steps=[
             FlowStep(
@@ -209,7 +210,7 @@ class TestRetryNonRetryable:
                 max_retries=5,
                 backoff_seconds=0.0,
                 backoff_multiplier=1.0,
-                retryable_errors=(KeyError,),
+                retryable_errors=("builtins:KeyError",),
             ),
         )
         result = ex.execute_flow("retry_flow", {"number": 1})

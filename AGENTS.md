@@ -40,13 +40,15 @@ chainweaver/
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
+├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
+├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── cli.py             typer-based 'chainweaver inspect' entry point
 └── py.typed           PEP 561 marker
 tests/
@@ -189,7 +191,9 @@ python -m mypy chainweaver/ tests/
 python -m pytest tests/ -v
 ```
 
-CI runs lint + format + mypy on Python 3.10 only; tests run across 3.10–3.13.
+CI runs lint + format + mypy on Python 3.10 / `ubuntu-latest` only; tests
+run across `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
+3.12, 3.13}` (12 jobs in total).
 
 For full CI, PR, branch, and commit conventions, see
 [workflows.md](docs/agent-context/workflows.md).
@@ -219,6 +223,8 @@ Full checklist: [review-checklist.md](docs/agent-context/review-checklist.md).
 | [invariants.md](docs/agent-context/invariants.md) | Hard rules, forbidden patterns | Modifying core modules, adding deps, touching executor |
 | [lessons-learned.md](docs/agent-context/lessons-learned.md) | Recurring mistake patterns | Before proposing changes to avoid known pitfalls |
 | [review-checklist.md](docs/agent-context/review-checklist.md) | Definition-of-done, review gates | Before submitting a PR, during code review |
+| [versioning-policy.md](docs/versioning-policy.md) | SemVer policy, public-API scope, deprecation process | Adding / removing / renaming public symbols, planning a release |
+| [v1-release-criteria.md](docs/v1-release-criteria.md) | Measurable v1.0.0 release bar | Before tagging a release, when scoping issues against the v1.0 milestone |
 
 ---
 

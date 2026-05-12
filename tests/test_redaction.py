@@ -178,6 +178,7 @@ class TestExecutorIntegration:
 
         flow = Flow(
             name="redact_flow",
+            version="0.1.0",
             description="Single-step flow.",
             steps=[FlowStep(tool_name="check_password")],
         )

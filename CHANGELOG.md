@@ -1,0 +1,121 @@
+# Changelog
+
+All notable changes to ChainWeaver will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+(see [docs/versioning-policy.md](docs/versioning-policy.md)).
+
+## [Unreleased]
+
+## [0.4.0] - 2026-05-12
+
+### Added
+
+- **Flow serialization** (#14): `Flow.to_yaml` / `to_json` /
+  `from_yaml` / `from_json` (and `DAGFlow` equivalents) plus the
+  module-level helpers `flow_to_dict`, `flow_from_dict`, `flow_to_json`,
+  `flow_from_json`, `flow_to_yaml`, `flow_from_yaml`. JSON support has
+  no extra runtime dependency; YAML support requires the new optional
+  extra `chainweaver[yaml]` (`pyyaml>=6.0`).
+- **`FlowSerializationError`** exception covering malformed payloads,
+  unknown `type` discriminators, unresolvable class refs, and
+  wrong-base refs.
+- **Pluggable registry storage** (#16): new `chainweaver/storage.py`
+  with a `RegistryStore` `typing.Protocol`, an `InMemoryStore` default
+  (preserves prior in-process behavior), and a `FileStore` that
+  persists each flow as `{name}@{version}.flow.json`. `FlowRegistry`
+  now accepts an optional `store=` parameter; the latest-version
+  pointer is rebuilt from the store on construction so file-backed
+  registries survive process restarts.
+- **CLI `validate`** (#45) — validate a single
+  `.flow.yaml` / `.flow.yml` / `.flow.json` file. Exit codes:
+  0 = valid, 1 = validation error, 2 = file not found.
+- **CLI `check`** (#45) — validate every flow file in a directory
+  (recursive). Supports `--quiet` and `--format json`. Exit codes:
+  0 = all valid, 1 = at least one invalid, 2 = directory not found.
+- **CLI `viz`** (#46) — render a registered flow as ASCII (default)
+  or DOT/Graphviz text. `chainweaver viz my_flow --format dot |
+  dot -Tpng -o my_flow.png` produces a rendered image.
+- **`flow_to_dot`** renderer in `chainweaver/viz.py`, plus
+  `Flow.to_dot()` / `DAGFlow.to_dot()` convenience methods.
+- **Benchmarks** (#29): new top-level `benchmarks/` directory with
+  `bench_naive_vs_compiled.py` (standalone, no test-framework deps)
+  and `benchmarks/README.md`.
+- **CI matrix** (#34): `ubuntu-latest`, `windows-latest`, and
+  `macos-latest` × Python 3.10–3.13 (12 jobs total). Lint, format, and
+  mypy remain pinned to the canonical Python 3.10 / Ubuntu leg.
+- **`docs/versioning-policy.md`** documenting the SemVer policy, public
+  API surface, and deprecation process.
+
+### Changed
+
+- **BREAKING:** `Flow.version` and `DAGFlow.version` are now **required**
+  fields (no `"0.0.0"` default). Callers that previously relied on the
+  implicit default must pass an explicit `version="..."`.
+- **BREAKING:** `Flow.input_schema` / `output_schema` (and the
+  `DAGFlow` equivalents) are no longer `type[BaseModel] | None` fields.
+  They are now read-only properties that lazy-resolve new
+  `input_schema_ref` / `output_schema_ref` fields holding
+  `"module:qualname"` strings. Use
+  `Flow.schema_ref_from(MySchema)` to derive the ref string from a
+  class. This change makes flows fully JSON/YAML-serializable; the
+  cost is that schemas referenced by serialized flows **must** live at
+  module top level (Python cannot reach `<locals>` via `importlib`).
+- **BREAKING:** `RetryPolicy.retryable_errors` is now a
+  `tuple[str, ...]` of `"module:qualname"` references rather than a
+  `tuple[type[BaseException], ...]`. The default value is
+  `("builtins:Exception",)`. `RetryPolicy.resolved_retryable_errors()`
+  resolves the refs to live classes just before the executor's retry
+  loop. Migrate `retryable_errors=(KeyError,)` to
+  `retryable_errors=("builtins:KeyError",)`.
+- `FlowBuilder` gains a `with_version(...)` method; if not called, the
+  builder picks a sensible `"0.1.0"` default to keep prototypes terse.
+- The CLI top-level help string now lists all four subcommands
+  (`inspect`, `validate`, `check`, `viz`).
+- `flow_to_ascii` (and the `Flow.to_ascii()` / `DAGFlow.to_ascii()`
+  convenience methods, which it backs) now emits the unicode arrow `→`
+  between steps instead of `-->`, matching issue #46's acceptance
+  criterion. Consumers that string-matched `[a] --> [b]` should update
+  their expectations to `[a] → [b]`. The Mermaid renderer
+  (`flow_to_mermaid`) is unaffected — Mermaid grammar still requires
+  `-->`.
+
+### Migration guide (0.2.x → 0.4.0)
+
+```python
+# Before
+flow = Flow(
+    name="example",
+    description="...",
+    steps=[...],
+    input_schema=MyInput,
+    output_schema=MyOutput,
+)
+policy = RetryPolicy(retryable_errors=(ValueError,))
+
+# After
+flow = Flow(
+    name="example",
+    version="1.0.0",            # now required
+    description="...",
+    steps=[...],
+    input_schema_ref=Flow.schema_ref_from(MyInput),
+    output_schema_ref=Flow.schema_ref_from(MyOutput),
+)
+policy = RetryPolicy(retryable_errors=("builtins:ValueError",))
+```
+
+Reading the resolved schema is still ergonomic:
+
+```python
+flow.input_schema   # → MyInput (resolves the ref lazily)
+```
+
+## [0.2.0] and earlier
+
+This file starts at 0.4.0.  See the git history for the contents of the
+0.1.0 and 0.2.0 releases.
+
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dgenio/ChainWeaver/releases/tag/v0.4.0

@@ -261,6 +261,7 @@ class TestRoundTripWithExecutor:
 
         flow = Flow(
             name="decorator_flow",
+            version="0.1.0",
             description="Test flow with decorated tool.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )
@@ -285,6 +286,7 @@ class TestRoundTripWithExecutor:
 
         flow = Flow(
             name="double_then_add",
+            version="0.1.0",
             description="Doubles then adds ten.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),

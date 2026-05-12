@@ -43,9 +43,10 @@ def _node_id(prefix: str, idx: int) -> str:
 def flow_to_ascii(flow: Flow | DAGFlow) -> str:
     """Render *flow* as a single-line ASCII flow diagram.
 
-    Linear flows produce ``[a] --> [b] --> [c]``; DAG flows render each
-    dependency as a separate line ``[a] --> [b]`` so that branching is
-    visible.  Empty flows return ``"(empty flow)"``.
+    Linear flows produce ``[a] → [b] → [c]``; DAG flows render each
+    dependency as a separate line ``[a] → [b]`` so that branching is
+    visible (issue #46 acceptance: ASCII output uses the unicode arrow
+    ``→``).  Empty flows return ``"(empty flow)"``.
     """
     from chainweaver.flow import DAGFlow
 
@@ -56,16 +57,16 @@ def flow_to_ascii(flow: Flow | DAGFlow) -> str:
         return _dag_to_ascii(flow)
 
     parts = [f"[{step.tool_name}]" for step in flow.steps]
-    return " --> ".join(parts)
+    return " → ".join(parts)
 
 
 def _dag_to_ascii(flow: DAGFlow) -> str:
-    """Render a DAG as one ``[parent] --> [child]`` edge per line."""
+    """Render a DAG as one ``[parent] → [child]`` edge per line."""
     label_by_id = {step.step_id: f"[{step.tool_name}]" for step in flow.steps}
     edges: list[str] = []
     for step in flow.steps:
         for dep in step.depends_on:
-            edges.append(f"{label_by_id[dep]} --> {label_by_id[step.step_id]}")
+            edges.append(f"{label_by_id[dep]} → {label_by_id[step.step_id]}")
     if not edges:
         # All steps independent (no edges) — list them on one line.
         return ", ".join(label_by_id.values())
@@ -138,6 +139,85 @@ def _node_label(
         return base
     fields = ", ".join(f"{_safe_label(k)}: {_safe_label(v)}" for k, v in schema_fields.items())
     return f"{base}<br/>{fields}"
+
+
+# ---------------------------------------------------------------------------
+# Flow → DOT (Graphviz)
+# ---------------------------------------------------------------------------
+
+
+def _dot_quote(text: str) -> str:
+    r"""Quote *text* for a DOT label (per the Graphviz spec).
+
+    Wraps the string in double quotes and escapes embedded ``"`` and ``\``.
+    Newlines are converted to ``\n`` so labels never break the DOT grammar.
+    """
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def _dot_identifier(flow_name: str) -> str:
+    """Return a DOT graph identifier derived from *flow_name*.
+
+    Identifiers are ASCII-letter-digit-underscore only; anything else is
+    replaced with ``_`` so the resulting ``digraph <id> { ... }`` parses
+    cleanly even when the flow name contains hyphens or spaces.
+    """
+    sanitized = "".join(c if c.isalnum() or c == "_" else "_" for c in flow_name)
+    if not sanitized or not sanitized[0].isalpha():
+        sanitized = "G_" + sanitized
+    return sanitized
+
+
+def flow_to_dot(flow: Flow | DAGFlow) -> str:
+    """Render *flow* as a DOT (Graphviz) string (issue #46).
+
+    Pure-string generation with no Graphviz dependency.  Consumers can pipe
+    the output to ``dot`` (e.g. ``chainweaver viz my_flow --format dot |
+    dot -Tpng -o my_flow.png``) when they want a rendered image.
+
+    Linear :class:`~chainweaver.flow.Flow` objects produce a chain of edges
+    in declaration order; :class:`~chainweaver.flow.DAGFlow` objects use
+    each step's ``depends_on`` declaration verbatim.  Empty flows return
+    a syntactically valid empty digraph.
+
+    Args:
+        flow: A :class:`~chainweaver.flow.Flow` or
+            :class:`~chainweaver.flow.DAGFlow`.
+
+    Returns:
+        A valid DOT graph string ready to feed to Graphviz.
+    """
+    from chainweaver.flow import DAGFlow as _DAGFlow
+
+    graph_id = _dot_identifier(flow.name)
+    if not flow.steps:
+        return f"digraph {graph_id} {{\n}}\n"
+
+    lines = [f"digraph {graph_id} {{"]
+
+    if isinstance(flow, _DAGFlow):
+        # Use stable node ids derived from step_id; emit labels separately so
+        # tool names with spaces / special chars don't break the syntax.
+        node_ids = {step.step_id: f"S_{_dot_identifier(step.step_id)}" for step in flow.steps}
+        for dag_step in flow.steps:
+            lines.append(
+                f"  {node_ids[dag_step.step_id]} [label={_dot_quote(dag_step.tool_name)}];"
+            )
+        for dag_step in flow.steps:
+            for dep in dag_step.depends_on:
+                lines.append(f"  {node_ids[dep]} -> {node_ids[dag_step.step_id]};")
+    else:
+        # Linear flows may have duplicate tool names, so node ids are derived
+        # from step position rather than tool name.
+        positional_ids = [_node_id("S", i) for i in range(len(flow.steps))]
+        for nid, lin_step in zip(positional_ids, flow.steps, strict=True):
+            lines.append(f"  {nid} [label={_dot_quote(lin_step.tool_name)}];")
+        for prev, nxt in pairwise(positional_ids):
+            lines.append(f"  {prev} -> {nxt};")
+
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------

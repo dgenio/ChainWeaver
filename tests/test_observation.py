@@ -136,6 +136,7 @@ class TestExecutorIntegration:
     def test_executor_records_observed_trace(self) -> None:
         flow = Flow(
             name="obs_flow",
+            version="0.1.0",
             description="Two-step.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -175,6 +176,7 @@ class TestExecutorIntegration:
     def test_executor_without_recorder_does_not_track(self) -> None:
         flow = Flow(
             name="obs_flow_2",
+            version="0.1.0",
             description="No recorder.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )

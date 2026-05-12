@@ -43,6 +43,7 @@ def _make_tool() -> Tool:
 def _make_flow(name: str = "test_flow", status: FlowStatus = FlowStatus.ACTIVE) -> Flow:
     return Flow(
         name=name,
+        version="0.1.0",
         description="A test flow.",
         steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         status=status,
@@ -65,7 +66,9 @@ class TestFlowStatusEnum:
         assert FlowStatus.DISABLED.value == "disabled"
 
     def test_default_status_is_active(self) -> None:
-        flow = Flow(name="test", description="Test.", steps=[FlowStep(tool_name="x")])
+        flow = Flow(
+            name="test", version="0.1.0", description="Test.", steps=[FlowStep(tool_name="x")]
+        )
         assert flow.status == FlowStatus.ACTIVE
 
 

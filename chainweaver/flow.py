@@ -13,6 +13,7 @@ registration time via :func:`validate_dag_topology`.
 
 from __future__ import annotations
 
+import importlib
 import random
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from chainweaver.exceptions import DAGDefinitionError
+from chainweaver.exceptions import DAGDefinitionError, FlowSerializationError
 
 
 class FlowStatus(str, Enum):
@@ -36,6 +37,65 @@ class FlowStatus(str, Enum):
     ACTIVE = "active"
     NEEDS_REVIEW = "needs_review"
     DISABLED = "disabled"
+
+
+def _qualified_name(cls: type) -> str:
+    """Return ``"module:qualname"`` for *cls*, suitable for storage and lookup."""
+    return f"{cls.__module__}:{cls.__qualname__}"
+
+
+def resolve_class_ref(ref: str, *, expected_base: type | None = None) -> type:
+    """Resolve a ``"module:qualname"`` string to the referenced class object.
+
+    Used for both schema refs (``Flow.input_schema_ref``, etc.) and exception
+    refs (``RetryPolicy.retryable_errors``).  All breakage modes raise
+    :class:`~chainweaver.exceptions.FlowSerializationError` with a precise
+    detail so that callers can surface actionable error messages.
+
+    Args:
+        ref: A reference of the form ``"package.module:ClassName"`` or
+            ``"package.module:Outer.Inner"`` (for nested classes).
+        expected_base: When provided, the resolved class must be a subclass
+            of this type.  Useful to enforce that schema refs resolve to
+            ``BaseModel`` subclasses or that error refs resolve to
+            ``BaseException`` subclasses.
+
+    Returns:
+        The resolved class object.
+
+    Raises:
+        FlowSerializationError: When *ref* is not in ``module:qualname`` form,
+            when the module cannot be imported, when the attribute does not
+            exist, when the attribute is not a class, or when it does not
+            subclass *expected_base*.
+    """
+    if ":" not in ref:
+        raise FlowSerializationError(f"Class ref '{ref}' must be in 'module:qualname' form")
+    module_path, qualname = ref.split(":", 1)
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise FlowSerializationError(
+            f"Cannot import module '{module_path}' for ref '{ref}': {exc}"
+        ) from exc
+    obj: Any = module
+    for part in qualname.split("."):
+        try:
+            obj = getattr(obj, part)
+        except AttributeError as exc:
+            raise FlowSerializationError(
+                f"Attribute '{qualname}' not found in module '{module_path}' for ref '{ref}'"
+            ) from exc
+    if not isinstance(obj, type):
+        raise FlowSerializationError(
+            f"Ref '{ref}' resolved to {type(obj).__name__}, expected a class"
+        )
+    if expected_base is not None and not issubclass(obj, expected_base):
+        raise FlowSerializationError(
+            f"Ref '{ref}' resolved to {obj.__name__}, "
+            f"which is not a subclass of {expected_base.__name__}"
+        )
+    return obj
 
 
 class RetryPolicy(BaseModel):
@@ -59,18 +119,48 @@ class RetryPolicy(BaseModel):
             between retries.  Must be ``>= 1.0``.
         jitter: When ``True``, multiply each computed delay by a uniform
             sample in ``[0.5, 1.5)``.
-        retryable_errors: Exception types that trigger a retry.  Anything
-            else fails immediately.  Defaults to ``(Exception,)`` — retry on
-            any error.
+        retryable_errors: Exception class references that trigger a retry.
+            Each entry is a ``"module:qualname"`` string (e.g.
+            ``"builtins.ValueError"`` written as ``"builtins:ValueError"``).
+            Anything else fails immediately.  Defaults to
+            ``("builtins:Exception",)`` — retry on any error.
+
+            String refs (rather than live class objects) keep the policy
+            JSON/YAML-serializable; refs are resolved to types just before
+            the retry loop in :mod:`chainweaver.executor`.
     """
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=True)
 
     max_retries: int = Field(default=3, ge=0)
     backoff_seconds: float = Field(default=1.0, ge=0.0)
     backoff_multiplier: float = Field(default=2.0, ge=1.0)
     jitter: bool = False
-    retryable_errors: tuple[type[BaseException], ...] = (Exception,)
+    retryable_errors: tuple[str, ...] = ("builtins:Exception",)
+
+    @field_validator("retryable_errors")
+    @classmethod
+    def _validate_retryable_errors(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("retryable_errors must contain at least one class ref.")
+        for ref in value:
+            if ":" not in ref:
+                raise ValueError(
+                    f"retryable_errors entry '{ref}' must be in 'module:qualname' form "
+                    f"(e.g. 'builtins:ValueError')."
+                )
+        return value
+
+    def resolved_retryable_errors(self) -> tuple[type[BaseException], ...]:
+        """Resolve ``retryable_errors`` ref strings to a tuple of exception classes.
+
+        Raises:
+            FlowSerializationError: When any ref cannot be resolved or does
+                not point to a :class:`BaseException` subclass.
+        """
+        return tuple(
+            resolve_class_ref(ref, expected_base=BaseException) for ref in self.retryable_errors
+        )
 
     def compute_delay(self, attempt_number: int) -> float:
         """Return the wait, in seconds, before retry attempt *attempt_number*.
@@ -147,46 +237,88 @@ class Flow(BaseModel):
         trigger_conditions: Optional free-form metadata that an agent or
             higher-level orchestrator can use to decide when to invoke this
             flow.  ChainWeaver itself does not evaluate these conditions.
-        input_schema: An optional Pydantic :class:`~pydantic.BaseModel`
-            subclass describing the shape of the *initial_input* dictionary
-            that a caller must provide when executing this flow.  When set,
-            the :class:`~chainweaver.executor.FlowExecutor` validates
-            *initial_input* against this schema **before** the first step
-            runs.
-        output_schema: An optional Pydantic :class:`~pydantic.BaseModel`
-            subclass describing the shape of the final merged context
-            produced after every step has completed.  When set, the
+        input_schema_ref: An optional ``"module:qualname"`` reference to a
+            Pydantic :class:`~pydantic.BaseModel` subclass describing the
+            shape of the *initial_input* dictionary that a caller must
+            provide when executing this flow.  When set, the
+            :class:`~chainweaver.executor.FlowExecutor` validates
+            *initial_input* against the resolved schema **before** the first
+            step runs.
+
+            String refs (rather than live class objects) keep the flow
+            JSON/YAML-serializable; use :meth:`schema_ref_from` to derive
+            the ref from a class.  The :attr:`input_schema` property
+            resolves the ref lazily.
+        output_schema_ref: An optional ``"module:qualname"`` reference to a
+            Pydantic :class:`~pydantic.BaseModel` subclass describing the
+            shape of the final merged context produced after every step has
+            completed.  When set, the
             :class:`~chainweaver.executor.FlowExecutor` validates the
-            accumulated context against this schema **after** the last step
-            finishes.
+            accumulated context against the resolved schema **after** the
+            last step finishes.
 
     Example::
 
         flow = Flow(
             name="double_add_format",
+            version="1.0.0",
             description="Doubles a number, adds 10, and formats the result.",
             steps=[
                 FlowStep(tool_name="double",    input_mapping={"number": "number"}),
                 FlowStep(tool_name="add_ten",   input_mapping={"value": "value"}),
                 FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
-            output_schema=FormattedOutput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+            output_schema_ref=Flow.schema_ref_from(FormattedOutput),
         )
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     name: str
-    version: str = "0.0.0"
+    version: str
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
     status: FlowStatus = FlowStatus.ACTIVE
     trigger_conditions: dict[str, Any] | None = None
-    input_schema: type[BaseModel] | None = None
-    output_schema: type[BaseModel] | None = None
+    input_schema_ref: str | None = None
+    output_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+
+    @staticmethod
+    def schema_ref_from(cls: type[BaseModel]) -> str:
+        """Return a ``"module:qualname"`` ref string for *cls*.
+
+        Convenience helper so callers can write
+        ``input_schema_ref=Flow.schema_ref_from(NumberInput)`` instead of
+        hand-formatting the ref string.
+        """
+        return _qualified_name(cls)
+
+    @property
+    def input_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`input_schema_ref` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.input_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.input_schema_ref, expected_base=BaseModel)
+        return resolved
+
+    @property
+    def output_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`output_schema_ref` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.output_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.output_schema_ref, expected_base=BaseModel)
+        return resolved
 
     def to_ascii(self) -> str:
         """Return a single-line ASCII flow diagram (issue #79)."""
@@ -199,6 +331,79 @@ class Flow(BaseModel):
         from chainweaver.viz import flow_to_mermaid
 
         return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
+
+    def to_dot(self) -> str:
+        """Return a DOT (Graphviz) rendering of this flow (issue #46)."""
+        from chainweaver.viz import flow_to_dot
+
+        return flow_to_dot(self)
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        """Serialize this flow to a JSON string (issue #14).
+
+        Args:
+            indent: Indentation level for pretty-printing.  ``None`` produces
+                a compact single-line representation.
+
+        Returns:
+            A JSON string that round-trips via :meth:`from_json`.
+        """
+        from chainweaver.serialization import flow_to_json
+
+        return flow_to_json(self, indent=indent)
+
+    def to_yaml(self) -> str:
+        """Serialize this flow to a YAML string (issue #14).
+
+        Requires ``pyyaml`` to be installed (``pip install chainweaver[yaml]``).
+
+        Returns:
+            A YAML string that round-trips via :meth:`from_yaml`.
+
+        Raises:
+            FlowSerializationError: When ``pyyaml`` is not available.
+        """
+        from chainweaver.serialization import flow_to_yaml
+
+        return flow_to_yaml(self)
+
+    @classmethod
+    def from_json(cls, data: str) -> Flow:
+        """Deserialize a :class:`Flow` from a JSON string (issue #14).
+
+        Raises:
+            FlowSerializationError: When the JSON payload is malformed,
+                missing required fields, or describes a :class:`DAGFlow`
+                instead of a :class:`Flow`.
+        """
+        from chainweaver.serialization import flow_from_json
+
+        result = flow_from_json(data)
+        if not isinstance(result, cls):
+            raise FlowSerializationError(
+                f"Expected a Flow payload but got {type(result).__name__}"
+            )
+        return result
+
+    @classmethod
+    def from_yaml(cls, data: str) -> Flow:
+        """Deserialize a :class:`Flow` from a YAML string (issue #14).
+
+        Requires ``pyyaml`` to be installed (``pip install chainweaver[yaml]``).
+
+        Raises:
+            FlowSerializationError: When the YAML payload is malformed,
+                missing required fields, or describes a :class:`DAGFlow`
+                instead of a :class:`Flow`.
+        """
+        from chainweaver.serialization import flow_from_yaml
+
+        result = flow_from_yaml(data)
+        if not isinstance(result, cls):
+            raise FlowSerializationError(
+                f"Expected a Flow payload but got {type(result).__name__}"
+            )
+        return result
 
 
 # TODO (Phase 2): Add conditional branching — a step that inspects
@@ -304,10 +509,14 @@ class DAGFlow(BaseModel):
             that no LLM calls are inserted between steps.
         trigger_conditions: Optional free-form metadata for agent-level
             dispatch (not evaluated by ChainWeaver itself).
-        input_schema: Optional Pydantic :class:`~pydantic.BaseModel` subclass
-            validated against ``initial_input`` before the first step runs.
-        output_schema: Optional Pydantic :class:`~pydantic.BaseModel` subclass
-            validated against the final merged context after all steps finish.
+        input_schema_ref: Optional ``"module:qualname"`` ref to a Pydantic
+            :class:`~pydantic.BaseModel` subclass validated against
+            ``initial_input`` before the first step runs.  Resolved lazily
+            via the :attr:`input_schema` property.
+        output_schema_ref: Optional ``"module:qualname"`` ref to a Pydantic
+            :class:`~pydantic.BaseModel` subclass validated against the
+            final merged context after all steps finish.  Resolved lazily
+            via the :attr:`output_schema` property.
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
@@ -319,6 +528,7 @@ class DAGFlow(BaseModel):
 
         dag = DAGFlow(
             name="diamond",
+            version="1.0.0",
             description="A → (B, C) → D",
             steps=[
                 DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
@@ -329,18 +539,40 @@ class DAGFlow(BaseModel):
         )
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     name: str
-    version: str = "0.0.0"
+    version: str
     description: str
     steps: list[DAGFlowStep]
     deterministic: bool = True
     status: FlowStatus = FlowStatus.ACTIVE
     trigger_conditions: dict[str, Any] | None = None
-    input_schema: type[BaseModel] | None = None
-    output_schema: type[BaseModel] | None = None
+    input_schema_ref: str | None = None
+    output_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+
+    @staticmethod
+    def schema_ref_from(cls: type[BaseModel]) -> str:
+        """Return a ``"module:qualname"`` ref string for *cls*.
+
+        See :meth:`Flow.schema_ref_from` for full docs.
+        """
+        return _qualified_name(cls)
+
+    @property
+    def input_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`input_schema_ref` to a class, or ``None`` if unset."""
+        if self.input_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.input_schema_ref, expected_base=BaseModel)
+        return resolved
+
+    @property
+    def output_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`output_schema_ref` to a class, or ``None`` if unset."""
+        if self.output_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.output_schema_ref, expected_base=BaseModel)
+        return resolved
 
     def to_ascii(self) -> str:
         """Return a multi-line ASCII rendering of this DAG (issue #79)."""
@@ -353,6 +585,63 @@ class DAGFlow(BaseModel):
         from chainweaver.viz import flow_to_mermaid
 
         return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
+
+    def to_dot(self) -> str:
+        """Return a DOT (Graphviz) rendering of this DAG (issue #46)."""
+        from chainweaver.viz import flow_to_dot
+
+        return flow_to_dot(self)
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        """Serialize this DAG flow to a JSON string (issue #14)."""
+        from chainweaver.serialization import flow_to_json
+
+        return flow_to_json(self, indent=indent)
+
+    def to_yaml(self) -> str:
+        """Serialize this DAG flow to a YAML string (issue #14).
+
+        Raises:
+            FlowSerializationError: When ``pyyaml`` is not available.
+        """
+        from chainweaver.serialization import flow_to_yaml
+
+        return flow_to_yaml(self)
+
+    @classmethod
+    def from_json(cls, data: str) -> DAGFlow:
+        """Deserialize a :class:`DAGFlow` from a JSON string (issue #14).
+
+        Raises:
+            FlowSerializationError: When the JSON payload is malformed,
+                missing required fields, or describes a :class:`Flow`
+                instead of a :class:`DAGFlow`.
+        """
+        from chainweaver.serialization import flow_from_json
+
+        result = flow_from_json(data)
+        if not isinstance(result, cls):
+            raise FlowSerializationError(
+                f"Expected a DAGFlow payload but got {type(result).__name__}"
+            )
+        return result
+
+    @classmethod
+    def from_yaml(cls, data: str) -> DAGFlow:
+        """Deserialize a :class:`DAGFlow` from a YAML string (issue #14).
+
+        Raises:
+            FlowSerializationError: When ``pyyaml`` is not available or when
+                the payload is malformed or refers to a :class:`Flow`.
+        """
+        from chainweaver.serialization import flow_from_yaml
+
+        result = flow_from_yaml(data)
+        if not isinstance(result, cls):
+            raise FlowSerializationError(
+                f"Expected a DAGFlow payload but got {type(result).__name__}"
+            )
+        return result
 
 
 # ---------------------------------------------------------------------------

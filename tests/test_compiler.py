@@ -35,6 +35,11 @@ class FloatInput(BaseModel):
     value: float
 
 
+class RequiredOutputWithMissingField(BaseModel):
+    value: int
+    missing_field: str
+
+
 # ---------------------------------------------------------------------------
 # Tool functions
 # ---------------------------------------------------------------------------
@@ -93,14 +98,15 @@ class TestValidFlow:
         tools = _make_tools()
         flow = Flow(
             name="double_add_format",
+            version="0.1.0",
             description="Doubles, adds ten, formats.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
                 FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
-            output_schema=FormattedOutput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+            output_schema_ref=Flow.schema_ref_from(FormattedOutput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -110,11 +116,12 @@ class TestValidFlow:
         tools = _make_tools()
         flow = Flow(
             name="simple",
+            version="0.1.0",
             description="Simple flow.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -124,9 +131,10 @@ class TestMissingTool:
     def test_missing_tool_detected(self) -> None:
         flow = Flow(
             name="bad",
+            version="0.1.0",
             description="Bad flow.",
             steps=[FlowStep(tool_name="nonexistent", input_mapping={"x": "x"})],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, {})
         assert result.success is False
@@ -140,11 +148,12 @@ class TestMissingMappingKey:
         tools = _make_tools()
         flow = Flow(
             name="bad_mapping",
+            version="0.1.0",
             description="Bad mapping.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "missing_key"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is False
@@ -154,12 +163,13 @@ class TestMissingMappingKey:
         tools = _make_tools()
         flow = Flow(
             name="multi_step",
+            version="0.1.0",
             description="Multi-step flow.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -187,13 +197,14 @@ class TestTypeMismatch:
         tools = {"str_tool": str_tool, **_make_tools()}
         flow = Flow(
             name="type_mismatch",
+            version="0.1.0",
             description="Type mismatch flow.",
             steps=[
                 FlowStep(tool_name="str_tool", input_mapping={"value": "number"}),
                 # "text" (str) mapped to "value" (int) on add_ten
                 FlowStep(tool_name="add_ten", input_mapping={"value": "text"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is False
@@ -234,12 +245,13 @@ class TestTypeMismatch:
         tools = {"int_tool": int_tool, "float_tool": float_tool}
         flow = Flow(
             name="widening",
+            version="0.1.0",
             description="Int to float widening.",
             steps=[
                 FlowStep(tool_name="int_tool", input_mapping={"number": "number"}),
                 FlowStep(tool_name="float_tool", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -247,19 +259,16 @@ class TestTypeMismatch:
 
 class TestOutputSchemaGap:
     def test_output_schema_gap_detected(self) -> None:
-        class RequiredOutput(BaseModel):
-            value: int
-            missing_field: str
-
         tools = _make_tools()
         flow = Flow(
             name="gap",
+            version="0.1.0",
             description="Missing output field.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
             ],
-            input_schema=NumberInput,
-            output_schema=RequiredOutput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+            output_schema_ref=Flow.schema_ref_from(RequiredOutputWithMissingField),
         )
         result = compile_flow(flow, tools)
         assert result.success is False
@@ -302,12 +311,13 @@ class TestOptionalTypeCompatibility:
         tools = {"opt": opt_tool, **_make_tools()}
         flow = Flow(
             name="opt_flow",
+            version="0.1.0",
             description="Map int into Optional[int].",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="opt", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -333,12 +343,13 @@ class TestOptionalTypeCompatibility:
         tools = {"pep604": tool, **_make_tools()}
         flow = Flow(
             name="pep604_flow",
+            version="0.1.0",
             description="Map int into int | None.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="pep604", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -364,12 +375,13 @@ class TestOptionalTypeCompatibility:
         # Map an int source — should pass (unknown target treats as compatible).
         flow = Flow(
             name="multi_flow",
+            version="0.1.0",
             description="Map int into Union[int, str].",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="multi", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         # Multi-arm Union[int, str] is unknown → no false-positive type_mismatch.
@@ -381,6 +393,7 @@ class TestUnknownTargetKey:
         tools = _make_tools()
         flow = Flow(
             name="bad_target",
+            version="0.1.0",
             description="Maps to a field the tool does not declare.",
             steps=[
                 FlowStep(
@@ -388,7 +401,7 @@ class TestUnknownTargetKey:
                     input_mapping={"number": "number", "ghost": "number"},
                 ),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is False
@@ -421,9 +434,10 @@ class TestMissingRequiredInput:
         # Provide only `a` via mapping — `b` is required but missing.
         flow = Flow(
             name="missing_required",
+            version="0.1.0",
             description="Only `a` is mapped.",
             steps=[FlowStep(tool_name="two", input_mapping={"a": "number"})],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is False
@@ -453,9 +467,10 @@ class TestMissingRequiredInput:
         # Empty mapping — `number` is in the input_schema context, so it is satisfied.
         flow = Flow(
             name="empty_map",
+            version="0.1.0",
             description="Empty mapping satisfied by context.",
             steps=[FlowStep(tool_name="one")],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         assert result.success is True
@@ -482,9 +497,10 @@ class TestMissingRequiredInput:
         # No mapping for "value", and "value" not in context — but it's optional.
         flow = Flow(
             name="optional_unmapped",
+            version="0.1.0",
             description="Optional input deliberately unmapped.",
             steps=[FlowStep(tool_name="opt", input_mapping={"_dummy": "number"})],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         result = compile_flow(flow, tools)
         # Optional input field `value` should not produce a missing_required_input

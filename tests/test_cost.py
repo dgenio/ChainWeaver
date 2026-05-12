@@ -23,6 +23,7 @@ from chainweaver.tools import Tool
 def _build_two_step_executor(*, cost_profile: CostProfile | None = None) -> FlowExecutor:
     flow = Flow(
         name="cost_two_step",
+        version="0.1.0",
         description="Two-step flow.",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -159,6 +160,7 @@ class TestExecutorIntegration:
 
         flow = Flow(
             name="cost_boom",
+            version="0.1.0",
             description="Always-failing flow.",
             steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
         )

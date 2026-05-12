@@ -28,6 +28,7 @@ from chainweaver.tools import Tool
 def _build_executor() -> FlowExecutor:
     flow = Flow(
         name="replay_two_step",
+        version="0.1.0",
         description="Two-step flow used for replay tests.",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -97,6 +98,7 @@ class TestVerifyDiff:
         registry.register_flow(
             Flow(
                 name="moving_target",
+                version="0.1.0",
                 description="Tool output changes between runs.",
                 steps=[FlowStep(tool_name="counter", input_mapping={"number": "number"})],
             )
@@ -183,6 +185,7 @@ class TestResumeFromStep:
         registry = FlowRegistry()
         flow = DAGFlow(
             name="dag_replay",
+            version="0.1.0",
             description="Linear DAG used to verify the rejection path.",
             steps=[DAGFlowStep(tool_name="double", step_id="A", depends_on=[])],
         )
@@ -214,6 +217,7 @@ class TestReplayWithMissingTool:
         registry = FlowRegistry()
         flow = Flow(
             name="missing_tool",
+            version="0.1.0",
             description="Single step.",
             steps=[FlowStep(tool_name="ephemeral", input_mapping={"x": "x"})],
         )

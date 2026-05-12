@@ -177,6 +177,7 @@ class TestCheckFlowCompatibility:
         )
         flow = Flow(
             name="f",
+            version="0.1.0",
             description="Flow.",
             steps=[FlowStep(tool_name="proc")],
             tool_schema_hashes={"proc": tool.schema_hash},
@@ -187,6 +188,7 @@ class TestCheckFlowCompatibility:
     def test_missing_tool_detected(self) -> None:
         flow = Flow(
             name="f",
+            version="0.1.0",
             description="Flow.",
             steps=[FlowStep(tool_name="missing")],
         )
@@ -205,6 +207,7 @@ class TestCheckFlowCompatibility:
         )
         flow = Flow(
             name="f",
+            version="0.1.0",
             description="Flow.",
             steps=[FlowStep(tool_name="proc")],
             tool_schema_hashes={"proc": "0000000000000000"},
@@ -223,6 +226,7 @@ class TestCheckFlowCompatibility:
         )
         flow = Flow(
             name="f",
+            version="0.1.0",
             description="Flow.",
             steps=[FlowStep(tool_name="proc")],
             tool_schema_hashes=None,
