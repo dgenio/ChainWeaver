@@ -72,7 +72,13 @@ class RegistryStore(Protocol):
         ...
 
     def list_keys(self) -> list[tuple[str, str]]:
-        """Return all ``(name, version)`` pairs in deterministic order."""
+        """Return all ``(name, version)`` pairs sorted lexicographically.
+
+        Sort order is fixed (``sorted(..., key=lambda kv: kv)``) so the
+        result is reproducible across processes, backends, and the same
+        backend's repeated calls.  Callers that need a different ordering
+        (e.g. semver) should re-sort the returned list.
+        """
         ...
 
     def delete_flow(self, name: str, version: str) -> None:
@@ -116,7 +122,7 @@ class InMemoryStore:
         return (name, version) in self._flows
 
     def list_keys(self) -> list[tuple[str, str]]:
-        return list(self._flows)
+        return sorted(self._flows)
 
     def delete_flow(self, name: str, version: str) -> None:
         try:

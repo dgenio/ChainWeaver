@@ -207,8 +207,8 @@ def flow_to_dot(flow: Flow | DAGFlow) -> str:
             for dep in dag_step.depends_on:
                 lines.append(f"  {node_ids[dep]} -> {node_ids[dag_step.step_id]};")
     else:
-        node_ids = {step.tool_name: _node_id("S", i) for i, step in enumerate(flow.steps)}
-        # We could have duplicate tool names in a linear flow; index by position.
+        # Linear flows may have duplicate tool names, so node ids are derived
+        # from step position rather than tool name.
         positional_ids = [_node_id("S", i) for i in range(len(flow.steps))]
         for nid, lin_step in zip(positional_ids, flow.steps, strict=True):
             lines.append(f"  {nid} [label={_dot_quote(lin_step.tool_name)}];")

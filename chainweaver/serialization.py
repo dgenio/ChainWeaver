@@ -136,8 +136,9 @@ def flow_to_yaml(flow: AnyFlow) -> str:
     """Serialize *flow* to a YAML string.
 
     Requires ``pyyaml`` to be installed.  The output uses block style
-    (`default_flow_style=False`) and preserves key order so files are
-    diff-friendly.
+    (``default_flow_style=False``) and emits keys in alphabetical order
+    (``sort_keys=True``) so the same flow always renders identically and
+    diffs stay stable across processes.
 
     Raises:
         FlowSerializationError: When ``pyyaml`` is not available.
