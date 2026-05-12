@@ -99,7 +99,7 @@ from chainweaver.serialization import (
 )
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.tools import Tool
-from chainweaver.viz import flow_to_ascii, flow_to_mermaid, result_to_mermaid
+from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
 
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
@@ -162,6 +162,7 @@ __all__ = [
     "flow_from_yaml",
     "flow_to_ascii",
     "flow_to_dict",
+    "flow_to_dot",
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",

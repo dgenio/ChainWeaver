@@ -13,6 +13,9 @@ Available commands
 - ``chainweaver check <dir>`` — validate every flow file in *dir* and
   print a summary; quiet mode (``--quiet``) emits only the exit code
   (issue #45).
+- ``chainweaver viz <flow>`` — render a registered flow as ASCII or DOT
+  (Graphviz) text. Pipe the DOT output through ``dot -Tpng`` to produce
+  an image (issue #46).
 
 Programmatic registration entry point
 -------------------------------------
@@ -59,6 +62,7 @@ from chainweaver.exceptions import FlowNotFoundError, FlowSerializationError
 from chainweaver.flow import DAGFlow, Flow
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml
+from chainweaver.viz import flow_to_ascii, flow_to_dot
 
 app = typer.Typer(
     name="chainweaver",
@@ -138,6 +142,64 @@ def inspect_command(
         typer.echo(json.dumps(_flow_to_dict(flow), indent=2, default=str))
     else:
         typer.echo(_flow_to_table(flow))
+
+
+# ---------------------------------------------------------------------------
+# viz command (issue #46)
+# ---------------------------------------------------------------------------
+
+
+class VizFormat(str, Enum):
+    """Output format options for ``chainweaver viz``."""
+
+    ASCII = "ascii"
+    DOT = "dot"
+
+
+_VIZ_FLOW_NAME_ARG = typer.Argument(..., help="Name of the flow to visualize.")
+_VIZ_FORMAT_OPTION = typer.Option(
+    VizFormat.ASCII,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Visualization format: 'ascii' (default, terminal-friendly) or 'dot' (Graphviz).",
+)
+
+
+@app.command("viz")
+def viz_command(
+    flow_name: str = _VIZ_FLOW_NAME_ARG,
+    output_format: VizFormat = _VIZ_FORMAT_OPTION,
+) -> None:
+    """Render a registered flow as ASCII or DOT (Graphviz) text.
+
+    Reads the flow from the registry installed via
+    :func:`set_default_registry`, exactly like ``inspect``.  The DOT output
+    is plain text — pipe it through ``dot`` to produce an image::
+
+        chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
+
+    Exit codes: 0 = success, 1 = flow not found or no registry configured.
+    """
+    registry = _DEFAULT_REGISTRY
+    if registry is None:
+        typer.echo(
+            "No registry configured. Call chainweaver.cli.set_default_registry(...) "
+            "before invoking the CLI.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        flow = registry.get_flow(flow_name)
+    except FlowNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format is VizFormat.DOT:
+        typer.echo(flow_to_dot(flow), nl=False)
+    else:
+        typer.echo(flow_to_ascii(flow))
 
 
 # ---------------------------------------------------------------------------

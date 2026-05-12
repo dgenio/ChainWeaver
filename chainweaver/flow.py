@@ -332,6 +332,12 @@ class Flow(BaseModel):
 
         return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
 
+    def to_dot(self) -> str:
+        """Return a DOT (Graphviz) rendering of this flow (issue #46)."""
+        from chainweaver.viz import flow_to_dot
+
+        return flow_to_dot(self)
+
     def to_json(self, *, indent: int | None = 2) -> str:
         """Serialize this flow to a JSON string (issue #14).
 
@@ -579,6 +585,12 @@ class DAGFlow(BaseModel):
         from chainweaver.viz import flow_to_mermaid
 
         return flow_to_mermaid(self, direction=direction, show_schemas=show_schemas)
+
+    def to_dot(self) -> str:
+        """Return a DOT (Graphviz) rendering of this DAG (issue #46)."""
+        from chainweaver.viz import flow_to_dot
+
+        return flow_to_dot(self)
 
     def to_json(self, *, indent: int | None = 2) -> str:
         """Serialize this DAG flow to a JSON string (issue #14)."""
