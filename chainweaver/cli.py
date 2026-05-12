@@ -1,16 +1,26 @@
-"""Command-line interface for ChainWeaver (issue #44).
+"""Command-line interface for ChainWeaver.
 
-Built on `typer <https://typer.tiangolo.com/>`_.  The ``inspect`` command
-prints a registered flow's structure either as a human-friendly table or
-as machine-readable JSON.
+Built on `typer <https://typer.tiangolo.com/>`_.
+
+Available commands
+------------------
+
+- ``chainweaver inspect <flow>`` — print a registered flow's structure as a
+  human-friendly table or machine-readable JSON (issue #44).
+- ``chainweaver validate <file>`` — validate a flow definition file
+  (``.flow.yaml`` / ``.flow.json``) and report any structural errors
+  (issue #45).
+- ``chainweaver check <dir>`` — validate every flow file in *dir* and
+  print a summary; quiet mode (``--quiet``) emits only the exit code
+  (issue #45).
 
 Programmatic registration entry point
 -------------------------------------
 
-The CLI inspects a :class:`~chainweaver.registry.FlowRegistry` that the
-host application registers via :func:`set_default_registry`.  This avoids
-hard-coding a discovery mechanism (env vars, plugin entry points, etc.)
-and keeps the CLI usable from notebooks and tests:
+The ``inspect`` command queries a :class:`~chainweaver.registry.FlowRegistry`
+that the host application registers via :func:`set_default_registry`.
+This avoids hard-coding a discovery mechanism (env vars, plugin entry
+points, etc.) and keeps the CLI usable from notebooks and tests:
 
 .. code-block:: python
 
@@ -22,12 +32,17 @@ and keeps the CLI usable from notebooks and tests:
     cli.app()  # or use the ``chainweaver`` console script
 
 The :func:`set_default_registry` lookup is module-level state, scoped to
-the current process; tests reset it between cases.
+the current process; tests reset it between cases.  ``validate`` and
+``check`` do **not** consult the default registry — they read flow files
+directly from disk and exercise the serialization round-trip from
+issue #14.
 
 Exit codes:
 
-- ``0`` — success.
-- ``1`` — flow not found, no registry configured, or unexpected error.
+- ``0`` — success / all flows valid.
+- ``1`` — flow not found, validation errors, no registry configured,
+  or unexpected error.
+- ``2`` — input file or directory not found.
 """
 
 from __future__ import annotations
@@ -35,17 +50,19 @@ from __future__ import annotations
 import json
 import sys
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import typer
 
-from chainweaver.exceptions import FlowNotFoundError
+from chainweaver.exceptions import FlowNotFoundError, FlowSerializationError
 from chainweaver.flow import DAGFlow, Flow
 from chainweaver.registry import FlowRegistry
+from chainweaver.serialization import flow_from_json, flow_from_yaml
 
 app = typer.Typer(
     name="chainweaver",
-    help="ChainWeaver CLI — inspect registered flows.",
+    help="ChainWeaver CLI — inspect, validate, and check flows.",
     no_args_is_help=True,
 )
 
@@ -121,6 +138,184 @@ def inspect_command(
         typer.echo(json.dumps(_flow_to_dict(flow), indent=2, default=str))
     else:
         typer.echo(_flow_to_table(flow))
+
+
+# ---------------------------------------------------------------------------
+# validate / check commands (issue #45)
+# ---------------------------------------------------------------------------
+
+_FLOW_FILE_SUFFIXES: tuple[str, ...] = (".flow.yaml", ".flow.yml", ".flow.json")
+
+
+def _load_flow_file(path: Path) -> Flow | DAGFlow:
+    """Load a single flow file by extension; raises :class:`FlowSerializationError`."""
+    name_lower = path.name.lower()
+    text = path.read_text(encoding="utf-8")
+    if name_lower.endswith(".flow.json"):
+        return flow_from_json(text)
+    if name_lower.endswith((".flow.yaml", ".flow.yml")):
+        return flow_from_yaml(text)
+    raise FlowSerializationError(
+        f"Unrecognised extension; expected one of {_FLOW_FILE_SUFFIXES}",
+        source=str(path),
+    )
+
+
+def _iter_flow_files(directory: Path) -> list[Path]:
+    """Return all flow files under *directory* (recursive), sorted for stability."""
+    matches: list[Path] = []
+    for path in sorted(directory.rglob("*")):
+        if path.is_file() and path.name.lower().endswith(_FLOW_FILE_SUFFIXES):
+            matches.append(path)
+    return matches
+
+
+_VALIDATE_PATH_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file.",
+)
+_CHECK_DIR_ARG = typer.Argument(
+    ...,
+    help="Directory to scan for flow files (recursive).",
+)
+_QUIET_OPTION = typer.Option(
+    False,
+    "--quiet",
+    "-q",
+    help="Suppress per-flow output; exit code communicates the result.",
+)
+_VALIDATE_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+
+
+@app.command("validate")
+def validate_command(
+    file_path: Path = _VALIDATE_PATH_ARG,
+    output_format: OutputFormat = _VALIDATE_FORMAT_OPTION,
+) -> None:
+    """Validate a flow definition file.
+
+    Reads ``file_path`` (``.flow.yaml`` / ``.flow.yml`` / ``.flow.json``),
+    deserializes it via :func:`chainweaver.serialization.flow_from_yaml` or
+    :func:`chainweaver.serialization.flow_from_json`, and reports the
+    outcome.
+
+    Exit codes: 0 = valid, 1 = validation error, 2 = file not found.
+    """
+    if not file_path.exists():
+        typer.echo(f"chainweaver: file not found: {file_path}", err=True)
+        raise typer.Exit(code=2)
+    if not file_path.is_file():
+        typer.echo(f"chainweaver: not a file: {file_path}", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        flow = _load_flow_file(file_path)
+    except FlowSerializationError as exc:
+        if output_format is OutputFormat.JSON:
+            typer.echo(
+                json.dumps(
+                    {"path": str(file_path), "valid": False, "error": exc.detail},
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo(f"INVALID  {file_path}: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format is OutputFormat.JSON:
+        typer.echo(
+            json.dumps(
+                {
+                    "path": str(file_path),
+                    "valid": True,
+                    "name": flow.name,
+                    "version": flow.version,
+                    "type": "DAGFlow" if isinstance(flow, DAGFlow) else "Flow",
+                    "step_count": len(flow.steps),
+                },
+                indent=2,
+            )
+        )
+    else:
+        kind = "DAGFlow" if isinstance(flow, DAGFlow) else "Flow"
+        typer.echo(f"OK       {file_path}: {flow.name} v{flow.version} [{kind}]")
+
+
+@app.command("check")
+def check_command(
+    directory: Path = _CHECK_DIR_ARG,
+    output_format: OutputFormat = _VALIDATE_FORMAT_OPTION,
+    quiet: bool = _QUIET_OPTION,
+) -> None:
+    """Validate every flow file in *directory* (recursive).
+
+    Walks the directory, attempts to deserialize each ``.flow.*`` file, and
+    prints a per-file status plus a final summary.  When *quiet* is set,
+    only the exit code is meaningful (table output is suppressed; JSON
+    output is still produced because it is the machine-readable contract).
+
+    Exit codes: 0 = all valid, 1 = at least one invalid file, 2 = directory
+    not found.
+    """
+    if not directory.exists():
+        typer.echo(f"chainweaver: directory not found: {directory}", err=True)
+        raise typer.Exit(code=2)
+    if not directory.is_dir():
+        typer.echo(f"chainweaver: not a directory: {directory}", err=True)
+        raise typer.Exit(code=2)
+
+    flow_files = _iter_flow_files(directory)
+    results: list[dict[str, Any]] = []
+    valid_count = 0
+    invalid_count = 0
+
+    for path in flow_files:
+        try:
+            flow = _load_flow_file(path)
+        except FlowSerializationError as exc:
+            invalid_count += 1
+            results.append({"path": str(path), "valid": False, "error": exc.detail})
+            if not quiet and output_format is OutputFormat.TABLE:
+                typer.echo(f"INVALID  {path}: {exc.detail}", err=True)
+            continue
+        valid_count += 1
+        results.append(
+            {
+                "path": str(path),
+                "valid": True,
+                "name": flow.name,
+                "version": flow.version,
+                "type": "DAGFlow" if isinstance(flow, DAGFlow) else "Flow",
+                "step_count": len(flow.steps),
+            }
+        )
+        if not quiet and output_format is OutputFormat.TABLE:
+            kind = "DAGFlow" if isinstance(flow, DAGFlow) else "Flow"
+            typer.echo(f"OK       {path}: {flow.name} v{flow.version} [{kind}]")
+
+    if output_format is OutputFormat.JSON:
+        typer.echo(
+            json.dumps(
+                {
+                    "directory": str(directory),
+                    "valid_count": valid_count,
+                    "invalid_count": invalid_count,
+                    "results": results,
+                },
+                indent=2,
+            )
+        )
+    elif not quiet:
+        typer.echo(f"\n{valid_count} valid, {invalid_count} invalid")
+
+    if invalid_count > 0:
+        raise typer.Exit(code=1)
 
 
 def main(argv: list[str] | None = None) -> int:
