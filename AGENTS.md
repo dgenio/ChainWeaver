@@ -191,7 +191,9 @@ python -m mypy chainweaver/ tests/
 python -m pytest tests/ -v
 ```
 
-CI runs lint + format + mypy on Python 3.10 only; tests run across 3.10–3.13.
+CI runs lint + format + mypy on Python 3.10 / `ubuntu-latest` only; tests
+run across `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
+3.12, 3.13}` (12 jobs in total).
 
 For full CI, PR, branch, and commit conventions, see
 [workflows.md](docs/agent-context/workflows.md).

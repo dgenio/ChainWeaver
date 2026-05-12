@@ -8,9 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
@@ -24,16 +27,19 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      # Lint / format / mypy are stable across OSes and Pythons, so we run
+      # them once (the canonical Python 3.10 on ubuntu-latest leg) to keep
+      # the matrix fast and the gating signal unambiguous.
       - name: Lint with Ruff
-        if: ${{ matrix.python-version == '3.10' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
         run: ruff check chainweaver/ tests/ examples/
 
       - name: Check formatting with Ruff
-        if: ${{ matrix.python-version == '3.10' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
         run: ruff format --check chainweaver/ tests/ examples/
 
       - name: Type check with mypy
-        if: ${{ matrix.python-version == '3.10' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
         run: python -m mypy chainweaver/ tests/
 
       - name: Run tests
