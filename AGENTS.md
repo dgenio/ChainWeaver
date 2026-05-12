@@ -38,7 +38,7 @@ chainweaver/
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
 ├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash; Tool.from_flow() wraps a Flow as a Tool (#24)
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
