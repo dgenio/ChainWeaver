@@ -105,7 +105,7 @@ from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "ChainWeaverError",
