@@ -123,7 +123,7 @@ def flow_from_json(data: str) -> AnyFlow:
 def _require_yaml() -> Any:
     """Return the ``yaml`` module, or raise :class:`FlowSerializationError`."""
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
     except ImportError as exc:
         raise FlowSerializationError(
             "YAML support requires 'pyyaml' to be installed. "
