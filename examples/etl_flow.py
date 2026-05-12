@@ -240,6 +240,7 @@ store_tool = Tool(
 
 etl_flow = Flow(
     name="data_etl",
+    version="0.1.0",
     description="ETL flow: fetch → validate → normalize → enrich → store.",
     steps=[
         FlowStep(
@@ -263,8 +264,8 @@ etl_flow = Flow(
             input_mapping={"enriched_records": "enriched_records"},
         ),
     ],
-    input_schema=FetchInput,
-    output_schema=StoreOutput,
+    input_schema_ref=Flow.schema_ref_from(FetchInput),
+    output_schema_ref=Flow.schema_ref_from(StoreOutput),
 )
 
 

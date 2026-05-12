@@ -16,6 +16,7 @@ from chainweaver.registry import FlowRegistry
 def _make_flow(name: str = "test_flow") -> Flow:
     return Flow(
         name=name,
+        version="0.1.0",
         description=f"A test flow called {name}.",
         steps=[FlowStep(tool_name="dummy")],
     )
@@ -93,6 +94,7 @@ class TestMatchFlowByIntent:
         registry = FlowRegistry()
         flow = Flow(
             name="double_add_format",
+            version="0.1.0",
             description="Doubles and adds.",
             steps=[FlowStep(tool_name="dummy")],
         )
@@ -105,6 +107,7 @@ class TestMatchFlowByIntent:
         registry = FlowRegistry()
         flow = Flow(
             name="transform",
+            version="0.1.0",
             description="Converts a raw value into a formatted report.",
             steps=[FlowStep(tool_name="dummy")],
         )
@@ -161,7 +164,7 @@ def _make_dag(name: str = "dag", *, steps: list[DAGFlowStep] | None = None) -> D
             DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
             DAGFlowStep(tool_name="b", step_id="B", depends_on=["A"]),
         ]
-    return DAGFlow(name=name, description=f"Test DAG '{name}'.", steps=steps)
+    return DAGFlow(name=name, version="0.1.0", description=f"Test DAG '{name}'.", steps=steps)
 
 
 class TestDAGFlowRegistration:
@@ -181,7 +184,7 @@ class TestDAGFlowRegistration:
             DAGFlowStep(tool_name="a", step_id="DUP", depends_on=[]),
             DAGFlowStep(tool_name="b", step_id="DUP", depends_on=["DUP"]),
         ]
-        flow = DAGFlow(name="dup_dag", description="Duplicate IDs.", steps=steps)
+        flow = DAGFlow(name="dup_dag", version="0.1.0", description="Duplicate IDs.", steps=steps)
         registry = FlowRegistry()
         with pytest.raises(DAGDefinitionError) as exc_info:
             registry.register_flow(flow)
@@ -192,7 +195,9 @@ class TestDAGFlowRegistration:
         steps = [
             DAGFlowStep(tool_name="a", step_id="A", depends_on=["GHOST"]),
         ]
-        flow = DAGFlow(name="unknown_dag", description="Unknown dep.", steps=steps)
+        flow = DAGFlow(
+            name="unknown_dag", version="0.1.0", description="Unknown dep.", steps=steps
+        )
         registry = FlowRegistry()
         with pytest.raises(DAGDefinitionError) as exc_info:
             registry.register_flow(flow)
@@ -203,7 +208,7 @@ class TestDAGFlowRegistration:
             DAGFlowStep(tool_name="a", step_id="A", depends_on=["B"]),
             DAGFlowStep(tool_name="b", step_id="B", depends_on=["A"]),
         ]
-        flow = DAGFlow(name="cycle_dag", description="Cycle A↔B.", steps=steps)
+        flow = DAGFlow(name="cycle_dag", version="0.1.0", description="Cycle A↔B.", steps=steps)
         registry = FlowRegistry()
         with pytest.raises(DAGDefinitionError) as exc_info:
             registry.register_flow(flow)
@@ -211,7 +216,7 @@ class TestDAGFlowRegistration:
 
     def test_dag_self_loop_raises(self) -> None:
         steps = [DAGFlowStep(tool_name="a", step_id="A", depends_on=["A"])]
-        flow = DAGFlow(name="self_loop", description="Self-dep.", steps=steps)
+        flow = DAGFlow(name="self_loop", version="0.1.0", description="Self-dep.", steps=steps)
         registry = FlowRegistry()
         with pytest.raises(DAGDefinitionError) as exc_info:
             registry.register_flow(flow)
@@ -225,7 +230,7 @@ class TestDAGFlowRegistration:
             DAGFlowStep(tool_name="x", step_id="X", depends_on=["Y"]),
             DAGFlowStep(tool_name="y", step_id="Y", depends_on=["X"]),
         ]
-        bad_dag = DAGFlow(name="dag_v1", description="Cycle.", steps=bad_steps)
+        bad_dag = DAGFlow(name="dag_v1", version="0.1.0", description="Cycle.", steps=bad_steps)
         with pytest.raises(DAGDefinitionError):
             registry.register_flow(bad_dag, overwrite=True)
         # Original should still be present (overwrite never committed).
@@ -242,6 +247,7 @@ class TestDAGFlowRegistration:
         registry = FlowRegistry()
         dag = DAGFlow(
             name="process_events",
+            version="0.1.0",
             description="Processes incoming event streams in parallel.",
             steps=[DAGFlowStep(tool_name="t", step_id="T", depends_on=[])],
         )

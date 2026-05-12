@@ -130,6 +130,7 @@ class TestToolRunGuardrails:
 def _build_executor(tool: Tool) -> FlowExecutor:
     flow = Flow(
         name="guardrail_flow",
+        version="0.1.0",
         description="One-step flow used for guardrail integration.",
         steps=[FlowStep(tool_name=tool.name, input_mapping={"number": "number"})],
     )

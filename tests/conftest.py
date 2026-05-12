@@ -60,6 +60,7 @@ def format_tool() -> Tool:
 def linear_flow() -> Flow:
     return Flow(
         name="double_add_format",
+        version="0.1.0",
         description="Doubles a number, adds 10, and formats the result.",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),

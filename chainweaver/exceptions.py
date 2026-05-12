@@ -157,3 +157,24 @@ class InvalidFlowVersionError(ChainWeaverError):
         self.version = version
         self.detail = detail
         super().__init__(f"Flow '{flow_name}' has invalid version '{version}': {detail}.")
+
+
+class FlowSerializationError(ChainWeaverError):
+    """Raised when a flow cannot be serialized or deserialized.
+
+    Covers malformed YAML/JSON payloads, unknown ``type`` discriminators,
+    unresolvable schema/exception class references, and missing required
+    fields.
+
+    Attributes:
+        detail: Human-readable explanation of what failed.
+        source: Optional identifier for the input source (e.g. file path).
+    """
+
+    def __init__(self, detail: str, *, source: str | None = None) -> None:
+        self.detail = detail
+        self.source = source
+        if source is None:
+            super().__init__(f"Flow serialization failed: {detail}.")
+        else:
+            super().__init__(f"Flow serialization failed for '{source}': {detail}.")

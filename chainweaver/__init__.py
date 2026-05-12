@@ -16,6 +16,8 @@ Public API
         schema_fingerprint, check_flow_compatibility, CompatibilityIssue,
         compile_flow, CompilationResult, CompilationError, CompilationWarning,
         flow_to_ascii, flow_to_mermaid, result_to_mermaid,
+        flow_to_dict, flow_to_json, flow_to_yaml,
+        flow_from_dict, flow_from_json, flow_from_yaml,
     )
     from chainweaver.exceptions import (
         ChainWeaverError,
@@ -23,6 +25,7 @@ Public API
         ToolNotFoundError,
         FlowNotFoundError,
         FlowAlreadyExistsError,
+        FlowSerializationError,
         FlowStatusError,
         InvalidFlowVersionError,
         SchemaValidationError,
@@ -53,6 +56,7 @@ from chainweaver.exceptions import (
     FlowAlreadyExistsError,
     FlowExecutionError,
     FlowNotFoundError,
+    FlowSerializationError,
     FlowStatusError,
     InputMappingError,
     InvalidFlowVersionError,
@@ -85,6 +89,14 @@ from chainweaver.flow import (
 from chainweaver.log_utils import RedactionPolicy
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
+from chainweaver.serialization import (
+    flow_from_dict,
+    flow_from_json,
+    flow_from_yaml,
+    flow_to_dict,
+    flow_to_json,
+    flow_to_yaml,
+)
 from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_mermaid, result_to_mermaid
 
@@ -116,6 +128,7 @@ __all__ = [
     "FlowExecutor",
     "FlowNotFoundError",
     "FlowRegistry",
+    "FlowSerializationError",
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
@@ -140,8 +153,14 @@ __all__ = [
     "check_flow_compatibility",
     "cli",
     "compile_flow",
+    "flow_from_dict",
+    "flow_from_json",
+    "flow_from_yaml",
     "flow_to_ascii",
+    "flow_to_dict",
+    "flow_to_json",
     "flow_to_mermaid",
+    "flow_to_yaml",
     "result_to_mermaid",
     "schema_fingerprint",
     "tool",

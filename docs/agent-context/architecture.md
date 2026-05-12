@@ -34,6 +34,7 @@ and tools, the same flow produces the same output every time.
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
 | `observation.py` | `TraceRecorder` + `ObservedTrace` for ad-hoc tool sequence capture | In-memory storage only; persistence deferred |
 | `viz.py` | `flow_to_ascii`, `flow_to_mermaid`, `result_to_mermaid` pure renderers | No external dependencies — string generation only |
+| `serialization.py` | YAML + JSON encode/decode for `Flow` and `DAGFlow` (`flow_to_json`, `flow_from_yaml`, etc.) | JSON path is dep-free; YAML requires `pyyaml` (optional extra `chainweaver[yaml]`); schema/exception refs round-trip as `"module:qualname"` strings |
 | `cli.py` | typer-based `chainweaver inspect` entry point | Reads from a process-scoped default registry installed via `cli.set_default_registry` |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
 

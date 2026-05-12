@@ -28,6 +28,7 @@ class TestLinearAscii:
     def test_three_step_linear(self) -> None:
         flow = Flow(
             name="three",
+            version="0.1.0",
             description="Three-step.",
             steps=[
                 FlowStep(tool_name="a"),
@@ -40,17 +41,18 @@ class TestLinearAscii:
     def test_single_step(self) -> None:
         flow = Flow(
             name="one",
+            version="0.1.0",
             description="single step.",
             steps=[FlowStep(tool_name="lone")],
         )
         assert flow_to_ascii(flow) == "[lone]"
 
     def test_empty_flow(self) -> None:
-        flow = Flow(name="empty", description="empty", steps=[])
+        flow = Flow(name="empty", version="0.1.0", description="empty", steps=[])
         assert flow_to_ascii(flow) == "(empty flow)"
 
     def test_method_on_flow(self) -> None:
-        flow = Flow(name="x", description="y", steps=[FlowStep(tool_name="t")])
+        flow = Flow(name="x", version="0.1.0", description="y", steps=[FlowStep(tool_name="t")])
         assert flow.to_ascii() == "[t]"
 
 
@@ -63,6 +65,7 @@ class TestDagAscii:
     def test_diamond(self) -> None:
         dag = DAGFlow(
             name="diamond",
+            version="0.1.0",
             description="A->B,A->C,B->D,C->D",
             steps=[
                 DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
@@ -80,6 +83,7 @@ class TestDagAscii:
     def test_independent_dag_steps(self) -> None:
         dag = DAGFlow(
             name="indep",
+            version="0.1.0",
             description="Two independent steps.",
             steps=[
                 DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
@@ -93,6 +97,7 @@ class TestDagAscii:
     def test_dag_method_call(self) -> None:
         dag = DAGFlow(
             name="x",
+            version="0.1.0",
             description="x",
             steps=[DAGFlowStep(tool_name="t", step_id="T", depends_on=[])],
         )
@@ -109,6 +114,7 @@ class TestMermaidLinear:
     def test_basic_graph(self) -> None:
         flow = Flow(
             name="three",
+            version="0.1.0",
             description="three.",
             steps=[
                 FlowStep(tool_name="a"),
@@ -125,18 +131,18 @@ class TestMermaidLinear:
         assert "S1 --> S2" in out
 
     def test_direction_td(self) -> None:
-        flow = Flow(name="t", description="t", steps=[FlowStep(tool_name="x")])
+        flow = Flow(name="t", version="0.1.0", description="t", steps=[FlowStep(tool_name="x")])
         out = flow_to_mermaid(flow, direction="TD")
         assert out.startswith("graph TD")
 
     def test_empty_flow(self) -> None:
-        flow = Flow(name="empty", description="empty", steps=[])
+        flow = Flow(name="empty", version="0.1.0", description="empty", steps=[])
         out = flow_to_mermaid(flow)
         assert "graph LR" in out
         assert "empty" in out
 
     def test_method_on_flow(self) -> None:
-        flow = Flow(name="t", description="t", steps=[FlowStep(tool_name="m")])
+        flow = Flow(name="t", version="0.1.0", description="t", steps=[FlowStep(tool_name="m")])
         assert "S0[m]" in flow.to_mermaid()
 
 
@@ -144,6 +150,7 @@ class TestMermaidDag:
     def test_diamond_renders_all_edges(self) -> None:
         dag = DAGFlow(
             name="diamond",
+            version="0.1.0",
             description="diamond",
             steps=[
                 DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),
@@ -163,6 +170,7 @@ class TestMermaidEscaping:
     def test_dangerous_chars_escaped(self) -> None:
         flow = Flow(
             name="dangerous",
+            version="0.1.0",
             description="x",
             steps=[FlowStep(tool_name="<bad>")],
         )
@@ -180,6 +188,7 @@ class TestMermaidEscaping:
 def _build_two_step_executor() -> FlowExecutor:
     flow = Flow(
         name="viz_two_step",
+        version="0.1.0",
         description="two step",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -233,6 +242,7 @@ class TestResultMermaid:
 
         flow = Flow(
             name="viz_fail",
+            version="0.1.0",
             description="failing flow",
             steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
         )

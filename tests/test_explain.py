@@ -57,6 +57,7 @@ class TestValidPlan:
     def test_returns_execution_plan(self) -> None:
         flow = Flow(
             name="double_add",
+            version="0.1.0",
             description="Double then add 10.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -73,6 +74,7 @@ class TestValidPlan:
     def test_steps_carry_schema_shapes(self) -> None:
         flow = Flow(
             name="double_only",
+            version="0.1.0",
             description="Double.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )
@@ -85,6 +87,7 @@ class TestValidPlan:
     def test_input_sources_for_context_lookup(self) -> None:
         flow = Flow(
             name="double_only",
+            version="0.1.0",
             description="Double.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )
@@ -109,6 +112,7 @@ class TestValidPlan:
         )
         flow = Flow(
             name="scale_flow",
+            version="0.1.0",
             description="Scale by 3.",
             steps=[
                 FlowStep(
@@ -128,6 +132,7 @@ class TestValidPlan:
     def test_empty_mapping_documented(self) -> None:
         flow = Flow(
             name="passthrough_flow",
+            version="0.1.0",
             description="No mapping.",
             steps=[FlowStep(tool_name="double")],
         )
@@ -138,6 +143,7 @@ class TestValidPlan:
     def test_final_context_shape_accumulates(self) -> None:
         flow = Flow(
             name="double_add",
+            version="0.1.0",
             description="Double then add 10.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -160,6 +166,7 @@ class TestPlanWarnings:
     def test_unresolved_key_flagged_not_raised(self) -> None:
         flow = Flow(
             name="bad_mapping",
+            version="0.1.0",
             description="Mapping references a key that won't exist.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "ghost"})],
         )
@@ -174,6 +181,7 @@ class TestPlanWarnings:
     def test_missing_tool_flagged_not_raised(self) -> None:
         flow = Flow(
             name="missing_tool_flow",
+            version="0.1.0",
             description="References an unregistered tool.",
             steps=[FlowStep(tool_name="ghost_tool", input_mapping={"x": "x"})],
         )
@@ -190,6 +198,7 @@ class TestEmptyFlow:
     def test_zero_steps_plan(self) -> None:
         flow = Flow(
             name="empty",
+            version="0.1.0",
             description="No steps.",
             steps=[],
         )
@@ -218,6 +227,7 @@ class TestNoToolFunctionInvoked:
         )
         flow = Flow(
             name="watcher_flow",
+            version="0.1.0",
             description="Single watcher step.",
             steps=[FlowStep(tool_name="watcher", input_mapping={"number": "number"})],
         )
@@ -230,6 +240,7 @@ class TestStringRepresentation:
     def test_str_contains_flow_name(self) -> None:
         flow = Flow(
             name="double_only",
+            version="0.1.0",
             description="Double.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )
@@ -240,7 +251,7 @@ class TestStringRepresentation:
         assert "double" in rendered
 
     def test_unknown_flow_raises(self) -> None:
-        ex = _build_executor(flow=Flow(name="x", description="x", steps=[]))
+        ex = _build_executor(flow=Flow(name="x", version="0.1.0", description="x", steps=[]))
         with pytest.raises(FlowNotFoundError):
             ex.explain_flow("nope", {})
 
@@ -249,6 +260,7 @@ class TestStepPlanSerialization:
     def test_round_trip(self) -> None:
         flow = Flow(
             name="double_only",
+            version="0.1.0",
             description="Double.",
             steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         )

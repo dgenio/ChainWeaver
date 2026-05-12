@@ -220,6 +220,7 @@ ALL_TOOLS = [fetch_tool, parse_tool, rules_tool, score_tool, emit_tool]
 
 enrichment_flow = Flow(
     name="record_enrichment",
+    version="0.1.0",
     description="Fetch, parse, rule-check, score, and emit a record.",
     steps=[
         FlowStep(
@@ -248,8 +249,8 @@ enrichment_flow = Flow(
             },
         ),
     ],
-    input_schema=FetchInput,
-    output_schema=EmitOutput,
+    input_schema_ref=Flow.schema_ref_from(FetchInput),
+    output_schema_ref=Flow.schema_ref_from(EmitOutput),
 )
 
 

@@ -28,6 +28,7 @@ from chainweaver.tools import Tool
 def _build_two_step_executor() -> FlowExecutor:
     flow = Flow(
         name="trace_two_step",
+        version="0.1.0",
         description="Two-step flow used for trace assertions.",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -130,6 +131,7 @@ class TestErrorStorage:
 
         flow = Flow(
             name="trace_err",
+            version="0.1.0",
             description="Always-failing flow.",
             steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
         )
@@ -210,6 +212,7 @@ class TestSerialization:
 
         flow = Flow(
             name="trace_err_round_trip",
+            version="0.1.0",
             description="Always-failing flow.",
             steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
         )

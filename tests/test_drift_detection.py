@@ -70,6 +70,7 @@ def _make_tool_v2() -> Tool:
 def _make_flow_with_hashes(tool: Tool) -> Flow:
     return Flow(
         name="my_flow",
+        version="0.1.0",
         description="A flow using proc.",
         steps=[FlowStep(tool_name="proc", input_mapping={"value": "value"})],
         tool_schema_hashes={"proc": tool.schema_hash},
@@ -97,6 +98,7 @@ class TestNoDrift:
         registry = FlowRegistry()
         flow = Flow(
             name="no_hashes",
+            version="0.1.0",
             description="No hashes stored.",
             steps=[FlowStep(tool_name="proc")],
             tool_schema_hashes=None,
@@ -134,6 +136,7 @@ class TestDriftDetected:
         # Flow using "other" tool, not "proc".
         flow = Flow(
             name="other_flow",
+            version="0.1.0",
             description="Uses other.",
             steps=[FlowStep(tool_name="other")],
             tool_schema_hashes={"other": other_tool.schema_hash},

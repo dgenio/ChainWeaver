@@ -21,6 +21,7 @@ def _reset_registry() -> None:
 def _make_linear_registry() -> FlowRegistry:
     flow = Flow(
         name="double_flow",
+        version="0.1.0",
         description="Doubles a number.",
         steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
     )
@@ -32,6 +33,7 @@ def _make_linear_registry() -> FlowRegistry:
 def _make_dag_registry() -> FlowRegistry:
     dag = DAGFlow(
         name="dag_flow",
+        version="0.1.0",
         description="Tiny DAG.",
         steps=[
             DAGFlowStep(tool_name="a", step_id="A", depends_on=[]),

@@ -44,9 +44,12 @@ def _make_flow(name: str = "versioned", version: str = "0.0.0") -> Flow:
 
 
 class TestFlowVersion:
-    def test_default_version(self) -> None:
-        flow = Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])
-        assert flow.version == "0.0.0"
+    def test_version_is_required(self) -> None:
+        """Flow now requires an explicit version (breaking change in 0.4.0)."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])  # type: ignore[call-arg]
 
     def test_custom_version(self) -> None:
         flow = _make_flow(version="1.2.3")
@@ -136,12 +139,11 @@ class TestMultiVersionRegistry:
         registry.register_flow(_make_flow("f", "0.5.0"))
         assert registry.get_flow("f").version == "3.0.0"
 
-    def test_backward_compat_default_version(self) -> None:
+    def test_register_with_explicit_version(self) -> None:
         registry = FlowRegistry()
-        # Flow without explicit version uses "0.0.0".
-        flow = Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])
+        flow = Flow(name="f", version="0.1.0", description="D.", steps=[FlowStep(tool_name="x")])
         registry.register_flow(flow)
-        assert registry.get_flow("f").version == "0.0.0"
+        assert registry.get_flow("f").version == "0.1.0"
 
 
 class TestFlowNotFoundErrorIncludesVersion:

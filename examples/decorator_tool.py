@@ -109,6 +109,7 @@ print(f"format_result(value=20) = {format_result(value=20)}")
 
 flow = Flow(
     name="double_add_format",
+    version="0.1.0",
     description="Doubles a number, adds 10, and formats the result.",
     steps=[
         FlowStep(tool_name="double", input_mapping={"number": "number"}),

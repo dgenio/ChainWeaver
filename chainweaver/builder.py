@@ -53,9 +53,12 @@ class FlowBuilder:
         )
     """
 
+    _DEFAULT_VERSION: str = "0.1.0"
+
     def __init__(self, name: str, description: str) -> None:
         self._name: str = name
         self._description: str = description
+        self._version: str = self._DEFAULT_VERSION
         self._steps: list[FlowStep] = []
         self._input_schema: type[BaseModel] | None = None
         self._output_schema: type[BaseModel] | None = None
@@ -128,6 +131,22 @@ class FlowBuilder:
         self._output_schema = schema
         return self
 
+    def with_version(self, version: str) -> FlowBuilder:
+        """Set the flow's PEP 440 version string.
+
+        Defaults to ``"0.1.0"`` when not called.  The :class:`Flow` constructor
+        requires an explicit version, so the builder picks a sensible default
+        so that quick prototypes and tests stay terse.
+
+        Args:
+            version: A PEP 440-compatible version string (e.g. ``"1.2.0"``).
+
+        Returns:
+            ``self`` — supports method chaining.
+        """
+        self._version = version
+        return self
+
     def with_trigger(self, conditions: dict[str, Any]) -> FlowBuilder:
         """Set optional trigger conditions (free-form metadata).
 
@@ -168,10 +187,19 @@ class FlowBuilder:
 
         return Flow(
             name=self._name,
+            version=self._version,
             description=self._description,
             steps=list(self._steps),
-            input_schema=self._input_schema,
-            output_schema=self._output_schema,
+            input_schema_ref=(
+                Flow.schema_ref_from(self._input_schema)
+                if self._input_schema is not None
+                else None
+            ),
+            output_schema_ref=(
+                Flow.schema_ref_from(self._output_schema)
+                if self._output_schema is not None
+                else None
+            ),
             trigger_conditions=(
                 dict(self._trigger_conditions) if self._trigger_conditions is not None else None
             ),

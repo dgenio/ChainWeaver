@@ -20,6 +20,33 @@ from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
+# Module-level schemas (must be importable via "module:qualname" so that
+# Flow.input_schema_ref / output_schema_ref can resolve them — locally-defined
+# classes inside test methods are unreachable through importlib lookup).
+# ---------------------------------------------------------------------------
+
+
+class _MissingFieldOutput(BaseModel):
+    missing_field: str
+
+
+class _ExtraFieldOutput(BaseModel):
+    extra_field: str
+
+
+class _KeyOnly(BaseModel):
+    key: str
+
+
+class _DagN(BaseModel):
+    n: int
+
+
+class _DagDoubled(BaseModel):
+    doubled: int
+
+
+# ---------------------------------------------------------------------------
 # Successful execution
 # ---------------------------------------------------------------------------
 
@@ -138,6 +165,7 @@ class TestSchemaValidation:
 
         flow = Flow(
             name="bad_flow",
+            version="0.1.0",
             description="Flow with bad output schema.",
             steps=[FlowStep(tool_name="bad_tool", input_mapping={"number": "number"})],
         )
@@ -175,6 +203,7 @@ class TestInputMapping:
         )
         flow = Flow(
             name="bad_mapping",
+            version="0.1.0",
             description="Flow with a broken mapping.",
             steps=[
                 FlowStep(
@@ -214,6 +243,7 @@ class TestInputMapping:
         )
         flow = Flow(
             name="scale_flow",
+            version="0.1.0",
             description="Scales by 3.",
             steps=[
                 FlowStep(
@@ -254,6 +284,7 @@ class TestInputMapping:
         )
         flow = Flow(
             name="passthrough_flow",
+            version="0.1.0",
             description="Step with empty input_mapping.",
             steps=[FlowStep(tool_name="sum", input_mapping={})],
         )
@@ -295,6 +326,7 @@ class TestFlowExecutionError:
         )
         flow = Flow(
             name="boom_flow",
+            version="0.1.0",
             description="Flow whose tool explodes.",
             steps=[FlowStep(tool_name="boom", input_mapping={"x": "x"})],
         )
@@ -330,6 +362,7 @@ class TestFlowExecutionError:
         )
         flow = Flow(
             name="bad_flow",
+            version="0.1.0",
             description="Flow with ValueError tool.",
             steps=[FlowStep(tool_name="bad", input_mapping={"x": "x"})],
         )
@@ -353,6 +386,7 @@ class TestEmptyFlow:
         """A flow with no steps should succeed, returning the initial input."""
         flow = Flow(
             name="empty",
+            version="0.1.0",
             description="No steps.",
             steps=[],
         )
@@ -431,14 +465,15 @@ class TestFlowLevelSchemas:
         """When schemas are satisfied the flow succeeds normally."""
         flow = Flow(
             name="schema_flow",
+            version="0.1.0",
             description="Flow with input & output schemas.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
                 FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
                 FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
             ],
-            input_schema=NumberInput,
-            output_schema=FormattedOutput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+            output_schema_ref=Flow.schema_ref_from(FormattedOutput),
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -461,11 +496,12 @@ class TestFlowLevelSchemas:
         """Invalid initial_input is rejected before any step runs."""
         flow = Flow(
             name="guarded_flow",
+            version="0.1.0",
             description="Flow with strict input schema.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
             ],
-            input_schema=NumberInput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -485,17 +521,14 @@ class TestFlowLevelSchemas:
         double_tool: Tool,
     ) -> None:
         """Output schema mismatch is caught after all steps complete."""
-
-        class StrictOutput(BaseModel):
-            missing_field: str
-
         flow = Flow(
             name="bad_output_flow",
+            version="0.1.0",
             description="Output schema requires a field the steps never produce.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
             ],
-            output_schema=StrictOutput,
+            output_schema_ref=Flow.schema_ref_from(_MissingFieldOutput),
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -523,17 +556,14 @@ class TestFlowLevelSchemas:
 
     def test_empty_flow_with_schemas(self) -> None:
         """Both validation gates work when the step loop is vacuous."""
-
-        class InOut(BaseModel):
-            key: str
-
         # Happy path: initial input satisfies both schemas.
         flow = Flow(
             name="empty_with_schemas",
+            version="0.1.0",
             description="Empty flow with input & output schemas.",
             steps=[],
-            input_schema=InOut,
-            output_schema=InOut,
+            input_schema_ref=Flow.schema_ref_from(_KeyOnly),
+            output_schema_ref=Flow.schema_ref_from(_KeyOnly),
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -546,16 +576,13 @@ class TestFlowLevelSchemas:
 
     def test_empty_flow_with_output_schema_mismatch(self) -> None:
         """Output schema fails when steps=[] and initial input lacks required fields."""
-
-        class StrictOutput(BaseModel):
-            extra_field: str
-
         flow = Flow(
             name="empty_bad_output",
+            version="0.1.0",
             description="Empty flow whose output schema won't match initial input.",
             steps=[],
-            input_schema=NumberInput,
-            output_schema=StrictOutput,
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+            output_schema_ref=Flow.schema_ref_from(_ExtraFieldOutput),
         )
         registry = FlowRegistry()
         registry.register_flow(flow)
@@ -583,6 +610,7 @@ class TestSingleStepFlow:
     ) -> None:
         flow = Flow(
             name="single_step",
+            version="0.1.0",
             description="One-step flow that doubles a number.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
@@ -656,6 +684,7 @@ class TestToolZeroDivisionError:
         )
         flow = Flow(
             name="divide_flow",
+            version="0.1.0",
             description="Flow that divides.",
             steps=[
                 FlowStep(
@@ -759,6 +788,7 @@ class TestSimpleDAG:
         )
         flow = DAGFlow(
             name="simple_dag",
+            version="0.1.0",
             description="A → B",
             steps=[
                 DAGFlowStep(tool_name="step_a", step_id="A", depends_on=[]),
@@ -799,6 +829,7 @@ class TestSingleNodeDAG:
         )
         flow = DAGFlow(
             name="lone_dag",
+            version="0.1.0",
             description="Single node.",
             steps=[DAGFlowStep(tool_name="lone", step_id="ONLY", depends_on=[])],
         )
@@ -867,6 +898,7 @@ class TestDiamondDAG:
         )
         flow = DAGFlow(
             name="diamond",
+            version="0.1.0",
             description="A → (B, C) → D",
             steps=[
                 DAGFlowStep(
@@ -960,6 +992,7 @@ class TestDiamondDAG:
 
         flow = DAGFlow(
             name="diamond_order",
+            version="0.1.0",
             description="Order test.",
             steps=[
                 DAGFlowStep(tool_name="ta", step_id="A", depends_on=[]),
@@ -1045,6 +1078,7 @@ class TestMixedDepthDAG:
 
         flow = DAGFlow(
             name="mixed_depth",
+            version="0.1.0",
             description="A → B, A → C, (B,C) → D with renamed keys",
             steps=[
                 DAGFlowStep(tool_name="ma", step_id="A", depends_on=[]),
@@ -1106,6 +1140,7 @@ class TestDAGSiblingKeyConflict:
 
         flow = DAGFlow(
             name="conflict_dag",
+            version="0.1.0",
             description="Two independent steps writing the same key.",
             steps=[
                 DAGFlowStep(tool_name="sa", step_id="A", depends_on=[]),
@@ -1150,6 +1185,7 @@ class TestDAGSiblingKeyConflict:
 
         flow = DAGFlow(
             name="no_conflict_dag",
+            version="0.1.0",
             description="Two independent steps with distinct keys.",
             steps=[
                 DAGFlowStep(tool_name="nca", step_id="A", depends_on=[]),
@@ -1174,25 +1210,16 @@ class TestDAGFlowLevelSchemas:
     """Optional input_schema / output_schema on DAGFlow."""
 
     def test_valid_input_schema_passes(self) -> None:
-        class Inp(BaseModel):
-            n: int
-
-        class Out(BaseModel):
-            doubled: int
-
         ta = Tool(
             name="ds",
             description="d",
-            input_schema=Inp,
-            output_schema=Out,
+            input_schema=_DagN,
+            output_schema=_DagDoubled,
             fn=lambda i: {"doubled": i.n * 2},
         )
-
-        class OutSchema(BaseModel):
-            doubled: int
-
         flow = DAGFlow(
             name="schema_dag",
+            version="0.1.0",
             description="With schemas.",
             steps=[
                 DAGFlowStep(
@@ -1202,8 +1229,8 @@ class TestDAGFlowLevelSchemas:
                     input_mapping={"n": "n"},
                 )
             ],
-            input_schema=Inp,
-            output_schema=OutSchema,
+            input_schema_ref=DAGFlow.schema_ref_from(_DagN),
+            output_schema_ref=DAGFlow.schema_ref_from(_DagDoubled),
         )
         ex = _build_dag_executor(flow, ta)
         result = ex.execute_flow("schema_dag", {"n": 4})
@@ -1213,24 +1240,19 @@ class TestDAGFlowLevelSchemas:
         assert result.final_output["doubled"] == 8
 
     def test_invalid_input_schema_caught_before_execution(self) -> None:
-        class Inp(BaseModel):
-            n: int
-
-        class Out(BaseModel):
-            doubled: int
-
         ta = Tool(
             name="ds2",
             description="d2",
-            input_schema=Inp,
-            output_schema=Out,
+            input_schema=_DagN,
+            output_schema=_DagDoubled,
             fn=lambda i: {"doubled": i.n * 2},
         )
         flow = DAGFlow(
             name="guard_dag",
+            version="0.1.0",
             description="Guards input.",
             steps=[DAGFlowStep(tool_name="ds2", step_id="A", depends_on=[])],
-            input_schema=Inp,
+            input_schema_ref=DAGFlow.schema_ref_from(_DagN),
         )
         ex = _build_dag_executor(flow, ta)
         result = ex.execute_flow("guard_dag", {"wrong": "value"})
@@ -1241,28 +1263,20 @@ class TestDAGFlowLevelSchemas:
         assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_invalid_output_schema_caught_after_execution(self) -> None:
-        class Inp(BaseModel):
-            n: int
-
-        class Out(BaseModel):
-            doubled: int
-
-        class WrongOutputSchema(BaseModel):
-            missing_field: str  # context won't have this key
-
         ta = Tool(
             name="ds3",
             description="d3",
-            input_schema=Inp,
-            output_schema=Out,
+            input_schema=_DagN,
+            output_schema=_DagDoubled,
             fn=lambda i: {"doubled": i.n * 2},
         )
         flow = DAGFlow(
             name="bad_out_dag",
+            version="0.1.0",
             description="Output schema mismatch.",
             steps=[DAGFlowStep(tool_name="ds3", step_id="A", depends_on=[])],
-            input_schema=Inp,
-            output_schema=WrongOutputSchema,
+            input_schema_ref=DAGFlow.schema_ref_from(_DagN),
+            output_schema_ref=DAGFlow.schema_ref_from(_MissingFieldOutput),
         )
         ex = _build_dag_executor(flow, ta)
         result = ex.execute_flow("bad_out_dag", {"n": 4})
@@ -1292,6 +1306,7 @@ class TestDAGMissingTool:
     def test_missing_tool_fails_step(self) -> None:
         flow = DAGFlow(
             name="missing_tool_dag",
+            version="0.1.0",
             description="Step references an unregistered tool.",
             steps=[DAGFlowStep(tool_name="ghost", step_id="G", depends_on=[])],
         )
@@ -1376,6 +1391,7 @@ class TestDAGReverseOrderedSteps:
         # B depends on A, but B is listed FIRST in steps.
         flow = DAGFlow(
             name="reverse_order",
+            version="0.1.0",
             description="B before A in list, A before B in deps.",
             steps=[
                 DAGFlowStep(
@@ -1401,6 +1417,7 @@ class TestDAGCapabilityStepExecution:
     def test_capability_step_rejected_at_execution(self) -> None:
         flow = DAGFlow(
             name="cap_dag",
+            version="0.1.0",
             description="One capability step.",
             steps=[
                 DAGFlowStep(

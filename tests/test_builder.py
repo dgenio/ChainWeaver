@@ -41,6 +41,7 @@ class TestBasicBuild:
         )
         manual_flow = Flow(
             name="double_add_format",
+            version="0.1.0",
             description="Doubles a number, adds 10, and formats.",
             steps=[
                 FlowStep(tool_name="double", input_mapping={"number": "number"}),
