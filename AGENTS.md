@@ -40,7 +40,8 @@ chainweaver/
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
+├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
