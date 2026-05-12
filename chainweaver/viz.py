@@ -43,9 +43,10 @@ def _node_id(prefix: str, idx: int) -> str:
 def flow_to_ascii(flow: Flow | DAGFlow) -> str:
     """Render *flow* as a single-line ASCII flow diagram.
 
-    Linear flows produce ``[a] --> [b] --> [c]``; DAG flows render each
-    dependency as a separate line ``[a] --> [b]`` so that branching is
-    visible.  Empty flows return ``"(empty flow)"``.
+    Linear flows produce ``[a] → [b] → [c]``; DAG flows render each
+    dependency as a separate line ``[a] → [b]`` so that branching is
+    visible (issue #46 acceptance: ASCII output uses the unicode arrow
+    ``→``).  Empty flows return ``"(empty flow)"``.
     """
     from chainweaver.flow import DAGFlow
 
@@ -56,16 +57,16 @@ def flow_to_ascii(flow: Flow | DAGFlow) -> str:
         return _dag_to_ascii(flow)
 
     parts = [f"[{step.tool_name}]" for step in flow.steps]
-    return " --> ".join(parts)
+    return " → ".join(parts)
 
 
 def _dag_to_ascii(flow: DAGFlow) -> str:
-    """Render a DAG as one ``[parent] --> [child]`` edge per line."""
+    """Render a DAG as one ``[parent] → [child]`` edge per line."""
     label_by_id = {step.step_id: f"[{step.tool_name}]" for step in flow.steps}
     edges: list[str] = []
     for step in flow.steps:
         for dep in step.depends_on:
-            edges.append(f"{label_by_id[dep]} --> {label_by_id[step.step_id]}")
+            edges.append(f"{label_by_id[dep]} → {label_by_id[step.step_id]}")
     if not edges:
         # All steps independent (no edges) — list them on one line.
         return ", ".join(label_by_id.values())

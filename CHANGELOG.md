@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builder picks a sensible `"0.1.0"` default to keep prototypes terse.
 - The CLI top-level help string now lists all four subcommands
   (`inspect`, `validate`, `check`, `viz`).
+- `flow_to_ascii` (and the `Flow.to_ascii()` / `DAGFlow.to_ascii()`
+  convenience methods, which it backs) now emits the unicode arrow `→`
+  between steps instead of `-->`, matching issue #46's acceptance
+  criterion. Consumers that string-matched `[a] --> [b]` should update
+  their expectations to `[a] → [b]`. The Mermaid renderer
+  (`flow_to_mermaid`) is unaffected — Mermaid grammar still requires
+  `-->`.
 
 ### Migration guide (0.2.x → 0.4.0)
 

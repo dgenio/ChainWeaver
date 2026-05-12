@@ -14,6 +14,22 @@ Schema references (``input_schema_ref`` / ``output_schema_ref``) round-trip
 as ``"module:qualname"`` strings.  Retry exception types likewise round-trip
 as strings.  No live class objects are written to the payload, so flow
 files stay JSON-compatible end-to-end.
+
+.. warning::
+
+    **Trust boundary**: deserialization resolves ``input_schema_ref``,
+    ``output_schema_ref``, and ``RetryPolicy.retryable_errors`` via
+    :func:`chainweaver.flow.resolve_class_ref`, which calls
+    :func:`importlib.import_module` on the module half of every ``"module:qualname"``
+    string in the payload.  Importing a module runs its top-level code, so a
+    crafted flow file can trigger arbitrary side effects in any module that
+    happens to be available on ``sys.path``.  The subsequent ``isinstance``
+    and ``expected_base`` checks reject the *resolved attribute* but do not
+    undo the import.
+
+    Load flow files only from sources you trust (your own repo, a controlled
+    registry, etc.).  Treat untrusted flow payloads with the same caution as
+    untrusted ``pickle`` input.
 """
 
 from __future__ import annotations

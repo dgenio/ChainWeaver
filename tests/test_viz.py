@@ -36,7 +36,7 @@ class TestLinearAscii:
                 FlowStep(tool_name="c"),
             ],
         )
-        assert flow_to_ascii(flow) == "[a] --> [b] --> [c]"
+        assert flow_to_ascii(flow) == "[a] → [b] → [c]"
 
     def test_single_step(self) -> None:
         flow = Flow(
@@ -75,10 +75,10 @@ class TestDagAscii:
             ],
         )
         rendered = flow_to_ascii(dag)
-        assert "[a] --> [b]" in rendered
-        assert "[a] --> [c]" in rendered
-        assert "[b] --> [d]" in rendered
-        assert "[c] --> [d]" in rendered
+        assert "[a] → [b]" in rendered
+        assert "[a] → [c]" in rendered
+        assert "[b] → [d]" in rendered
+        assert "[c] → [d]" in rendered
 
     def test_independent_dag_steps(self) -> None:
         dag = DAGFlow(
@@ -433,7 +433,7 @@ class TestVizCli:
             self._teardown()
         captured = capsys.readouterr()
         assert exit_code == 0
-        assert "[a] --> [b] --> [c]" in captured.out
+        assert "[a] → [b] → [c]" in captured.out
 
     def test_dot_format(self, capsys: Any) -> None:
         from chainweaver import cli

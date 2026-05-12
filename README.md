@@ -437,6 +437,7 @@ All errors are typed and traceable:
 | `FlowAlreadyExistsError` | Registering a flow that already exists (without `overwrite=True`) |
 | `FlowStatusError` | Executing a flow whose status is not `ACTIVE` (without `force=True`) |
 | `InvalidFlowVersionError` | A flow is registered with a version string that is not valid PEP 440 |
+| `FlowSerializationError` | A flow file (YAML/JSON) is malformed, has an unknown discriminator, or references an unresolvable class |
 | `SchemaValidationError` | Input or output fails Pydantic validation |
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
@@ -452,36 +453,19 @@ All exceptions inherit from `ChainWeaverError`.
 
 ## Roadmap
 
-### v0.1 — MVP (current)
+Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainWeaver/milestones); see
+[CHANGELOG.md](CHANGELOG.md) for a per-release feature breakdown.
 
-- [x] `Tool` with Pydantic input/output schemas
-- [x] `Flow` as an ordered list of `FlowStep` objects
-- [x] `FlowBuilder` fluent API for flow construction
-- [x] `FlowRegistry` (in-memory)
-- [x] `FlowExecutor` (sequential, LLM-free)
-- [x] Structured per-step logging
-- [x] Typed exceptions
-- [x] Full test suite
-
-### v0.2 — DAG & Branching
-
-- [x] DAG-based execution with dependency edges (`DAGFlow`, `DAGFlowStep`)
-- [x] Topological level-grouped execution with sibling key-conflict detection
-- [x] `DAGDefinitionError` — cycle / duplicate ID / unknown dep detected at registration
-- [ ] Actual parallel/async execution for independent levels
-- [ ] Conditional branching inside flows
-
-### v0.3 — Persistence & Learning
-
-- [ ] JSON/YAML flow storage and reload
-- [ ] Runtime chain observation (record ad-hoc tool sequences)
-- [ ] Automatic flow suggestion from observed patterns
-
-### v0.4 — Scoring & Observability
-
-- [ ] Determinism scoring for partial flows
-- [ ] OpenTelemetry trace export
-- [ ] Async execution mode
+| Milestone | Theme | Status |
+|-----------|-------|--------|
+| **v0.1.0** — Harden Foundation & Streamline DX | Infra, docs, DX APIs, CI | shipped |
+| **v0.2.0** — Build Core Execution & MCP Bridge | DAG execution, MCP adapter/server, guardrails | shipped |
+| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance pipeline | shipped |
+| **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | **shipped (current)** |
+| **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | planned |
+| **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | planned |
+| **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, offline LLM compiler | planned |
+| **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
 
 ---
 
