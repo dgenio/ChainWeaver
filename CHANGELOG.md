@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Tool.from_flow`** (#24): wrap a registered `Flow` or `DAGFlow` as a
+  single `Tool` whose `fn` delegates back to a `FlowExecutor`.  The
+  resulting tool is registrable like any other tool, so a compiled flow
+  can be composed as a step inside another flow or exposed as one
+  capability to external consumers.  Schemas are derived from explicit
+  overrides, then the flow-level `input_schema_ref` / `output_schema_ref`,
+  then the first/last step's tool schema (or unique DAG sink).  Inner
+  flow failures surface as `FlowExecutionError`.  See
+  `examples/virtual_tool.py`.
+
 ## [0.4.0] - 2026-05-12
 
 ### Added

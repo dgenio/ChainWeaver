@@ -14,6 +14,13 @@ misbehaving tools:
   the timeout only protects the *caller* from waiting.
 - ``max_output_size`` rejects oversized payloads after measuring the
   UTF-8 encoded JSON length of the raw output dict.
+
+``Tool.from_flow`` (issue #24) wraps a registered :class:`~chainweaver.flow.Flow`
+or :class:`~chainweaver.flow.DAGFlow` as a single :class:`Tool` whose
+``fn`` delegates back to a :class:`~chainweaver.executor.FlowExecutor`.  This
+collapses an N-step compiled flow into one tool-shaped capability that can be
+composed into other flows, exposed to external frameworks (OpenAI/Anthropic
+function schemas, MCP servers), or registered in a weaver-spec catalog.
 """
 
 from __future__ import annotations
@@ -24,12 +31,23 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from functools import cached_property
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from chainweaver.compat import schema_fingerprint
-from chainweaver.exceptions import ToolOutputSizeError, ToolTimeoutError
+from chainweaver.exceptions import (
+    FlowExecutionError,
+    FlowSerializationError,
+    ToolDefinitionError,
+    ToolNotFoundError,
+    ToolOutputSizeError,
+    ToolTimeoutError,
+)
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
+
+if TYPE_CHECKING:
+    from chainweaver.executor import FlowExecutor
 
 
 class Tool:
@@ -158,3 +176,214 @@ class Tool:
 
     def __repr__(self) -> str:
         return f"Tool(name={self.name!r})"
+
+    # ------------------------------------------------------------------
+    # Flow-as-Tool adapter (issue #24)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_flow(
+        cls,
+        flow: Flow | DAGFlow,
+        executor: FlowExecutor,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        input_schema: type[BaseModel] | None = None,
+        output_schema: type[BaseModel] | None = None,
+    ) -> Tool:
+        """Wrap a registered flow as a :class:`Tool` (issue #24).
+
+        The returned tool behaves like any other ``Tool``: its ``fn``
+        validates inputs against the derived ``input_schema``, dispatches
+        the flow through *executor*, and returns the validated final
+        output.  This makes a compiled flow composable as a step inside
+        another flow, or exportable as a single capability to external
+        consumers (OpenAI / Anthropic / MCP / weaver-spec).
+
+        Schema derivation prefers, in order:
+
+        1. The explicit ``input_schema`` / ``output_schema`` keyword overrides.
+        2. The flow's own ``input_schema_ref`` / ``output_schema_ref`` (when set).
+        3. The first step's tool's ``input_schema`` (for inputs) and the
+           last step's tool's ``output_schema`` (for outputs).  For a
+           :class:`DAGFlow`, "last step" means the unique sink node; if
+           the DAG has multiple sinks, an ``output_schema`` override is
+           required.
+
+        Args:
+            flow: A :class:`Flow` or :class:`DAGFlow` whose steps reference
+                tools registered on *executor*.  The flow **must** also be
+                registered on *executor*'s registry before the returned
+                tool is invoked, because its ``fn`` calls
+                ``executor.execute_flow(flow.name, …)`` to dispatch the
+                run.  ``from_flow`` itself does not register the flow;
+                registration is the caller's responsibility (typically
+                done immediately before or after this call).
+            executor: The :class:`~chainweaver.executor.FlowExecutor` that
+                will run the wrapped flow.  Captured by reference; later
+                changes to its tool/flow registries are visible through
+                the returned tool.
+            name: Override for the resulting tool's name.  Defaults to
+                ``flow.name``.
+            description: Override for the resulting tool's description.
+                Defaults to ``flow.description``.
+            input_schema: Override for the derived input schema.  Useful
+                when the first step's tool input contains fields the
+                caller should not have to provide directly.
+            output_schema: Override for the derived output schema.
+                Required for DAG flows with multiple sink nodes when no
+                flow-level ``output_schema_ref`` is set.
+
+        Returns:
+            A :class:`Tool` instance whose ``fn`` executes *flow*.  The
+            tool can be registered via
+            :meth:`~chainweaver.executor.FlowExecutor.register_tool` just
+            like any other tool, enabling flow composition by name.
+
+        Raises:
+            ToolDefinitionError: When the flow has no steps, or when
+                neither the explicit override, the flow-level ref, nor a
+                step-level fallback can produce a required schema (or
+                when a DAG has multiple sinks without an explicit
+                ``output_schema`` override).
+        """
+        if not flow.steps:
+            raise ToolDefinitionError(flow.name, "Cannot wrap a flow with no steps as a tool.")
+
+        tool_name = name if name is not None else flow.name
+        tool_description = description if description is not None else flow.description
+
+        # --- Input schema resolution --------------------------------------
+        if input_schema is not None:
+            resolved_input = input_schema
+        elif flow.input_schema_ref is not None:
+            # Flow.input_schema either returns a BaseModel subclass or
+            # raises FlowSerializationError when the ref is set; wrap that
+            # error in ToolDefinitionError to match this function's other
+            # "Cannot derive schema" branches.
+            try:
+                resolved_input = flow.input_schema  # type: ignore[assignment]
+            except FlowSerializationError as exc:
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot resolve Flow.input_schema_ref '{flow.input_schema_ref}': {exc}",
+                ) from exc
+        else:
+            first_step = flow.steps[0]
+            try:
+                first_tool = executor.get_tool(first_step.tool_name)
+            except ToolNotFoundError as exc:
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot derive input schema: first step's tool "
+                    f"'{first_step.tool_name}' is not registered on the executor. "
+                    "Pass input_schema=... or register the tool first.",
+                ) from exc
+            resolved_input = first_tool.input_schema
+
+        # --- Output schema resolution -------------------------------------
+        if output_schema is not None:
+            resolved_output = output_schema
+        elif flow.output_schema_ref is not None:
+            try:
+                resolved_output = flow.output_schema  # type: ignore[assignment]
+            except FlowSerializationError as exc:
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot resolve Flow.output_schema_ref '{flow.output_schema_ref}': {exc}",
+                ) from exc
+        else:
+            terminal_step = _terminal_step(flow)
+            try:
+                terminal_tool = executor.get_tool(terminal_step.tool_name)
+            except ToolNotFoundError as exc:
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot derive output schema: terminal step's tool "
+                    f"'{terminal_step.tool_name}' is not registered on the executor. "
+                    "Pass output_schema=... or register the tool first.",
+                ) from exc
+            resolved_output = terminal_tool.output_schema
+
+        flow_name = flow.name
+
+        def _flow_fn(validated_input: BaseModel) -> dict[str, Any]:
+            result = executor.execute_flow(flow_name, validated_input.model_dump())
+            if not result.success:
+                # Surface the first failed step's context so the caller can
+                # diagnose without inspecting the full execution log.
+                failed = next((r for r in result.execution_log if not r.success), None)
+                if failed is None:
+                    detail = "Flow execution failed without recording a failing step."
+                    step_index = -1
+                else:
+                    detail = failed.error_message or failed.error_type or "Unknown error."
+                    step_index = failed.step_index
+                raise FlowExecutionError(tool_name=tool_name, step_index=step_index, detail=detail)
+            if result.final_output is None:
+                # Defensive: a successful run should always have a final_output,
+                # but the executor's contract allows None on failure paths and
+                # this is the only place the closure can guarantee non-None.
+                # Use ``len(flow.steps)`` (the flow-output validation sentinel
+                # per AGENTS.md §5 StepRecord) — this anomaly is a flow-output
+                # contract violation, not a flow-input validation failure
+                # (which is what ``step_index=-1`` would denote).
+                raise FlowExecutionError(
+                    tool_name=tool_name,
+                    step_index=len(flow.steps),
+                    detail="Flow reported success but produced no final output.",
+                )
+            return result.final_output
+
+        return cls(
+            name=tool_name,
+            description=tool_description,
+            input_schema=resolved_input,
+            output_schema=resolved_output,
+            fn=_flow_fn,
+        )
+
+
+def _terminal_step(flow: Flow | DAGFlow) -> FlowStep:
+    """Return the sole terminal step of *flow* for output-schema derivation.
+
+    For a linear :class:`Flow` the terminal step is the last entry in
+    ``flow.steps``.  For a :class:`DAGFlow` the terminal step is the unique
+    sink node (a step that no other step depends on).  When the DAG has more
+    than one sink, deriving a single output schema is ambiguous; the caller
+    must supply ``output_schema=`` explicitly.
+
+    Args:
+        flow: The flow whose terminal step should be located.
+
+    Returns:
+        The terminal :class:`FlowStep` (or :class:`DAGFlowStep` for DAGs).
+
+    Raises:
+        ToolDefinitionError: When *flow* is a DAG with zero or multiple
+            sink nodes.
+    """
+    from chainweaver.exceptions import ToolDefinitionError
+
+    if not isinstance(flow, DAGFlow):
+        return flow.steps[-1]
+
+    referenced: set[str] = set()
+    for step in flow.steps:
+        referenced.update(step.depends_on)
+    sinks: list[DAGFlowStep] = [s for s in flow.steps if s.step_id not in referenced]
+    if len(sinks) == 1:
+        return sinks[0]
+    if len(sinks) == 0:
+        raise ToolDefinitionError(
+            flow.name,
+            "DAG has no sink node; cannot derive output schema. "
+            "Pass output_schema=... explicitly.",
+        )
+    sink_ids = ", ".join(f"'{s.step_id}'" for s in sinks)
+    raise ToolDefinitionError(
+        flow.name,
+        f"DAG has multiple sink nodes ({sink_ids}); output schema is ambiguous. "
+        "Pass output_schema=... explicitly.",
+    )

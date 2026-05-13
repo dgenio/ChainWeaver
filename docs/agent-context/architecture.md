@@ -25,7 +25,7 @@ and tools, the same flow produces the same output every time.
 | `compat.py` | `schema_fingerprint()`, `CompatibilityIssue`, `check_flow_compatibility()` | Pure utility; no execution or I/O |
 | `compiler.py` | `compile_flow()`: static schema flow validation pre-execution | Returns `CompilationResult`; no execution logic |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
-| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` | Tool functions must be `fn(BaseModel) -> dict[str, Any]` |
+| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash`; `Tool.from_flow()` adapter (#24) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
 | `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
