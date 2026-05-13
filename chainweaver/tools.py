@@ -36,7 +36,14 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from chainweaver.compat import schema_fingerprint
-from chainweaver.exceptions import FlowExecutionError, ToolOutputSizeError, ToolTimeoutError
+from chainweaver.exceptions import (
+    FlowExecutionError,
+    FlowSerializationError,
+    ToolDefinitionError,
+    ToolNotFoundError,
+    ToolOutputSizeError,
+    ToolTimeoutError,
+)
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 
 if TYPE_CHECKING:
@@ -241,15 +248,11 @@ class Tool:
                 when a DAG has multiple sinks without an explicit
                 ``output_schema`` override).
         """
-        from chainweaver.exceptions import ToolDefinitionError, ToolNotFoundError
-
         if not flow.steps:
             raise ToolDefinitionError(flow.name, "Cannot wrap a flow with no steps as a tool.")
 
         tool_name = name if name is not None else flow.name
         tool_description = description if description is not None else flow.description
-
-        from chainweaver.exceptions import FlowSerializationError
 
         # --- Input schema resolution --------------------------------------
         if input_schema is not None:
@@ -322,9 +325,13 @@ class Tool:
                 # Defensive: a successful run should always have a final_output,
                 # but the executor's contract allows None on failure paths and
                 # this is the only place the closure can guarantee non-None.
+                # Use ``len(flow.steps)`` (the flow-output validation sentinel
+                # per AGENTS.md §5 StepRecord) — this anomaly is a flow-output
+                # contract violation, not a flow-input validation failure
+                # (which is what ``step_index=-1`` would denote).
                 raise FlowExecutionError(
                     tool_name=tool_name,
-                    step_index=-1,
+                    step_index=len(flow.steps),
                     detail="Flow reported success but produced no final output.",
                 )
             return result.final_output
