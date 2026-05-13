@@ -20,7 +20,7 @@ or :class:`~chainweaver.flow.DAGFlow` as a single :class:`Tool` whose
 ``fn`` delegates back to a :class:`~chainweaver.executor.FlowExecutor`.  This
 collapses an N-step compiled flow into one tool-shaped capability that can be
 composed into other flows, exposed to external frameworks (OpenAI/Anthropic
-function schemas, MCP servers), or registered in a contextweaver catalog.
+function schemas, MCP servers), or registered in a weaver-spec catalog.
 """
 
 from __future__ import annotations
@@ -206,10 +206,13 @@ class Tool:
 
         Args:
             flow: A :class:`Flow` or :class:`DAGFlow` whose steps reference
-                tools registered on *executor*.  The flow itself does not
-                need to be registered on *executor*'s registry; the
-                returned tool calls ``executor.execute_flow(flow.name, …)``
-                so registration is the caller's responsibility.
+                tools registered on *executor*.  The flow **must** also be
+                registered on *executor*'s registry before the returned
+                tool is invoked, because its ``fn`` calls
+                ``executor.execute_flow(flow.name, …)`` to dispatch the
+                run.  ``from_flow`` itself does not register the flow;
+                registration is the caller's responsibility (typically
+                done immediately before or after this call).
             executor: The :class:`~chainweaver.executor.FlowExecutor` that
                 will run the wrapped flow.  Captured by reference; later
                 changes to its tool/flow registries are visible through
@@ -246,18 +249,23 @@ class Tool:
         tool_name = name if name is not None else flow.name
         tool_description = description if description is not None else flow.description
 
+        from chainweaver.exceptions import FlowSerializationError
+
         # --- Input schema resolution --------------------------------------
         if input_schema is not None:
             resolved_input = input_schema
         elif flow.input_schema_ref is not None:
-            flow_input = flow.input_schema
-            if flow_input is None:
+            # Flow.input_schema either returns a BaseModel subclass or
+            # raises FlowSerializationError when the ref is set; wrap that
+            # error in ToolDefinitionError to match this function's other
+            # "Cannot derive schema" branches.
+            try:
+                resolved_input = flow.input_schema  # type: ignore[assignment]
+            except FlowSerializationError as exc:
                 raise ToolDefinitionError(
                     flow.name,
-                    f"Flow.input_schema_ref '{flow.input_schema_ref}' did not "
-                    "resolve to a schema.",
-                )
-            resolved_input = flow_input
+                    f"Cannot resolve Flow.input_schema_ref '{flow.input_schema_ref}': {exc}",
+                ) from exc
         else:
             first_step = flow.steps[0]
             try:
@@ -275,14 +283,13 @@ class Tool:
         if output_schema is not None:
             resolved_output = output_schema
         elif flow.output_schema_ref is not None:
-            flow_output = flow.output_schema
-            if flow_output is None:
+            try:
+                resolved_output = flow.output_schema  # type: ignore[assignment]
+            except FlowSerializationError as exc:
                 raise ToolDefinitionError(
                     flow.name,
-                    f"Flow.output_schema_ref '{flow.output_schema_ref}' did not "
-                    "resolve to a schema.",
-                )
-            resolved_output = flow_output
+                    f"Cannot resolve Flow.output_schema_ref '{flow.output_schema_ref}': {exc}",
+                ) from exc
         else:
             terminal_step = _terminal_step(flow)
             try:
@@ -310,13 +317,13 @@ class Tool:
                 else:
                     detail = failed.error_message or failed.error_type or "Unknown error."
                     step_index = failed.step_index
-                raise FlowExecutionError(tool_name=flow_name, step_index=step_index, detail=detail)
+                raise FlowExecutionError(tool_name=tool_name, step_index=step_index, detail=detail)
             if result.final_output is None:
                 # Defensive: a successful run should always have a final_output,
                 # but the executor's contract allows None on failure paths and
                 # this is the only place the closure can guarantee non-None.
                 raise FlowExecutionError(
-                    tool_name=flow_name,
+                    tool_name=tool_name,
                     step_index=-1,
                     detail="Flow reported success but produced no final output.",
                 )

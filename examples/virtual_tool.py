@@ -96,7 +96,7 @@ format_tool = Tool(
 # ---------------------------------------------------------------------------
 
 inner_flow = Flow(
-    name="inner_pipeline",
+    name="inner_flow",
     version="0.1.0",
     description="Doubles a number, adds 10, formats the result.",
     steps=[
@@ -132,21 +132,21 @@ def main() -> None:
     executor.register_tool(wrapped)
 
     outer_flow = Flow(
-        name="outer_pipeline",
+        name="outer_flow",
         version="0.1.0",
-        description="Doubles, then runs inner_pipeline on the doubled value.",
+        description="Doubles, then runs inner_flow on the doubled value.",
         steps=[
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
             # The wrapped inner flow is now usable as a single tool step.
             FlowStep(
-                tool_name="inner_pipeline",
+                tool_name="inner_flow",
                 input_mapping={"number": "value"},
             ),
         ],
     )
     registry.register_flow(outer_flow)
 
-    outer_result = executor.execute_flow("outer_pipeline", {"number": 5})
+    outer_result = executor.execute_flow("outer_flow", {"number": 5})
     assert outer_result.success
     assert outer_result.final_output is not None
     print(f"\nComposed outer flow result: {outer_result.final_output}")

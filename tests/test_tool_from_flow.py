@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from helpers import FormattedOutput, NumberInput, ValueInput, ValueOutput
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from chainweaver.exceptions import FlowExecutionError, ToolDefinitionError
 from chainweaver.executor import FlowExecutor
@@ -154,9 +154,7 @@ class TestExecution:
 
         assert through_tool == {"result": "Final value: 20"}
 
-    def test_run_matches_execute_flow_on_terminal_fields(
-        self, executor: FlowExecutor
-    ) -> None:
+    def test_run_matches_execute_flow_on_terminal_fields(self, executor: FlowExecutor) -> None:
         flow = executor._registry.get_flow("double_add_format")
         wrapped = Tool.from_flow(flow, executor)
 
@@ -181,10 +179,8 @@ class TestExecution:
         flow = executor._registry.get_flow("double_add_format")
         wrapped = Tool.from_flow(flow, executor)
 
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(ValidationError) as excinfo:
             wrapped.run({"wrong_field": 5})
-        # Pydantic's ValidationError inherits from ValueError; just confirm
-        # the message mentions the missing field.
         assert "number" in str(excinfo.value)
 
 
@@ -293,6 +289,44 @@ class TestErrorPropagation:
         assert excinfo.value.step_index == 1
         assert "intentional failure" in excinfo.value.detail
 
+    def test_failing_step_error_uses_overridden_tool_name(
+        self,
+        double_tool: Tool,
+    ) -> None:
+        # Regression: when ``name=`` is overridden, the FlowExecutionError
+        # raised on failure must surface the wrapper's name (the identity
+        # the caller knows), not the inner flow's name.
+        failing_tool = Tool(
+            name="boom",
+            description="Always fails.",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_failing_fn,
+        )
+        flow = Flow(
+            name="inner_flow_name",
+            version="0.1.0",
+            description="Has a failing step.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="boom", input_mapping={"value": "value"}),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(failing_tool)
+
+        wrapped = Tool.from_flow(flow, ex, name="my_alias")
+
+        with pytest.raises(FlowExecutionError) as excinfo:
+            wrapped.run({"number": 5})
+        assert excinfo.value.tool_name == "my_alias"
+        assert excinfo.value.tool_name != "inner_flow_name"
+        assert excinfo.value.step_index == 1
+        assert "intentional failure" in excinfo.value.detail
+
     def test_no_steps_raises_tool_definition_error(self) -> None:
         empty_flow = Flow(
             name="empty",
@@ -342,12 +376,7 @@ class TestErrorPropagation:
             Tool.from_flow(flow, ex)
         assert "phantom" in str(excinfo.value)
 
-    def test_unregistered_tool_skipped_when_input_schema_overridden(
-        self,
-        double_tool: Tool,
-        add_ten_tool: Tool,
-        format_tool: Tool,
-    ) -> None:
+    def test_unregistered_tool_skipped_when_input_schema_overridden(self) -> None:
         # When input_schema is overridden, we should NOT look up the first
         # step's tool. Same for output_schema and the last step.
         flow = Flow(
@@ -362,12 +391,10 @@ class TestErrorPropagation:
         registry = FlowRegistry()
         registry.register_flow(flow)
         ex = FlowExecutor(registry=registry)
-        # Intentionally register only one tool to prove the override path
-        # bypasses tool lookup for schema derivation.
-        ex.register_tool(double_tool)
-        ex.register_tool(add_ten_tool)
-        ex.register_tool(format_tool)
-
+        # Intentionally register zero tools to prove that when both schemas
+        # are overridden, ``Tool.from_flow`` never looks up the first or
+        # terminal step's tool for schema derivation.  If it did, the
+        # construction would raise ``ToolDefinitionError``.
         wrapped = Tool.from_flow(
             flow,
             ex,
