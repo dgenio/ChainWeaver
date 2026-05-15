@@ -33,7 +33,7 @@ extra raises a clear :class:`ImportError` instead of a cryptic
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 try:  # Optional dependency.
@@ -67,8 +67,22 @@ _STEP_SPAN_PREFIX = "chainweaver.tool."
 
 
 def _datetime_to_ns(dt: datetime) -> int:
-    """Convert a UTC ``datetime`` to nanoseconds since the epoch."""
-    return int(dt.replace(tzinfo=dt.tzinfo or timezone.utc).timestamp() * 1_000_000_000)
+    """Convert a timezone-aware ``datetime`` to nanoseconds since the epoch.
+
+    ChainWeaver uses timezone-aware UTC datetimes throughout
+    (``_now_utc`` in :mod:`chainweaver.executor`), so naive datetimes
+    should never reach this module.  We assert explicitly rather than
+    silently calling ``dt.replace(tzinfo=timezone.utc)``, which would
+    reinterpret the wall-clock value as UTC and skew span timestamps
+    by the local timezone offset if the input was actually local
+    time.  A surfaced assertion is easier to debug than wrong spans.
+    """
+    assert dt.tzinfo is not None, (
+        "_datetime_to_ns expects timezone-aware datetimes — ChainWeaver "
+        "uses tz-aware UTC everywhere; a naive datetime here indicates a "
+        "bug in the caller."
+    )
+    return int(dt.timestamp() * 1_000_000_000)
 
 
 def _set_step_attributes(
@@ -144,17 +158,28 @@ class OTelTraceExporter(BaseMiddleware):
       span — :class:`StepRecord` uses the same string-based
       convention.
 
-    Concurrency: one :class:`OTelTraceExporter` instance is **not**
-    thread-safe for concurrent flow executions because it tracks one
-    parent + one current child span on instance state.  Use a fresh
-    instance per concurrent flow, or instantiate the exporter inside
-    the calling code rather than sharing it across threads.
+    Concurrency: state is keyed by ``trace_id`` (``self._flow_spans``
+    and ``self._step_spans`` are dicts), so a single
+    :class:`OTelTraceExporter` instance can be safely shared across
+    sequential or interleaved executions on **distinct** trace ids —
+    the parent span of run A is not stomped on when run B's
+    ``on_flow_start`` fires.  Concurrent flows on the *same*
+    :class:`FlowExecutor` are still not supported (see the executor's
+    own concurrency note); concurrent flows on **distinct**
+    executors sharing one exporter are fine.
     """
 
     def __init__(self, tracer: Tracer) -> None:
         self._tracer = tracer
-        self._flow_span: Span | None = None
-        self._step_span: Span | None = None
+        # Per-trace state.  Keyed by ``trace_id`` so two concurrent
+        # flows (on distinct executors sharing this exporter) never
+        # overwrite each other's span references — fixes the leak
+        # mode where a shared global exporter wired into multiple
+        # ``FlowExecutor``s ended the first flow's parent span never
+        # because the second flow's ``on_flow_start`` overwrote the
+        # scalar.
+        self._flow_spans: dict[str, Span] = {}
+        self._step_spans: dict[str, Span] = {}
 
     def on_flow_start(self, ctx: FlowStartContext) -> None:
         start_ns = _datetime_to_ns(ctx.started_at)
@@ -166,7 +191,7 @@ class OTelTraceExporter(BaseMiddleware):
         span.set_attribute("chainweaver.flow_name", ctx.flow_name)
         span.set_attribute("chainweaver.flow_version", ctx.flow_version)
         span.set_attribute("chainweaver.total_steps", ctx.total_steps)
-        self._flow_span = span
+        self._flow_spans[ctx.trace_id] = span
 
     def on_step_start(self, ctx: StepStartContext) -> None:
         start_ns = _datetime_to_ns(ctx.started_at)
@@ -182,10 +207,10 @@ class OTelTraceExporter(BaseMiddleware):
             tool_name=ctx.tool_name,
             inputs=ctx.inputs,
         )
-        self._step_span = span
+        self._step_spans[ctx.trace_id] = span
 
     def on_step_end(self, ctx: StepEndContext) -> None:
-        step_span = self._step_span
+        step_span = self._step_spans.pop(ctx.trace_id, None)
         if step_span is None:
             # Pre-resolution failure (tool-not-found / input-mapping):
             # no preceding on_step_start fired.  Emit a 0-duration
@@ -204,10 +229,9 @@ class OTelTraceExporter(BaseMiddleware):
                 tool_name=ctx.step_record.tool_name,
             )
         _finalize_step_span(step_span, step_record=ctx.step_record)
-        self._step_span = None
 
     def on_flow_end(self, ctx: FlowEndContext) -> None:
-        flow_span = self._flow_span
+        flow_span = self._flow_spans.pop(ctx.trace_id, None)
         if flow_span is None:
             return
         flow_span.set_attribute("chainweaver.success", ctx.result.success)
@@ -215,7 +239,6 @@ class OTelTraceExporter(BaseMiddleware):
         if not ctx.result.success:
             flow_span.set_status(Status(StatusCode.ERROR, "Flow did not complete successfully"))
         flow_span.end(end_time=_datetime_to_ns(ctx.result.ended_at))
-        self._flow_span = None
 
 
 def export_result_to_otel(result: ExecutionResult, *, tracer: Tracer) -> None:

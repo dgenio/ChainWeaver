@@ -20,9 +20,11 @@ The cache is keyed by ``(tool_name, schema_hash, input_value_hash)``:
 Two reference implementations ship:
 
 - :class:`InMemoryStepCache` — dict-backed; useful for batch and
-  per-process tests.
+  per-process tests.  Not safe for concurrent access from multiple
+  threads — see the class docstring.
 - :class:`FileStepCache` — one JSON file per ``(tool, schema, input)``
   triple under a configurable directory; survives process restarts.
+  Writes are atomic (``tempfile.mkstemp`` + :func:`os.replace`).
 
 A user-supplied implementation only needs to satisfy the
 :class:`StepCache` :class:`~typing.Protocol`.  Persistence beyond
@@ -30,15 +32,18 @@ JSON-on-disk (Redis, SQLite, S3) is intentionally out of scope; the
 ``FileStepCache`` is deliberately simple so that downstream projects
 can subclass it or write a fresh backend.
 
-Cache writes happen *after* output schema validation, so a corrupted
-cache file is treated as a miss rather than poisoning future runs.
+Cache writes happen *after* output schema validation, so an
+unwritable cache file is treated as a miss rather than poisoning
+future runs.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -48,6 +53,10 @@ from pydantic import BaseModel, ConfigDict
 # safe on Windows and POSIX, and reversible enough to support ``clear``.
 _FILE_SUFFIX = ".cache.json"
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+# Length of the tool-name digest suffix appended to filenames so that
+# different tool names that map to the same sanitized form never share
+# a cache file even when ``schema_hash`` and ``input_value_hash`` match.
+_TOOL_NAME_DIGEST_LEN = 16
 
 
 class StepCacheKey(BaseModel):
@@ -105,6 +114,15 @@ class InMemoryStepCache:
 
     Use this for batch executions, tests, and any workload where the
     cache only needs to live for the lifetime of a process.
+
+    **Concurrency**: this class wraps a plain ``dict`` and offers no
+    internal synchronization.  It is safe to use from a single thread
+    of execution per :class:`FlowExecutor` instance (which is the
+    documented executor contract).  Sharing a single
+    ``InMemoryStepCache`` across threads requires the caller to wrap
+    accesses in an external :class:`threading.Lock`, or to use
+    :class:`FileStepCache` (which delegates atomicity to the
+    filesystem) instead.
     """
 
     def __init__(self) -> None:
@@ -130,9 +148,24 @@ class InMemoryStepCache:
 class FileStepCache:
     """JSON-on-disk :class:`StepCache` — one file per cached output.
 
-    Each entry is persisted to ``{root}/{safe_name}@{schema_hash}@{input_hash}.cache.json``.
-    Corrupt or unreadable files are treated as misses; concurrent
-    writes follow standard "last writer wins" semantics.
+    Each entry is persisted to
+    ``{root}/{safe_name}.{tool_digest}@{schema_hash}@{input_hash}.cache.json``,
+    where ``tool_digest`` is a truncated SHA-256 of the original
+    ``tool_name``.  Including the digest prevents collisions between
+    distinct tool names that sanitize to the same form (e.g.
+    ``"foo/bar"`` and ``"foo_bar"`` both reduce to ``"foo_bar"`` via
+    the filename sanitizer; because :attr:`Tool.schema_hash` does not
+    encode the tool name, those two tools would otherwise share a
+    cache file when their schemas and inputs matched).
+
+    Writes are atomic: the payload is written to a sibling ``.tmp``
+    file (created via :func:`tempfile.mkstemp` in the cache root) and
+    then renamed via :func:`os.replace`.  A crash or concurrent
+    writer mid-write cannot leave a partial/invalid file on disk.
+
+    Corrupt or unreadable files (e.g. left over from an older
+    non-atomic version of this code) are treated as misses; the next
+    :meth:`set` will overwrite them.
 
     Args:
         root: Directory holding the cache files.  Created (with
@@ -145,7 +178,12 @@ class FileStepCache:
 
     def _file_path(self, key: StepCacheKey) -> Path:
         safe_name = _SAFE_NAME_RE.sub("_", key.tool_name)
-        return self._root / f"{safe_name}@{key.schema_hash}@{key.input_value_hash}{_FILE_SUFFIX}"
+        tool_digest = hashlib.sha256(key.tool_name.encode("utf-8")).hexdigest()[
+            :_TOOL_NAME_DIGEST_LEN
+        ]
+        return self._root / (
+            f"{safe_name}.{tool_digest}@{key.schema_hash}@{key.input_value_hash}{_FILE_SUFFIX}"
+        )
 
     def get(self, key: StepCacheKey) -> dict[str, Any] | None:
         path = self._file_path(key)
@@ -163,8 +201,24 @@ class FileStepCache:
         return payload
 
     def set(self, key: StepCacheKey, output: dict[str, Any]) -> None:
-        path = self._file_path(key)
-        path.write_text(json.dumps(output, default=str), encoding="utf-8")
+        target = self._file_path(key)
+        payload = json.dumps(output, default=str)
+        # Atomic write: tmp file in the same directory, then replace.
+        # Mirrors ``FileCheckpointer.save`` so the two file-backed
+        # backends share a single approach to crash safety.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f"{target.stem}-",
+            suffix=".tmp",
+            dir=str(self._root),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            os.replace(tmp_name, target)
+        except BaseException:
+            # Clean up the tmp file on any error path.
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
 
     def clear(self) -> None:
         for path in self._root.glob(f"*{_FILE_SUFFIX}"):

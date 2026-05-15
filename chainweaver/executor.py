@@ -33,6 +33,8 @@ from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     CheckpointDriftError,
+    CheckpointerNotConfiguredError,
+    CheckpointNotFoundError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
@@ -391,7 +393,17 @@ class ExecutionResult(BaseModel):
         started_at: UTC timestamp when the execution began.
         ended_at: UTC timestamp when the execution finished.
         total_duration_ms: Wall-clock duration of the full execution in
-            milliseconds, measured with :func:`time.perf_counter`.
+            milliseconds, measured with :func:`time.perf_counter`.  For
+            executions produced by :meth:`FlowExecutor.resume_flow`
+            (issue #128), this covers **only** the resume process's
+            wall-clock — not the elapsed time between
+            ``started_at`` (captured in the original, crashed run) and
+            ``ended_at``.  In other words, ``total_duration_ms`` is the
+            time the executor *spent running tools* and is not
+            equivalent to ``(ended_at - started_at)`` after a resume.
+            Recovered step records still carry their original
+            ``started_at``/``ended_at`` timestamps; freshly executed
+            records carry resume-process timestamps.
         cost_report: Optional :class:`~chainweaver.cost.CostReport` estimating
             the LLM-call cost and latency avoided by running this compiled
             flow.  ``None`` unless the executor was constructed with a
@@ -439,6 +451,21 @@ class FlowExecutor:
        unique trace id, wall-clock timestamps, and per-step durations.
 
     There are **no LLM calls** at any point in this process.
+
+    **Concurrency**: a single :class:`FlowExecutor` instance is **not**
+    safe for concurrent :meth:`execute_flow`, :meth:`stream_flow`,
+    :meth:`resume_flow`, or :meth:`replay_flow` calls.  The
+    middleware list, the step cache, the checkpointer, the
+    ``_in_replay`` flag, the ``_resume_snapshot`` slot, and the
+    internal stream-collector all live on instance state.  Two
+    concurrent ``stream_flow`` calls on the same executor would each
+    push a collector that the other run also dispatches to — yielding
+    cross-talk where each generator receives the other flow's
+    events.  If you need to drive multiple flows in parallel,
+    instantiate one :class:`FlowExecutor` per worker (sharing the
+    underlying :class:`FlowRegistry`, :class:`StepCache`, and
+    :class:`Checkpointer` instances if appropriate — each backend's
+    docstring describes its own concurrency contract).
 
     Args:
         registry: The :class:`~chainweaver.registry.FlowRegistry` that holds
@@ -1125,11 +1152,19 @@ class FlowExecutor:
         hooks.
 
         The flow runs on a background worker thread; events are delivered
-        through a synchronized queue.  **Cancellation is not supported**
-        for the sync variant — if the consumer stops iterating, the
-        background thread runs the flow to completion and then exits.
-        Build UIs that surface this behavior; for true cancellation use
-        the async variant once issue #80 lands.
+        through a synchronized queue.
+
+        **Cancellation is not supported** for the sync variant.  If the
+        consumer breaks out of the iteration (or otherwise lets the
+        generator be garbage-collected), the generator's ``finally``
+        block blocks on ``thread.join()`` until the background flow
+        finishes — for a 10-step flow with a long step 3 that means
+        the caller's "stop iterating" intent is silently translated
+        into "block here until everything completes".  A ``WARNING``
+        is logged via the ``chainweaver.executor`` logger when this
+        happens so the behavior shows up in production traces.  For
+        proper cancellation use the async variant once issue #80
+        lands.
 
         Hook exceptions and middleware exceptions still follow the
         catch-and-log contract from :class:`FlowExecutorMiddleware`: a
@@ -1178,6 +1213,7 @@ class FlowExecutor:
             daemon=True,
         )
         thread.start()
+        consumer_abandoned = False
         try:
             while True:
                 item = events.get()
@@ -1186,7 +1222,17 @@ class FlowExecutor:
                         raise exc_holder[0]
                     return
                 yield item
+        except GeneratorExit:
+            consumer_abandoned = True
+            raise
         finally:
+            if consumer_abandoned and thread.is_alive():
+                _logger.warning(
+                    "stream_flow consumer abandoned the generator for flow '%s'; "
+                    "background worker continues to completion (cancellation is "
+                    "not supported in the sync variant — see #80).",
+                    flow_name,
+                )
             thread.join()
             # Defensive cleanup — collector should always still be in
             # the list, but suppress ValueError just in case a user
@@ -1360,6 +1406,10 @@ class FlowExecutor:
         Raises:
             ValueError: When no checkpointer is configured, or when no
                 snapshot exists for *trace_id*.
+            CheckpointerNotConfiguredError: When no checkpointer was
+                passed to ``FlowExecutor(...)``.
+            CheckpointNotFoundError: When no snapshot exists for
+                *trace_id*.
             FlowNotFoundError: When the snapshot's flow is no longer
                 registered.
             CheckpointDriftError: When the flow's version or any tool's
@@ -1367,10 +1417,10 @@ class FlowExecutor:
                 written.
         """
         if self._checkpointer is None:
-            raise ValueError("FlowExecutor has no checkpointer configured.")
+            raise CheckpointerNotConfiguredError()
         snapshot = self._checkpointer.load(trace_id)
         if snapshot is None:
-            raise ValueError(f"No snapshot found for trace_id '{trace_id}'.")
+            raise CheckpointNotFoundError(trace_id)
 
         flow = self._registry.get_flow(snapshot.flow_name)
         if flow.version != snapshot.flow_version:

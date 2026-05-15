@@ -242,7 +242,18 @@ def test_snapshot_saved_after_each_successful_linear_step() -> None:
         snapshots_seen.append(len(ck))
         return _add_ten_fn(inp)
 
-    ex._tools["add_ten"].fn = _peeking_add
+    # Re-register the second tool with a peeking version via the
+    # public ``register_tool`` API — overwrites the previous
+    # registration without reaching into private state.
+    ex.register_tool(
+        Tool(
+            name="add_ten",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_peeking_add,
+        )
+    )
     ex.execute_flow("ckpt_two_step", {"number": 3})
 
     assert snapshots_seen == [1]  # Snapshot after step 0 was saved.
@@ -396,18 +407,60 @@ def test_resume_picks_up_where_a_crash_left_off() -> None:
     assert ck.load(trace_id) is None
 
 
+def test_resume_log_length_equals_persisted_plus_remaining_steps() -> None:
+    """Regression guard: resume must append exactly the un-completed steps.
+
+    The snapshot only persists records for *successful* steps; the
+    failed step that triggered the crash is recorded into
+    ``result.execution_log`` but is *not* persisted into the
+    snapshot.  So on resume:
+
+        len(resumed.execution_log) == len(snapshot.execution_log)
+                                       + (total_steps - completed_steps)
+
+    This test pins that contract so a future refactor cannot drift
+    the resume log shape without flipping a red bulb.
+    """
+    ex, ck, trace_id = _simulate_mid_flow_crash()
+
+    snapshot = ck.load(trace_id)
+    assert snapshot is not None
+    persisted = len(snapshot.execution_log)
+    flow = ex._registry.get_flow(snapshot.flow_name)
+    remaining = len(flow.steps) - snapshot.completed_steps
+
+    # Swap the failing tool with a working one and resume.
+    ex.register_tool(
+        Tool(
+            name="bad",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        )
+    )
+    resumed = ex.resume_flow(trace_id)
+
+    assert resumed.success is True
+    assert len(resumed.execution_log) == persisted + remaining
+
+
 def test_resume_without_checkpointer_raises() -> None:
+    from chainweaver.exceptions import CheckpointerNotConfiguredError
+
     registry = FlowRegistry()
     ex = FlowExecutor(registry=registry)
-    with pytest.raises(ValueError, match="no checkpointer configured"):
+    with pytest.raises(CheckpointerNotConfiguredError):
         ex.resume_flow("anything")
 
 
 def test_resume_unknown_trace_id_raises() -> None:
+    from chainweaver.exceptions import CheckpointNotFoundError
+
     ck = InMemoryCheckpointer()
     registry = FlowRegistry()
     ex = FlowExecutor(registry=registry, checkpointer=ck)
-    with pytest.raises(ValueError, match="No snapshot found"):
+    with pytest.raises(CheckpointNotFoundError):
         ex.resume_flow("nope")
 
 

@@ -126,6 +126,13 @@ class InMemoryCheckpointer:
 
     Use this for unit tests and any scenario where the checkpoint
     only needs to live for the lifetime of a process.
+
+    **Concurrency**: this class wraps a plain ``dict`` and offers no
+    internal synchronization.  It is safe to use from a single thread
+    of execution per :class:`FlowExecutor` (which is the documented
+    executor contract).  For cross-process or cross-thread
+    crash-resume, use :class:`FileCheckpointer` (which delegates
+    atomicity to the filesystem) instead.
     """
 
     def __init__(self) -> None:

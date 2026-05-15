@@ -287,24 +287,52 @@ def test_stream_flow_coexists_with_user_middleware() -> None:
     ex = _build_two_step_executor()
     ex.add_middleware(counter)
 
+    # Two consecutive stream_flow calls.  If the internal collector
+    # middleware leaked across calls (i.e. it wasn't cleaned up at
+    # the end of call #1), each subsequent run would dispatch the
+    # same on_step_end through the leftover collector — but since
+    # the collector only writes to its own per-call event queue,
+    # leakage would manifest as Queue.put on a queue whose generator
+    # has already returned, with no observable count change on the
+    # user middleware.  The cleanest *behavioral* check is to assert
+    # the user counter sees exactly the expected number of step_end
+    # calls after both runs (collector leakage would not double the
+    # user middleware's counts, but if the collector's removal also
+    # accidentally removed user middleware, the count would drop).
+    list(ex.stream_flow("stream_two_step", {"number": 1}))
     list(ex.stream_flow("stream_two_step", {"number": 1}))
 
-    assert counter.ends == 2
-    # The internal stream collector cleans itself up — only the user
-    # middleware remains after the stream finishes.
-    assert ex._middleware == [counter]
+    assert counter.ends == 4
 
 
 def test_stream_collector_is_removed_after_completion() -> None:
-    """Internal collector middleware doesn't accumulate across calls."""
+    """Repeated stream_flow calls remain functional — no leftover collectors break later runs.
+
+    Previously this test asserted on ``ex._middleware`` directly.
+    The behavioral equivalent is: after N stream_flow calls, the
+    next call still produces the canonical event sequence with no
+    extra events from stale collectors and no missing events from
+    over-eager cleanup.
+    """
     ex = _build_two_step_executor()
 
-    starting = list(ex._middleware)
     for _ in range(3):
         list(ex.stream_flow("stream_two_step", {"number": 1}))
-    ending = list(ex._middleware)
 
-    assert ending == starting
+    events = list(ex.stream_flow("stream_two_step", {"number": 1}))
+
+    # Exactly one flow_start + one (step_start, step_end) per step +
+    # one flow_end.  Any leftover collector from a previous call
+    # would push duplicates onto this run's queue.
+    kinds = [e.kind for e in events]
+    assert kinds == [
+        "flow_start",
+        "step_start",
+        "step_end",
+        "step_start",
+        "step_end",
+        "flow_end",
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **PR #136 review-feedback fixes** for the executor extensibility
+  stack (#126/#127/#128/#131/#134):
+  - `FileStepCache._file_path` now includes a SHA-256 digest of the
+    original ``tool_name`` in the filename, eliminating a silent
+    cross-tool cache-collision when distinct tool names sanitize to
+    the same form (e.g. ``"foo/bar"`` vs ``"foo_bar"``) and share
+    schemas + inputs.
+  - `FileStepCache.set` is now atomic (``tempfile.mkstemp`` +
+    ``os.replace``), matching the pre-existing ``FileCheckpointer.save``
+    pattern.  Corrupt files left behind by older non-atomic writes
+    are still treated as misses.
+  - `OTelTraceExporter` keeps its open spans in dicts keyed by
+    ``trace_id`` rather than scalar instance attributes, so sharing a
+    single exporter across executors no longer leaks the first
+    flow's parent span.
+  - `FlowExecutor.resume_flow` now raises two typed exceptions
+    inheriting from `ChainWeaverError` — ``CheckpointerNotConfiguredError``
+    and ``CheckpointNotFoundError`` — instead of the previous opaque
+    `ValueError`s.  Both are exported in ``chainweaver.__all__``.
+  - `_datetime_to_ns` in the OTel integration now asserts
+    ``dt.tzinfo is not None`` rather than silently reinterpreting
+    naive datetimes as UTC.
+  - `stream_flow` emits a ``WARNING`` via the ``chainweaver.executor``
+    logger when the consumer breaks out of iteration mid-flow (the
+    background thread still runs to completion — cancellation lands
+    with #80).
+  - ``FlowExecutor`` class docstring now explicitly states the
+    single-thread-per-instance contract; ``InMemoryStepCache`` /
+    ``InMemoryCheckpointer`` docstrings note their dict-backed,
+    no-internal-locking semantics.
+  - ``ExecutionResult.total_duration_ms`` docstring now explains that
+    after a ``resume_flow`` it covers only the resume process's
+    wall-clock (not the elapsed time across the original crash and
+    resume).
+  - Test suite no longer reaches into ``FlowExecutor._middleware``
+    or ``FlowExecutor._tools`` private attributes — uses public
+    ``register_tool`` re-registration and behavioral assertions
+    instead.
+  - New regression test pins the resume-log invariant:
+    ``len(resumed.execution_log) == len(snapshot.execution_log) +
+    steps_remaining``.
+
 ### Added
 
 - **OpenTelemetry trace exporter** (#126): new

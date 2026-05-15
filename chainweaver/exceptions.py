@@ -201,3 +201,33 @@ class CheckpointDriftError(ChainWeaverError):
         self.flow_name = flow_name
         self.detail = detail
         super().__init__(f"Cannot resume trace '{trace_id}' for flow '{flow_name}': {detail}.")
+
+
+class CheckpointerNotConfiguredError(ChainWeaverError):
+    """Raised when :meth:`FlowExecutor.resume_flow` is called without a checkpointer.
+
+    Crash-resume is an opt-in feature — the executor needs a
+    :class:`~chainweaver.checkpoint.Checkpointer` passed at
+    construction time to know where snapshots live.  Callers that
+    omit ``checkpointer=`` and then call :meth:`resume_flow` hit this
+    error instead of a generic ``ValueError`` so wrapping code can
+    distinguish "configuration mistake" from arbitrary value errors.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "FlowExecutor has no checkpointer configured. "
+            "Pass checkpointer=... to FlowExecutor(...) to enable resume_flow."
+        )
+
+
+class CheckpointNotFoundError(ChainWeaverError):
+    """Raised when :meth:`FlowExecutor.resume_flow` cannot find a snapshot.
+
+    Attributes:
+        trace_id: The trace id that was looked up and missed.
+    """
+
+    def __init__(self, trace_id: str) -> None:
+        self.trace_id = trace_id
+        super().__init__(f"No snapshot found for trace_id '{trace_id}'.")

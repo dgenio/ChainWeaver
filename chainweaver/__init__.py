@@ -61,6 +61,8 @@ from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     ChainWeaverError,
     CheckpointDriftError,
+    CheckpointerNotConfiguredError,
+    CheckpointNotFoundError,
     DAGDefinitionError,
     FlowAlreadyExistsError,
     FlowExecutionError,
@@ -139,7 +141,9 @@ __all__ = [
     "BaseMiddleware",
     "ChainWeaverError",
     "CheckpointDriftError",
+    "CheckpointNotFoundError",
     "Checkpointer",
+    "CheckpointerNotConfiguredError",
     "CompatibilityIssue",
     "CompilationError",
     "CompilationResult",
