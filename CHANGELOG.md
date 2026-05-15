@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Middleware lifecycle seam** (#131): new `chainweaver/middleware.py`
+  module exposing a `FlowExecutorMiddleware` `typing.Protocol` with
+  four hooks — `on_flow_start`, `on_step_start`, `on_step_end`,
+  `on_flow_end` — plus the matching Pydantic context models
+  (`FlowStartContext`, `StepStartContext`, `StepEndContext`,
+  `FlowEndContext`) and an optional `BaseMiddleware` no-op base class.
+  `FlowExecutor` accepts a `middleware=` list and exposes
+  `add_middleware(...)`; hooks fire in registration order at fixed
+  boundaries.  Middleware exceptions are caught and logged at
+  `WARNING` via the `chainweaver.middleware` logger — observability
+  bugs cannot abort a flow execution.  Steps that fail before input
+  resolution (tool-not-found, input-mapping) emit `on_step_end`
+  without a preceding `on_step_start`; every other code path emits
+  the symmetric `start` / `end` pair.  This is the extension point
+  the upcoming OpenTelemetry exporter (#126), step-result cache
+  (#127), `Checkpointer` (#128), and streaming-events generator
+  (#134) will all plug into.  In-tree migration of `log_utils` and
+  cost reporting onto the seam will follow in a separate change.
 - **`Tool.from_flow`** (#24): wrap a registered `Flow` or `DAGFlow` as a
   single `Tool` whose `fn` delegates back to a `FlowExecutor`.  The
   resulting tool is registrable like any other tool, so a compiled flow

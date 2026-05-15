@@ -43,6 +43,7 @@ chainweaver/
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
+├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
@@ -64,6 +65,8 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 ### Key entry points
 
 - `FlowExecutor.execute_flow(flow_name, initial_input, *, force=False)` → `ExecutionResult`
+- `FlowExecutor(..., middleware=[...])` → register lifecycle hooks (#131); fire order is `on_flow_start` → (`on_step_start` → `on_step_end`)* → `on_flow_end`. Hook exceptions are caught and logged at `WARNING` (chainweaver.middleware) — observability bugs never abort a flow.
+- `FlowExecutor.add_middleware(mw)` → append a middleware to the registration chain
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow
 - `FlowRegistry.get_flow(name, *, version=None)` → latest or specific version
 - `FlowExecutor.register_tool(tool)` → register a tool; triggers drift detection on schema change

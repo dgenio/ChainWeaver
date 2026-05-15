@@ -87,6 +87,14 @@ from chainweaver.flow import (
     validate_dag_topology,
 )
 from chainweaver.log_utils import RedactionPolicy
+from chainweaver.middleware import (
+    BaseMiddleware,
+    FlowEndContext,
+    FlowExecutorMiddleware,
+    FlowStartContext,
+    StepEndContext,
+    StepStartContext,
+)
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import (
@@ -101,6 +109,17 @@ from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
 
+# Resolve forward references in middleware context models — ``StepRecord``
+# and ``ExecutionResult`` are defined in ``chainweaver.executor`` (imported
+# above), so they are now available for Pydantic to bind into the
+# ``StepEndContext`` / ``FlowEndContext`` schemas.
+StepEndContext.model_rebuild(
+    _types_namespace={"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
+)
+FlowEndContext.model_rebuild(
+    _types_namespace={"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
+)
+
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
@@ -108,6 +127,7 @@ logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 __version__ = "0.4.0"
 
 __all__ = [
+    "BaseMiddleware",
     "ChainWeaverError",
     "CompatibilityIssue",
     "CompilationError",
@@ -126,11 +146,14 @@ __all__ = [
     "FlowAlreadyExistsError",
     "FlowBuilder",
     "FlowBuilderError",
+    "FlowEndContext",
     "FlowExecutionError",
     "FlowExecutor",
+    "FlowExecutorMiddleware",
     "FlowNotFoundError",
     "FlowRegistry",
     "FlowSerializationError",
+    "FlowStartContext",
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
@@ -146,8 +169,10 @@ __all__ = [
     "RetryPolicy",
     "SchemaValidationError",
     "StepDiff",
+    "StepEndContext",
     "StepPlan",
     "StepRecord",
+    "StepStartContext",
     "Tool",
     "ToolDefinitionError",
     "ToolNotFoundError",

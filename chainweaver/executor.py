@@ -50,11 +50,19 @@ from chainweaver.log_utils import (
     log_step_error,
     log_step_start,
 )
+from chainweaver.middleware import (
+    FlowEndContext,
+    FlowExecutorMiddleware,
+    FlowStartContext,
+    StepEndContext,
+    StepStartContext,
+)
 from chainweaver.observation import TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
 _logger = get_logger("chainweaver.executor")
+_middleware_logger = get_logger("chainweaver.middleware")
 
 
 def _now_utc() -> datetime:
@@ -388,12 +396,79 @@ class FlowExecutor:
         cost_profile: CostProfile | None = None,
         redaction_policy: RedactionPolicy | None = None,
         trace_recorder: TraceRecorder | None = None,
+        middleware: list[FlowExecutorMiddleware] | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
         self._cost_profile = cost_profile
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
+        self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
+
+    def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
+        """Register an additional :class:`FlowExecutorMiddleware`.
+
+        Middlewares fire in registration order; calling :meth:`add_middleware`
+        appends to the end of the registration chain.
+
+        Args:
+            middleware: An object implementing any subset of the
+                :class:`~chainweaver.middleware.FlowExecutorMiddleware`
+                hooks.  Hooks with default no-op behavior may be omitted.
+        """
+        self._middleware.append(middleware)
+
+    # ------------------------------------------------------------------
+    # Middleware dispatch
+    #
+    # Hook exceptions are caught and logged at WARNING; observability
+    # bugs must never abort a flow execution (issue #131).  Hooks fire
+    # in registration order.
+    # ------------------------------------------------------------------
+
+    def _fire_hook(
+        self,
+        hook: str,
+        ctx: FlowStartContext | StepStartContext | StepEndContext | FlowEndContext,
+    ) -> None:
+        """Dispatch *hook* to every registered middleware, catching exceptions.
+
+        Middlewares that do not define *hook* are silently skipped so that
+        users can implement only the hooks they care about (the ones they
+        do define still satisfy the :class:`FlowExecutorMiddleware`
+        Protocol structurally — partial implementers typically inherit
+        from :class:`~chainweaver.middleware.BaseMiddleware` to satisfy
+        strict static type checkers).
+
+        Hooks that raise are logged at ``WARNING`` and the iteration
+        continues — middleware bugs never abort a flow.
+        """
+        for idx, mw in enumerate(self._middleware):
+            handler = getattr(mw, hook, None)
+            if handler is None:
+                continue
+            try:
+                handler(ctx)
+            except Exception as exc:
+                _middleware_logger.warning(
+                    "Middleware %d (%s) raised in %s: %s",
+                    idx,
+                    type(mw).__name__,
+                    hook,
+                    exc,
+                )
+
+    def _fire_flow_start(self, ctx: FlowStartContext) -> None:
+        self._fire_hook("on_flow_start", ctx)
+
+    def _fire_step_start(self, ctx: StepStartContext) -> None:
+        self._fire_hook("on_step_start", ctx)
+
+    def _fire_step_end(self, ctx: StepEndContext) -> None:
+        self._fire_hook("on_step_end", ctx)
+
+    def _fire_flow_end(self, ctx: FlowEndContext) -> None:
+        self._fire_hook("on_flow_end", ctx)
 
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
@@ -568,9 +643,20 @@ class FlowExecutor:
         flow_t0 = time.perf_counter()
         log: list[StepRecord] = []
 
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow.name,
+                flow_version=flow.version,
+                initial_input=dict(result.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
         for idx in range(resume_from_step, len(flow.steps)):
             step = flow.steps[idx]
-            step_record = self._execute_step(idx, step, context)
+            step_record = self._execute_step(idx, step, context, flow.name, trace_id)
             log.append(step_record)
 
             if not step_record.success:
@@ -779,6 +865,16 @@ class FlowExecutor:
             trace_id,
             len(flow.steps),
         )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
 
         # -- Flow-level input validation ------------------------------------
         if flow.input_schema is not None:
@@ -811,7 +907,7 @@ class FlowExecutor:
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
-            record = self._execute_step(idx, step, context)
+            record = self._execute_step(idx, step, context, flow_name, trace_id)
             log.append(record)
 
             if not record.success:
@@ -938,6 +1034,13 @@ class FlowExecutor:
         )
         if self._trace_recorder is not None:
             self._record_observed_trace(result)
+        self._fire_flow_end(
+            FlowEndContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                result=result,
+            )
+        )
         return result
 
     def _record_observed_trace(self, result: ExecutionResult) -> None:
@@ -1032,6 +1135,8 @@ class FlowExecutor:
         step_index: int,
         step: FlowStep,
         context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -1040,10 +1145,22 @@ class FlowExecutor:
         (``"fail"`` / ``"skip"`` / ``"fallback:<tool_name>"``) when all
         attempts are exhausted.
 
+        Fires :class:`~chainweaver.middleware.StepStartContext` once the
+        step's inputs have been resolved, and always fires
+        :class:`~chainweaver.middleware.StepEndContext` for the resulting
+        :class:`StepRecord` (success *and* failure paths).  Steps that
+        fail before input resolution — tool-not-found, input-mapping —
+        do not produce a ``on_step_start`` call but still produce
+        ``on_step_end``.
+
         Args:
             step_index: Zero-based position of the step.
             step: The step to execute.
             context: The current accumulated context.
+            flow_name: Name of the enclosing flow, threaded through for
+                middleware contexts.
+            trace_id: Trace id of the enclosing execution, threaded
+                through for middleware contexts.
 
         Returns:
             A :class:`StepRecord` describing the outcome with full timing.
@@ -1088,21 +1205,56 @@ class FlowExecutor:
                 skipped=skipped,
             )
 
+        def _finish(record: StepRecord) -> StepRecord:
+            self._fire_step_end(
+                StepEndContext(
+                    trace_id=trace_id,
+                    flow_name=flow_name,
+                    step_record=record,
+                )
+            )
+            return record
+
         try:
             tool = self.get_tool(step.tool_name)
         except ToolNotFoundError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _record(
-                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
             )
 
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _record(
-                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
             )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs=dict(inputs),
+                started_at=started_at,
+            )
+        )
 
         log_step_start(
             _logger,
@@ -1124,13 +1276,15 @@ class FlowExecutor:
         if final_raw_exc is not None:
             wrapped = self._wrap_tool_exception(step, step_index, final_raw_exc)
             log_step_error(_logger, step_index, step.tool_name, wrapped)
-            return self._apply_on_error(
-                step=step,
-                step_index=step_index,
-                inputs=inputs,
-                wrapped_error=wrapped,
-                retry_errors=retry_errors,
-                make_record=_record,
+            return _finish(
+                self._apply_on_error(
+                    step=step,
+                    step_index=step_index,
+                    inputs=inputs,
+                    wrapped_error=wrapped,
+                    retry_errors=retry_errors,
+                    make_record=_record,
+                )
             )
 
         assert outputs is not None
@@ -1141,13 +1295,15 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
-        return _record(
-            inputs=inputs,
-            outputs=outputs,
-            error=None,
-            success=True,
-            skipped=False,
-            retry_errors=retry_errors,
+        return _finish(
+            _record(
+                inputs=inputs,
+                outputs=outputs,
+                error=None,
+                success=True,
+                skipped=False,
+                retry_errors=retry_errors,
+            )
         )
 
     def _invoke_tool(
@@ -1375,6 +1531,16 @@ class FlowExecutor:
             trace_id,
             len(flow.steps),
         )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow.name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
 
         # -- Flow-level input validation ------------------------------------
         if flow.input_schema is not None:
@@ -1457,7 +1623,7 @@ class FlowExecutor:
                     tool_name=step.tool_name,
                     input_mapping=step.input_mapping,
                 )
-                record = self._execute_step(flat_index, proxy, context)
+                record = self._execute_step(flat_index, proxy, context, flow.name, trace_id)
                 level_records.append(record)
                 flat_index += 1
 
