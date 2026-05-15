@@ -178,3 +178,26 @@ class FlowSerializationError(ChainWeaverError):
             super().__init__(f"Flow serialization failed: {detail}.")
         else:
             super().__init__(f"Flow serialization failed for '{source}': {detail}.")
+
+
+class CheckpointDriftError(ChainWeaverError):
+    """Raised when a resumed flow's snapshot disagrees with current registry state.
+
+    Crash-resume (issue #128) is only safe when the flow definition and
+    every tool schema referenced by the snapshot are unchanged.  When the
+    registered flow's version or any tool's ``schema_hash`` has rolled
+    since the snapshot was written, resuming would silently mix old
+    intermediate outputs with new tool behavior — this exception stops
+    that before it happens.
+
+    Attributes:
+        trace_id: Trace id of the snapshot that could not be safely resumed.
+        flow_name: Name of the flow recorded in the snapshot.
+        detail: Human-readable explanation of which hash mismatched.
+    """
+
+    def __init__(self, trace_id: str, flow_name: str, detail: str) -> None:
+        self.trace_id = trace_id
+        self.flow_name = flow_name
+        self.detail = detail
+        super().__init__(f"Cannot resume trace '{trace_id}' for flow '{flow_name}': {detail}.")

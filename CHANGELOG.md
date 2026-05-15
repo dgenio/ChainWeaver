@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Crash-resume checkpointing** (#128): new `chainweaver/checkpoint.py`
+  module with a `Checkpointer` `typing.Protocol`, an
+  `ExecutionSnapshot` Pydantic model, `InMemoryCheckpointer`
+  (dict-backed), and `FileCheckpointer` (JSON-on-disk, one file per
+  `trace_id`, written atomically via `tempfile.mkstemp` +
+  `os.replace`).  `FlowExecutor.__init__` accepts a `checkpointer=`
+  argument and a `delete_on_success=True` flag; when set, an
+  `ExecutionSnapshot` is written after every successful linear step
+  or DAG level.  New `FlowExecutor.resume_flow(trace_id)` loads a
+  snapshot, validates the recorded flow version and every relevant
+  tool's `schema_hash` against the current registry (mismatches raise
+  the new `CheckpointDriftError`), and continues execution with the
+  original trace id — the resulting `ExecutionResult.execution_log`
+  contains both recovered and freshly executed records.  On terminal
+  success the snapshot is deleted; on failure it is preserved so
+  operators can fix the underlying issue and call `resume_flow`
+  again.  DAG checkpoints live at level boundaries (within a level
+  the steps are replayed from scratch on resume — the simplest
+  correct semantics).  See `examples/checkpoint_resume.py`.
 - **Step-result caching layer** (#127): new `chainweaver/cache.py`
   module with a `StepCache` `typing.Protocol`, `InMemoryStepCache`
   (dict-backed), `FileStepCache` (JSON-on-disk, one file per

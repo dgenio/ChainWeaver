@@ -28,9 +28,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
+from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
+    CheckpointDriftError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
@@ -478,6 +480,8 @@ class FlowExecutor:
         trace_recorder: TraceRecorder | None = None,
         middleware: list[FlowExecutorMiddleware] | None = None,
         step_cache: StepCache | None = None,
+        checkpointer: Checkpointer | None = None,
+        delete_on_success: bool = True,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -494,6 +498,16 @@ class FlowExecutor:
         # the cache is bypassed — replay must always re-execute (per
         # the existing replay semantics).
         self._in_replay = False
+        # Crash-resume checkpointer (issue #128).  When set, an
+        # ExecutionSnapshot is written after every successful linear
+        # step or DAG level.  On terminal completion the snapshot is
+        # deleted iff ``delete_on_success`` is ``True``.
+        self._checkpointer = checkpointer
+        self._delete_on_success = delete_on_success
+        # Resumption state — populated by ``resume_flow`` before
+        # invoking the relevant ``_execute_*`` path so the loops know
+        # where to start and which records to prepend.
+        self._resume_snapshot: ExecutionSnapshot | None = None
 
     def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
         """Register an additional :class:`FlowExecutorMiddleware`.
@@ -1039,6 +1053,18 @@ class FlowExecutor:
                     )
             context.update(record.outputs)
 
+            # Crash-resume checkpoint (issue #128) — write after every
+            # successful step so a fresh process can resume from here.
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
+
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
             validation_record = self._validate_flow_schema(
@@ -1222,6 +1248,11 @@ class FlowExecutor:
         )
         if self._trace_recorder is not None:
             self._record_observed_trace(result)
+        # On terminal success delete the snapshot — the resume window
+        # is closed.  Failed runs preserve the snapshot so the operator
+        # can choose to retry the failed step manually (issue #128).
+        if self._checkpointer is not None and self._delete_on_success and result.success:
+            self._checkpointer.delete(result.trace_id)
         self._fire_flow_end(
             FlowEndContext(
                 trace_id=trace_id,
@@ -1230,6 +1261,259 @@ class FlowExecutor:
             )
         )
         return result
+
+    def _save_linear_snapshot(
+        self,
+        *,
+        trace_id: str,
+        flow: Any,
+        initial_input: dict[str, Any],
+        started_at: datetime,
+        context: dict[str, Any],
+        log: list[StepRecord],
+        completed_steps: int,
+    ) -> None:
+        """Write a snapshot for a linear flow execution (issue #128).
+
+        No-op when no checkpointer is configured.  Captures every
+        relevant tool's current ``schema_hash`` so resume can detect
+        drift since the snapshot was written.
+        """
+        if self._checkpointer is None:
+            return
+        tool_hashes: dict[str, str] = {}
+        for step in flow.steps:
+            tool = self._tools.get(step.tool_name)
+            if tool is not None:
+                tool_hashes[step.tool_name] = tool.schema_hash
+        snapshot = ExecutionSnapshot(
+            trace_id=trace_id,
+            flow_name=flow.name,
+            flow_version=flow.version,
+            initial_input=dict(initial_input),
+            started_at=started_at,
+            context=dict(context),
+            execution_log=list(log),
+            completed_steps=completed_steps,
+            tool_schema_hashes=tool_hashes,
+        )
+        self._checkpointer.save(snapshot)
+
+    def _save_dag_snapshot(
+        self,
+        *,
+        trace_id: str,
+        flow: DAGFlow,
+        initial_input: dict[str, Any],
+        started_at: datetime,
+        context: dict[str, Any],
+        log: list[StepRecord],
+        completed_levels: int,
+    ) -> None:
+        """Write a snapshot at a DAG level boundary (issue #128).
+
+        DAG resume uses level granularity — within a level all steps
+        run sequentially, but on resume the level is replayed from
+        scratch.  No-op when no checkpointer is configured.
+        """
+        if self._checkpointer is None:
+            return
+        tool_hashes: dict[str, str] = {}
+        for step in flow.steps:
+            tool = self._tools.get(step.tool_name)
+            if tool is not None:
+                tool_hashes[step.tool_name] = tool.schema_hash
+        snapshot = ExecutionSnapshot(
+            trace_id=trace_id,
+            flow_name=flow.name,
+            flow_version=flow.version,
+            initial_input=dict(initial_input),
+            started_at=started_at,
+            context=dict(context),
+            execution_log=list(log),
+            completed_dag_levels=completed_levels,
+            tool_schema_hashes=tool_hashes,
+        )
+        self._checkpointer.save(snapshot)
+
+    def resume_flow(self, trace_id: str) -> ExecutionResult:
+        """Resume an in-flight execution from a stored snapshot (issue #128).
+
+        Loads the snapshot via the configured ``checkpointer``, validates
+        the snapshot's flow version and tool ``schema_hash`` values
+        against the current registry, then continues execution from the
+        step (linear) or DAG level (DAG) where the previous run left
+        off.  The returned :class:`ExecutionResult` carries the
+        original ``trace_id`` and ``started_at`` from the snapshot, and
+        ``execution_log`` includes both the recovered records and the
+        freshly executed ones.
+
+        On terminal success the snapshot is deleted iff
+        ``delete_on_success=True`` (the default).
+
+        Args:
+            trace_id: Trace id of the snapshot to resume.
+
+        Returns:
+            An :class:`ExecutionResult` for the (now-completed) flow.
+
+        Raises:
+            ValueError: When no checkpointer is configured, or when no
+                snapshot exists for *trace_id*.
+            FlowNotFoundError: When the snapshot's flow is no longer
+                registered.
+            CheckpointDriftError: When the flow's version or any tool's
+                ``schema_hash`` has changed since the snapshot was
+                written.
+        """
+        if self._checkpointer is None:
+            raise ValueError("FlowExecutor has no checkpointer configured.")
+        snapshot = self._checkpointer.load(trace_id)
+        if snapshot is None:
+            raise ValueError(f"No snapshot found for trace_id '{trace_id}'.")
+
+        flow = self._registry.get_flow(snapshot.flow_name)
+        if flow.version != snapshot.flow_version:
+            raise CheckpointDriftError(
+                trace_id,
+                snapshot.flow_name,
+                f"flow version changed: snapshot='{snapshot.flow_version}' "
+                f"current='{flow.version}'",
+            )
+        for tool_name, snap_hash in snapshot.tool_schema_hashes.items():
+            current = self._tools.get(tool_name)
+            if current is None:
+                raise CheckpointDriftError(
+                    trace_id,
+                    snapshot.flow_name,
+                    f"tool '{tool_name}' is no longer registered",
+                )
+            if current.schema_hash != snap_hash:
+                raise CheckpointDriftError(
+                    trace_id,
+                    snapshot.flow_name,
+                    f"tool '{tool_name}' schema_hash changed: "
+                    f"snapshot='{snap_hash}' current='{current.schema_hash}'",
+                )
+
+        if isinstance(flow, DAGFlow):
+            return self._resume_dag_flow(flow, snapshot)
+        return self._resume_linear_flow(flow, snapshot)
+
+    def _resume_linear_flow(
+        self,
+        flow: Any,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Continue a linear execution from *snapshot.completed_steps*."""
+        trace_id = snapshot.trace_id
+        flow_name = snapshot.flow_name
+        flow_started_at = snapshot.started_at
+        # perf_start anchors total_duration_ms; resume time is the wall
+        # clock from the resume point on, not the original elapsed
+        # duration.  Document this in the result interpretation if
+        # users want cross-resume totals they can sum execution_log
+        # durations.
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "Flow '%s' resuming | trace_id=%s | from_step=%d",
+            flow_name,
+            trace_id,
+            snapshot.completed_steps,
+        )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(snapshot.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        context: dict[str, Any] = dict(snapshot.context)
+        log: list[StepRecord] = list(snapshot.execution_log)
+
+        for idx in range(snapshot.completed_steps, len(flow.steps)):
+            step = flow.steps[idx]
+            record = self._execute_step(idx, step, context, flow_name, trace_id)
+            log.append(record)
+
+            if not record.success:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                )
+
+            assert record.outputs is not None  # success guarantees outputs
+            context.update(record.outputs)
+
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=snapshot.initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
+
+        # Flow-level output validation (mirrors execute_flow).
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow_name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=dict(snapshot.initial_input),
+        )
+
+    def _resume_dag_flow(
+        self,
+        flow: DAGFlow,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Continue a DAG execution from *snapshot.completed_dag_levels*."""
+        # Use the resume slot the existing _execute_dag_flow consults
+        # to seed context, log, and starting level.  Cleanup happens
+        # via the try/finally in resume_flow's caller — but resume_flow
+        # doesn't wrap in try/finally; we wrap here instead to keep
+        # the contract local.
+        self._resume_snapshot = snapshot
+        try:
+            return self._execute_dag_flow(flow, dict(snapshot.initial_input))
+        finally:
+            self._resume_snapshot = None
 
     def _record_observed_trace(self, result: ExecutionResult) -> None:
         """Mirror an :class:`ExecutionResult` into the configured TraceRecorder."""
@@ -1756,12 +2040,23 @@ class FlowExecutor:
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
-        trace_id = _new_trace_id()
-        flow_started_at = _now_utc()
+        # Resume support (issue #128): when _resume_snapshot is set,
+        # reuse its trace_id / started_at / context / log and skip the
+        # already-completed DAG levels.
+        resume = self._resume_snapshot
+        if resume is not None:
+            trace_id = resume.trace_id
+            flow_started_at = resume.started_at
+            start_level = resume.completed_dag_levels
+        else:
+            trace_id = _new_trace_id()
+            flow_started_at = _now_utc()
+            start_level = 0
         flow_t0 = time.perf_counter()
         _logger.info(
-            "DAGFlow '%s' started | trace_id=%s | steps=%d",
+            "DAGFlow '%s' %s | trace_id=%s | steps=%d",
             flow.name,
+            "resuming" if resume is not None else "started",
             trace_id,
             len(flow.steps),
         )
@@ -1776,8 +2071,8 @@ class FlowExecutor:
             )
         )
 
-        # -- Flow-level input validation ------------------------------------
-        if flow.input_schema is not None:
+        # -- Flow-level input validation (skipped on resume — already done) ----
+        if resume is None and flow.input_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
                 payload=initial_input,
@@ -1803,13 +2098,18 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
-        log: list[StepRecord] = []
+        if resume is not None:
+            context = dict(resume.context)
+            log = list(resume.execution_log)
+            flat_index = len(log)
+        else:
+            context = dict(initial_input)
+            log = []
+            flat_index = 0
         levels = self._compute_dag_levels(flow)
-        # Flat index for StepRecord.step_index (mirrors linear flow behaviour).
-        flat_index = 0
 
-        for level_steps in levels:
+        for relative_level_idx, level_steps in enumerate(levels[start_level:]):
+            absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []
 
@@ -1933,6 +2233,20 @@ class FlowExecutor:
                         key,
                     )
             context.update(level_outputs)
+
+            # DAG snapshot at level boundary (issue #128).  A resume
+            # restarts from the next un-completed level — within a
+            # level there is no checkpoint, so the level is replayed
+            # from scratch on resume (the simplest correct semantics).
+            self._save_dag_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_levels=absolute_level_idx + 1,
+            )
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
