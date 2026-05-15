@@ -50,6 +50,7 @@ from chainweaver.compiler import (
 )
 from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
+from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     ChainWeaverError,
     DAGDefinitionError,
@@ -109,16 +110,15 @@ from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
 
-# Resolve forward references in middleware context models — ``StepRecord``
-# and ``ExecutionResult`` are defined in ``chainweaver.executor`` (imported
-# above), so they are now available for Pydantic to bind into the
-# ``StepEndContext`` / ``FlowEndContext`` schemas.
-StepEndContext.model_rebuild(
-    _types_namespace={"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
-)
-FlowEndContext.model_rebuild(
-    _types_namespace={"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
-)
+# Resolve forward references in middleware context and event models —
+# ``StepRecord`` and ``ExecutionResult`` are defined in
+# ``chainweaver.executor`` (imported above), so they are now available
+# for Pydantic to bind into the ``StepEndContext`` / ``FlowEndContext``
+# schemas as well as ``FlowEvent``.
+_forward_namespace = {"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
+StepEndContext.model_rebuild(_types_namespace=_forward_namespace)
+FlowEndContext.model_rebuild(_types_namespace=_forward_namespace)
+FlowEvent.model_rebuild(_types_namespace=_forward_namespace)
 
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
@@ -147,6 +147,7 @@ __all__ = [
     "FlowBuilder",
     "FlowBuilderError",
     "FlowEndContext",
+    "FlowEvent",
     "FlowExecutionError",
     "FlowExecutor",
     "FlowExecutorMiddleware",

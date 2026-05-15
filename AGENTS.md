@@ -42,8 +42,9 @@ chainweaver/
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection (main entry point)
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
+├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
@@ -65,6 +66,7 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 ### Key entry points
 
 - `FlowExecutor.execute_flow(flow_name, initial_input, *, force=False)` → `ExecutionResult`
+- `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)` → `Iterator[FlowEvent]` (#134); yields `kind="flow_start"` → (`step_start` → `step_end`)* → `flow_end` events as the flow runs on a worker thread. Cancellation is not supported for the sync variant; the background thread runs to completion.
 - `FlowExecutor(..., middleware=[...])` → register lifecycle hooks (#131); fire order is `on_flow_start` → (`on_step_start` → `on_step_end`)* → `on_flow_end`. Hook exceptions are caught and logged at `WARNING` (chainweaver.middleware) — observability bugs never abort a flow.
 - `FlowExecutor.add_middleware(mw)` → append a middleware to the registration chain
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow

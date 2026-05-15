@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming `stream_flow` generator** (#134): new
+  `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)`
+  method returns a sync `Iterator[FlowEvent]` that yields lifecycle
+  events as the flow runs (`flow_start` → `(step_start, step_end)*` →
+  `flow_end`).  Implementation reuses the lifecycle hook seam from
+  #131 — an internal `_StreamCollectorMiddleware` writes events to a
+  `queue.Queue` from a worker thread.  `flow_end` always fires (even
+  on failure); steps that fail before input resolution emit
+  `step_end` without a preceding `step_start`, matching the
+  middleware lifecycle contract.  `FlowEvent` is a frozen Pydantic
+  model that round-trips through `model_dump_json` /
+  `model_validate_json`.  Sync-variant cancellation is intentionally
+  not supported: if the consumer stops iterating, the background
+  worker runs the flow to completion and exits.  The async variant
+  (`stream_flow_async`) is gated on issue #80.  See
+  `examples/streaming_flow.py`.
 - **Middleware lifecycle seam** (#131): new `chainweaver/middleware.py`
   module exposing a `FlowExecutorMiddleware` `typing.Protocol` with
   four hooks — `on_flow_start`, `on_step_start`, `on_step_end`,

@@ -13,9 +13,12 @@ strings so the result is JSON-serializable end-to-end.
 
 from __future__ import annotations
 
+import contextlib
+import queue
+import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -25,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
+from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     FlowExecutionError,
     FlowStatusError,
@@ -51,6 +55,7 @@ from chainweaver.log_utils import (
     log_step_start,
 )
 from chainweaver.middleware import (
+    BaseMiddleware,
     FlowEndContext,
     FlowExecutorMiddleware,
     FlowStartContext,
@@ -78,6 +83,74 @@ def _new_trace_id() -> str:
 def _exc_to_strings(exc: Exception) -> tuple[str, str]:
     """Render an exception as ``(error_type, error_message)`` strings."""
     return type(exc).__name__, str(exc)
+
+
+class _StreamSentinel:
+    """Internal marker placed on the event queue to signal completion."""
+
+
+_STREAM_SENTINEL: _StreamSentinel = _StreamSentinel()
+
+
+class _StreamCollectorMiddleware(BaseMiddleware):
+    """Per-call middleware that pushes lifecycle events onto a queue.
+
+    Used by :meth:`FlowExecutor.stream_flow` to bridge the lifecycle
+    hook surface to a generator yielding :class:`FlowEvent` payloads.
+    """
+
+    def __init__(self, events: queue.Queue[FlowEvent | _StreamSentinel]) -> None:
+        self._events = events
+
+    def on_flow_start(self, ctx: FlowStartContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="flow_start",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                flow_version=ctx.flow_version,
+                initial_input=dict(ctx.initial_input),
+                total_steps=ctx.total_steps,
+            )
+        )
+
+    def on_step_start(self, ctx: StepStartContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="step_start",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_index,
+                tool_name=ctx.tool_name,
+                inputs=dict(ctx.inputs),
+            )
+        )
+
+    def on_step_end(self, ctx: StepEndContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="step_end",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_record.step_index,
+                tool_name=ctx.step_record.tool_name,
+                step_record=ctx.step_record,
+            )
+        )
+
+    def on_flow_end(self, ctx: FlowEndContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="flow_end",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                result=ctx.result,
+            )
+        )
 
 
 def _schema_field_shape(schema: type[BaseModel]) -> dict[str, str]:
@@ -979,6 +1052,96 @@ class FlowExecutor:
             perf_start=flow_t0,
             initial_input=initial_input,
         )
+
+    def stream_flow(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        force: bool = False,
+    ) -> Iterator[FlowEvent]:
+        """Execute a flow and yield :class:`FlowEvent` lifecycle events (#134).
+
+        Events arrive in strict order::
+
+            flow_start
+            (step_start, step_end)*       # one pair per executed step
+            flow_end                       # always — inspect result.success
+
+        Steps that fail before input resolution (tool-not-found,
+        input-mapping) emit ``step_end`` without a preceding
+        ``step_start`` — same contract as the underlying middleware
+        hooks.
+
+        The flow runs on a background worker thread; events are delivered
+        through a synchronized queue.  **Cancellation is not supported**
+        for the sync variant — if the consumer stops iterating, the
+        background thread runs the flow to completion and then exits.
+        Build UIs that surface this behavior; for true cancellation use
+        the async variant once issue #80 lands.
+
+        Hook exceptions and middleware exceptions still follow the
+        catch-and-log contract from :class:`FlowExecutorMiddleware`: a
+        consumer that mishandles an event cannot abort the flow.
+
+        Args:
+            flow_name: Name of the flow to execute.
+            initial_input: Initial key/value context passed to the first
+                step.
+            force: When ``True``, bypass the status guard and execute
+                even if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+
+        Yields:
+            :class:`~chainweaver.events.FlowEvent` instances in the order
+            described above.
+
+        Raises:
+            FlowNotFoundError: When *flow_name* is not registered.  This
+                is raised eagerly by the worker thread and re-raised
+                from the generator before any event is yielded.
+            FlowStatusError: When the flow's status is not ``ACTIVE`` and
+                *force* is ``False``.  Same re-raise behavior.
+        """
+        events: queue.Queue[FlowEvent | _StreamSentinel] = queue.Queue()
+        collector = _StreamCollectorMiddleware(events)
+        exc_holder: list[BaseException] = []
+
+        # Per-call mutation of the middleware list is the simplest
+        # correct implementation — see the issue's "boring correct"
+        # note.  FlowExecutor is not documented as thread-safe; users
+        # who need concurrent stream_flow calls should use distinct
+        # FlowExecutor instances.
+        self._middleware.append(collector)
+
+        def _worker() -> None:
+            try:
+                self.execute_flow(flow_name, initial_input, force=force)
+            except BaseException as exc:
+                exc_holder.append(exc)
+            finally:
+                events.put(_STREAM_SENTINEL)
+
+        thread = threading.Thread(
+            target=_worker,
+            name=f"chainweaver-stream-{flow_name}",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            while True:
+                item = events.get()
+                if isinstance(item, _StreamSentinel):
+                    if exc_holder:
+                        raise exc_holder[0]
+                    return
+                yield item
+        finally:
+            thread.join()
+            # Defensive cleanup — collector should always still be in
+            # the list, but suppress ValueError just in case a user
+            # called add_middleware/remove between start and finish.
+            with contextlib.suppress(ValueError):
+                self._middleware.remove(collector)
 
     # ------------------------------------------------------------------
     # Internal helpers
