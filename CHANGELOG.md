@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenTelemetry trace exporter** (#126): new
+  `chainweaver/integrations/opentelemetry.py` module exposing
+  `OTelTraceExporter` (a `FlowExecutorMiddleware` that emits one
+  parent `chainweaver.flow.{name}` span + one child
+  `chainweaver.tool.{name}` span per `StepRecord`) and
+  `export_result_to_otel(result, tracer=...)` for after-the-fact
+  emission from a completed `ExecutionResult`.  Span attributes
+  carry `chainweaver.trace_id`, `chainweaver.flow_version`,
+  `chainweaver.total_steps`, `chainweaver.step_index`,
+  `chainweaver.tool_name`, `chainweaver.step.success`,
+  `chainweaver.step.duration_ms`, `chainweaver.step.retry_count`,
+  `chainweaver.step.cached`, `chainweaver.step.skipped`, and on
+  failure `chainweaver.step.error_type`; the span status is set to
+  `ERROR` and the message becomes the status description.
+  `chainweaver.step.input_keys` reports the sorted list of input
+  field names (not values — a privacy and cardinality hazard).
+  Pre-resolution failures (tool-not-found / input-mapping) emit a
+  zero-duration step span at `on_step_end` so the failure is still
+  visible.  Optional dependency declared as `chainweaver[otel]`;
+  importing the module without the extra raises a clear
+  `ImportError`.  See `examples/otel_export.py`.
 - **Crash-resume checkpointing** (#128): new `chainweaver/checkpoint.py`
   module with a `Checkpointer` `typing.Protocol`, an
   `ExecutionSnapshot` Pydantic model, `InMemoryCheckpointer`
