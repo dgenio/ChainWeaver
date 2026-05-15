@@ -27,6 +27,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
+from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
@@ -338,6 +339,11 @@ class StepRecord(BaseModel):
         skipped: ``True`` when the step exhausted its retries and the
             configured ``on_error="skip"`` action let the flow continue
             without merging any output.
+        cached: ``True`` when the step's outputs were served from the
+            executor's ``step_cache`` (issue #127) and the tool's
+            callable was not invoked.  ``duration_ms`` for cached steps
+            reflects only the cache lookup time.  ``False`` for normal
+            executions (the default).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -355,6 +361,7 @@ class StepRecord(BaseModel):
     retry_count: int = 0
     retry_errors: list[str] = Field(default_factory=list)
     skipped: bool = False
+    cached: bool = False
 
 
 class ExecutionResult(BaseModel):
@@ -470,6 +477,7 @@ class FlowExecutor:
         redaction_policy: RedactionPolicy | None = None,
         trace_recorder: TraceRecorder | None = None,
         middleware: list[FlowExecutorMiddleware] | None = None,
+        step_cache: StepCache | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -477,6 +485,15 @@ class FlowExecutor:
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
         self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
+        # Step-result cache (issue #127).  ``None`` (the default)
+        # disables caching entirely — every tool runs every call.
+        # When set, eligible step outputs are read from / written to
+        # this cache before the tool callable runs.
+        self._step_cache = step_cache
+        # ``True`` while inside replay_flow / _replay_linear_from so
+        # the cache is bypassed — replay must always re-execute (per
+        # the existing replay semantics).
+        self._in_replay = False
 
     def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
         """Register an additional :class:`FlowExecutorMiddleware`.
@@ -671,12 +688,20 @@ class FlowExecutor:
         """
         flow = self._registry.get_flow(result.flow_name)
 
-        if resume_from_step <= 0:
-            new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
-        else:
-            if isinstance(flow, DAGFlow):
-                raise ValueError("resume_from_step is not supported for DAGFlow yet.")
-            new_result = self._replay_linear_from(flow, result, resume_from_step)
+        # Bypass the step cache for the duration of replay — replay
+        # must always re-execute tools (per the existing replay
+        # semantics and issue #127's acceptance criteria).
+        previous_in_replay = self._in_replay
+        self._in_replay = True
+        try:
+            if resume_from_step <= 0:
+                new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
+            else:
+                if isinstance(flow, DAGFlow):
+                    raise ValueError("resume_from_step is not supported for DAGFlow yet.")
+                new_result = self._replay_linear_from(flow, result, resume_from_step)
+        finally:
+            self._in_replay = previous_in_replay
 
         diffs: list[StepDiff] = []
         if mode is ReplayMode.VERIFY:
@@ -1345,6 +1370,7 @@ class FlowExecutor:
             success: bool,
             skipped: bool,
             retry_errors: list[str],
+            cached: bool = False,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -1366,6 +1392,7 @@ class FlowExecutor:
                 retry_count=retry_count,
                 retry_errors=list(retry_errors),
                 skipped=skipped,
+                cached=cached,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -1427,6 +1454,46 @@ class FlowExecutor:
             redaction=self._redaction_policy,
         )
 
+        # Cache lookup (issue #127).  Skip caching during replay_flow
+        # (replay always re-executes) and for tools that opt out via
+        # ``cacheable=False``.  Input validation runs inside the cache
+        # path so we can hash the *validated* form — equivalent inputs
+        # that differ only in field ordering or coercion collapse onto
+        # the same key.  If validation fails, fall through to the
+        # normal execution path, which surfaces the same error.
+        cache_key: StepCacheKey | None = None
+        if self._step_cache is not None and tool.cacheable and not self._in_replay:
+            try:
+                validated = tool.input_schema.model_validate(inputs)
+            except ValidationError:
+                validated = None  # let the normal path raise
+            if validated is not None:
+                cache_key = StepCacheKey(
+                    tool_name=tool.name,
+                    schema_hash=tool.schema_hash,
+                    input_value_hash=compute_input_value_hash(validated),
+                )
+                cached_output = self._step_cache.get(cache_key)
+                if cached_output is not None:
+                    log_step_end(
+                        _logger,
+                        step_index,
+                        step.tool_name,
+                        cached_output,
+                        redaction=self._redaction_policy,
+                    )
+                    return _finish(
+                        _record(
+                            inputs=inputs,
+                            outputs=cached_output,
+                            error=None,
+                            success=True,
+                            skipped=False,
+                            retry_errors=[],
+                            cached=True,
+                        )
+                    )
+
         retry_errors: list[str] = []
         outputs: dict[str, Any] | None = None
         final_raw_exc: Exception | None = None
@@ -1458,6 +1525,10 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
+        # Cache write happens *after* the output has been schema-validated
+        # by ``Tool.run`` — never store invalid output.
+        if cache_key is not None and self._step_cache is not None:
+            self._step_cache.set(cache_key, outputs)
         return _finish(
             _record(
                 inputs=inputs,

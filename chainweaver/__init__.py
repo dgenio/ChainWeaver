@@ -41,6 +41,7 @@ import logging
 
 from chainweaver import cli
 from chainweaver.builder import FlowBuilder, FlowBuilderError
+from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
 from chainweaver.compiler import (
     CompilationError,
@@ -141,6 +142,7 @@ __all__ = [
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
+    "FileStepCache",
     "FileStore",
     "Flow",
     "FlowAlreadyExistsError",
@@ -158,6 +160,7 @@ __all__ = [
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "InMemoryStepCache",
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
@@ -169,6 +172,8 @@ __all__ = [
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "StepCache",
+    "StepCacheKey",
     "StepDiff",
     "StepEndContext",
     "StepPlan",

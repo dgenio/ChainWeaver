@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Step-result caching layer** (#127): new `chainweaver/cache.py`
+  module with a `StepCache` `typing.Protocol`, `InMemoryStepCache`
+  (dict-backed), `FileStepCache` (JSON-on-disk, one file per
+  `(tool, schema, input)` triple), and a `StepCacheKey` Pydantic
+  model.  `FlowExecutor.__init__` accepts an optional `step_cache=`
+  argument; when set, eligible step outputs are read from / written
+  to the cache around the step boundary.  Cache keys include the
+  tool's `schema_hash`, so schema changes invalidate entries
+  automatically.  Cache hits skip `Tool.fn` entirely — including
+  retries and `timeout_seconds` — and the resulting record reports
+  `StepRecord.cached=True`.  Cache writes happen *after* output
+  schema validation so invalid output never poisons the cache; on
+  disk, corrupt cache files are treated as misses.  `Tool` gains a
+  `cacheable: bool = True` parameter — set `cacheable=False` for
+  tools with side effects or that read external state to force them
+  to always run.  `replay_flow` always bypasses the cache (replay
+  must always re-execute).
 - **Streaming `stream_flow` generator** (#134): new
   `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)`
   method returns a sync `Iterator[FlowEvent]` that yields lifecycle
