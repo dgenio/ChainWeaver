@@ -1,0 +1,1030 @@
+{
+  "all": [
+    "ChainWeaverError",
+    "CompatibilityIssue",
+    "CompilationError",
+    "CompilationResult",
+    "CompilationWarning",
+    "CostProfile",
+    "CostReport",
+    "DAGDefinitionError",
+    "DAGFlow",
+    "DAGFlowStep",
+    "DriftInfo",
+    "ExecutionPlan",
+    "ExecutionResult",
+    "FileStore",
+    "Flow",
+    "FlowAlreadyExistsError",
+    "FlowBuilder",
+    "FlowBuilderError",
+    "FlowExecutionError",
+    "FlowExecutor",
+    "FlowNotFoundError",
+    "FlowRegistry",
+    "FlowSerializationError",
+    "FlowStatus",
+    "FlowStatusError",
+    "FlowStep",
+    "InMemoryStore",
+    "InputMappingError",
+    "InvalidFlowVersionError",
+    "ObservedStep",
+    "ObservedTrace",
+    "RedactionPolicy",
+    "RegistryStore",
+    "ReplayMode",
+    "ReplayResult",
+    "RetryPolicy",
+    "SchemaValidationError",
+    "StepDiff",
+    "StepPlan",
+    "StepRecord",
+    "Tool",
+    "ToolDefinitionError",
+    "ToolNotFoundError",
+    "ToolOutputSizeError",
+    "ToolTimeoutError",
+    "TraceRecorder",
+    "check_flow_compatibility",
+    "cli",
+    "compile_flow",
+    "flow_from_dict",
+    "flow_from_json",
+    "flow_from_yaml",
+    "flow_to_ascii",
+    "flow_to_dict",
+    "flow_to_dot",
+    "flow_to_json",
+    "flow_to_mermaid",
+    "flow_to_yaml",
+    "result_to_mermaid",
+    "schema_fingerprint",
+    "tool",
+    "validate_dag_topology"
+  ],
+  "package": "chainweaver",
+  "symbols": {
+    "ChainWeaverError": {
+      "bases": [
+        "Exception"
+      ],
+      "kind": "class"
+    },
+    "CompatibilityIssue": {
+      "bases": [],
+      "kind": "class"
+    },
+    "CompilationError": {
+      "bases": [],
+      "kind": "class"
+    },
+    "CompilationResult": {
+      "bases": [],
+      "kind": "class"
+    },
+    "CompilationWarning": {
+      "bases": [],
+      "kind": "class"
+    },
+    "CostProfile": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "avg_llm_latency_ms": {
+          "annotation": "float",
+          "has_default": true
+        },
+        "avg_tokens_per_call": {
+          "annotation": "float",
+          "has_default": true
+        },
+        "cost_per_token_usd": {
+          "annotation": "float",
+          "has_default": true
+        }
+      }
+    },
+    "CostReport": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "actual_execution_ms": {
+          "annotation": "float",
+          "has_default": false
+        },
+        "cost_saved_usd": {
+          "annotation": "float",
+          "has_default": false
+        },
+        "latency_saved_ms": {
+          "annotation": "float",
+          "has_default": false
+        },
+        "llm_calls_avoided": {
+          "annotation": "int",
+          "has_default": false
+        },
+        "profile": {
+          "annotation": "cost.CostProfile",
+          "has_default": false
+        },
+        "steps_executed": {
+          "annotation": "int",
+          "has_default": false
+        }
+      }
+    },
+    "DAGDefinitionError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "DAGFlow": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "description": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "deterministic": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "input_schema_ref": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "name": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "output_schema_ref": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "status": {
+          "annotation": "<enum 'FlowStatus'>",
+          "has_default": true
+        },
+        "steps": {
+          "annotation": "list[flow.DAGFlowStep]",
+          "has_default": false
+        },
+        "tool_schema_hashes": {
+          "annotation": "dict[str, str] | None",
+          "has_default": true
+        },
+        "trigger_conditions": {
+          "annotation": "dict[str, Any] | None",
+          "has_default": true
+        },
+        "version": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "DAGFlowStep": {
+      "bases": [
+        "FlowStep"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "capability_id": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "depends_on": {
+          "annotation": "list[str]",
+          "has_default": false
+        },
+        "input_mapping": {
+          "annotation": "dict[str, Any]",
+          "has_default": false
+        },
+        "on_error": {
+          "annotation": "str",
+          "has_default": true
+        },
+        "retry": {
+          "annotation": "flow.RetryPolicy | None",
+          "has_default": true
+        },
+        "step_id": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "step_type": {
+          "annotation": "Literal['tool', 'capability']",
+          "has_default": true
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "DriftInfo": {
+      "bases": [],
+      "kind": "class"
+    },
+    "ExecutionPlan": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "all_resolvable": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "final_context_shape": {
+          "annotation": "dict[str, str]",
+          "has_default": false
+        },
+        "flow_name": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "step_count": {
+          "annotation": "int",
+          "has_default": false
+        },
+        "steps": {
+          "annotation": "list[executor.StepPlan]",
+          "has_default": false
+        }
+      }
+    },
+    "ExecutionResult": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "cost_report": {
+          "annotation": "cost.CostReport | None",
+          "has_default": true
+        },
+        "ended_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "execution_log": {
+          "annotation": "list[executor.StepRecord]",
+          "has_default": false
+        },
+        "final_output": {
+          "annotation": "dict[str, Any] | None",
+          "has_default": false
+        },
+        "flow_name": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "initial_input": {
+          "annotation": "dict[str, Any]",
+          "has_default": false
+        },
+        "started_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "success": {
+          "annotation": "bool",
+          "has_default": false
+        },
+        "total_duration_ms": {
+          "annotation": "float",
+          "has_default": false
+        },
+        "trace_id": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "FileStore": {
+      "bases": [],
+      "kind": "class"
+    },
+    "Flow": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "description": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "deterministic": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "input_schema_ref": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "name": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "output_schema_ref": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "status": {
+          "annotation": "<enum 'FlowStatus'>",
+          "has_default": true
+        },
+        "steps": {
+          "annotation": "list[flow.FlowStep]",
+          "has_default": false
+        },
+        "tool_schema_hashes": {
+          "annotation": "dict[str, str] | None",
+          "has_default": true
+        },
+        "trigger_conditions": {
+          "annotation": "dict[str, Any] | None",
+          "has_default": true
+        },
+        "version": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "FlowAlreadyExistsError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowBuilder": {
+      "bases": [],
+      "kind": "class"
+    },
+    "FlowBuilderError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowExecutionError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowExecutor": {
+      "bases": [],
+      "kind": "class"
+    },
+    "FlowNotFoundError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowRegistry": {
+      "bases": [],
+      "kind": "class"
+    },
+    "FlowSerializationError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowStatus": {
+      "bases": [
+        "Enum",
+        "str"
+      ],
+      "kind": "class"
+    },
+    "FlowStatusError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "FlowStep": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "input_mapping": {
+          "annotation": "dict[str, Any]",
+          "has_default": false
+        },
+        "on_error": {
+          "annotation": "str",
+          "has_default": true
+        },
+        "retry": {
+          "annotation": "flow.RetryPolicy | None",
+          "has_default": true
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "InMemoryStore": {
+      "bases": [],
+      "kind": "class"
+    },
+    "InputMappingError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "InvalidFlowVersionError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "ObservedStep": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "duration_ms": {
+          "annotation": "float",
+          "has_default": true
+        },
+        "inputs": {
+          "annotation": "dict[str, Any]",
+          "has_default": false
+        },
+        "outputs": {
+          "annotation": "dict[str, Any] | None",
+          "has_default": true
+        },
+        "recorded_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "ObservedTrace": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "ended_at": {
+          "annotation": "datetime.datetime | None",
+          "has_default": true
+        },
+        "source": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "started_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "steps": {
+          "annotation": "list[observation.ObservedStep]",
+          "has_default": false
+        },
+        "trace_id": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "RedactionPolicy": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "max_value_length": {
+          "annotation": "int | None",
+          "has_default": true
+        },
+        "redact_keys": {
+          "annotation": "frozenset[str]",
+          "has_default": true
+        },
+        "redact_pattern": {
+          "annotation": "re.Pattern[str] | None",
+          "has_default": true
+        },
+        "redact_replacement": {
+          "annotation": "str",
+          "has_default": true
+        }
+      }
+    },
+    "RegistryStore": {
+      "bases": [
+        "Protocol"
+      ],
+      "kind": "class"
+    },
+    "ReplayMode": {
+      "bases": [
+        "Enum",
+        "str"
+      ],
+      "kind": "class"
+    },
+    "ReplayResult": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "all_steps_match": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "diffs": {
+          "annotation": "list[executor.StepDiff]",
+          "has_default": false
+        },
+        "mode": {
+          "annotation": "<enum 'ReplayMode'>",
+          "has_default": false
+        },
+        "new_result": {
+          "annotation": "ForwardRef('ExecutionResult')",
+          "has_default": false
+        },
+        "original_trace_id": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "RetryPolicy": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "backoff_multiplier": {
+          "annotation": "float",
+          "has_default": true
+        },
+        "backoff_seconds": {
+          "annotation": "float",
+          "has_default": true
+        },
+        "jitter": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "max_retries": {
+          "annotation": "int",
+          "has_default": true
+        },
+        "retryable_errors": {
+          "annotation": "tuple[str, ...]",
+          "has_default": true
+        }
+      }
+    },
+    "SchemaValidationError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "StepDiff": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "actual": {
+          "annotation": "Any",
+          "has_default": false
+        },
+        "expected": {
+          "annotation": "Any",
+          "has_default": false
+        },
+        "field": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "step_index": {
+          "annotation": "int",
+          "has_default": false
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "StepPlan": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "input_schema": {
+          "annotation": "dict[str, str]",
+          "has_default": false
+        },
+        "input_sources": {
+          "annotation": "dict[str, str]",
+          "has_default": false
+        },
+        "output_schema": {
+          "annotation": "dict[str, str]",
+          "has_default": false
+        },
+        "step_index": {
+          "annotation": "int",
+          "has_default": false
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        },
+        "unresolved_keys": {
+          "annotation": "list[str]",
+          "has_default": false
+        },
+        "warnings": {
+          "annotation": "list[str]",
+          "has_default": false
+        }
+      }
+    },
+    "StepRecord": {
+      "bases": [
+        "BaseModel"
+      ],
+      "kind": "class",
+      "model_fields": {
+        "duration_ms": {
+          "annotation": "float",
+          "has_default": false
+        },
+        "ended_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "error_message": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "error_type": {
+          "annotation": "str | None",
+          "has_default": true
+        },
+        "inputs": {
+          "annotation": "dict[str, Any]",
+          "has_default": false
+        },
+        "outputs": {
+          "annotation": "dict[str, Any] | None",
+          "has_default": true
+        },
+        "retry_count": {
+          "annotation": "int",
+          "has_default": true
+        },
+        "retry_errors": {
+          "annotation": "list[str]",
+          "has_default": false
+        },
+        "skipped": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "started_at": {
+          "annotation": "datetime.datetime",
+          "has_default": false
+        },
+        "step_index": {
+          "annotation": "int",
+          "has_default": false
+        },
+        "success": {
+          "annotation": "bool",
+          "has_default": true
+        },
+        "tool_name": {
+          "annotation": "str",
+          "has_default": false
+        }
+      }
+    },
+    "Tool": {
+      "bases": [],
+      "kind": "class"
+    },
+    "ToolDefinitionError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "ToolNotFoundError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "ToolOutputSizeError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "ToolTimeoutError": {
+      "bases": [
+        "ChainWeaverError"
+      ],
+      "kind": "class"
+    },
+    "TraceRecorder": {
+      "bases": [],
+      "kind": "class"
+    },
+    "check_flow_compatibility": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Flow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        },
+        {
+          "annotation": "dict[str, Tool]",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "tools"
+        }
+      ],
+      "returns": "list[CompatibilityIssue]"
+    },
+    "cli": {
+      "kind": "module"
+    },
+    "compile_flow": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Flow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        },
+        {
+          "annotation": "dict[str, Tool]",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "tools"
+        }
+      ],
+      "returns": "CompilationResult"
+    },
+    "flow_from_dict": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "dict[str, Any]",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "data"
+        }
+      ],
+      "returns": "AnyFlow"
+    },
+    "flow_from_json": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "str",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "data"
+        }
+      ],
+      "returns": "AnyFlow"
+    },
+    "flow_from_yaml": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "str",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "data"
+        }
+      ],
+      "returns": "AnyFlow"
+    },
+    "flow_to_ascii": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Flow | DAGFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        }
+      ],
+      "returns": "str"
+    },
+    "flow_to_dict": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "AnyFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        }
+      ],
+      "returns": "dict[str, Any]"
+    },
+    "flow_to_dot": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Flow | DAGFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        }
+      ],
+      "returns": "str"
+    },
+    "flow_to_json": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "AnyFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        },
+        {
+          "annotation": "int | None",
+          "default": "2",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "indent"
+        }
+      ],
+      "returns": "str"
+    },
+    "flow_to_mermaid": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Flow | DAGFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        },
+        {
+          "annotation": "str",
+          "default": "'LR'",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "direction"
+        },
+        {
+          "annotation": "bool",
+          "default": "False",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "show_schemas"
+        }
+      ],
+      "returns": "str"
+    },
+    "flow_to_yaml": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "AnyFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        }
+      ],
+      "returns": "str"
+    },
+    "result_to_mermaid": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "ExecutionResult",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "result"
+        },
+        {
+          "annotation": "str",
+          "default": "'LR'",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "direction"
+        }
+      ],
+      "returns": "str"
+    },
+    "schema_fingerprint": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "type[BaseModel]",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "model"
+        }
+      ],
+      "returns": "str"
+    },
+    "tool": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "Callable[..., Any] | None",
+          "default": "None",
+          "has_default": true,
+          "kind": "positional_or_keyword",
+          "name": "fn"
+        },
+        {
+          "annotation": "str | None",
+          "default": "None",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "name"
+        },
+        {
+          "annotation": "str | None",
+          "default": "None",
+          "has_default": true,
+          "kind": "keyword_only",
+          "name": "description"
+        }
+      ],
+      "returns": "_DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
+    },
+    "validate_dag_topology": {
+      "kind": "function",
+      "parameters": [
+        {
+          "annotation": "DAGFlow",
+          "default": null,
+          "has_default": false,
+          "kind": "positional_or_keyword",
+          "name": "flow"
+        }
+      ],
+      "returns": "None"
+    }
+  },
+  "version": 1
+}

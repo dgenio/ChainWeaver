@@ -43,6 +43,9 @@ dev = [
     "mypy>=1.0",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
+    # Stable cross-Python introspection for the public-API snapshot test
+    # (tests/test_public_api_snapshot.py, issue #140).
+    "griffe>=1.0",
 ]
 
 [project.urls]
@@ -82,6 +85,14 @@ skip-magic-trailing-comma = false
 [tool.mypy]
 python_version = "3.10"
 strict = true
+# tests/ is a namespace package (no __init__.py); helpers.py and the
+# tests/scripts/ dev utilities are reached the same way pytest reaches
+# them — by adding tests/ to the import path. ``mypy_path`` mirrors
+# pytest's behavior so mypy doesn't discover tests/scripts/*.py under
+# two module names (e.g. ``regen_public_api`` and ``scripts.regen_public_api``).
+mypy_path = "tests"
+explicit_package_bases = true
+namespace_packages = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"
