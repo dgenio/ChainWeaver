@@ -1,0 +1,96 @@
+# Pre-commit hooks for ChainWeaver (issue #137).
+#
+# Install once per clone:
+#     pip install -e ".[dev]" pre-commit
+#     pre-commit install
+#
+# Run manually against the whole tree:
+#     pre-commit run --all-files
+#
+# Conventions:
+# - The four canonical Python checks (ruff check / ruff format --check / mypy)
+#   are `local` hooks so they invoke exactly the commands documented in
+#   AGENTS.md §7 — including the scope `chainweaver/ tests/ examples/`. This
+#   keeps the hook output identical to CI; see lessons-learned.md rule #3
+#   ("commands that don't match CI exactly").
+# - External hooks are pinned to specific tags. Update them deliberately.
+
+default_language_version:
+  python: python3.10
+
+# Don't waste time on auto-fixes in CI/headless contexts.
+default_stages: [pre-commit, manual]
+
+repos:
+  # ---------------------------------------------------------------------
+  # Canonical four checks (mirror AGENTS.md §7 verbatim).
+  # ---------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check chainweaver/ tests/ examples/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-format-check
+        name: ruff format --check
+        entry: ruff format --check chainweaver/ tests/ examples/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy
+        entry: python -m mypy chainweaver/ tests/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # ---------------------------------------------------------------------
+  # Generic hygiene.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.svg$'
+      - id: end-of-file-fixer
+        exclude: '\.secrets\.baseline$'
+      - id: check-yaml
+        # Allow multi-document YAML for GitHub Actions composite actions
+        # that occasionally use --- separators.
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ---------------------------------------------------------------------
+  # Secret scanning.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --baseline
+          - .secrets.baseline
+        # Don't rescan the baseline itself or test fixtures whose
+        # contents are intentionally secret-shaped.
+        exclude: |
+          (?x)^(
+            \.secrets\.baseline|
+            tests/fixtures/.*
+          )$
+
+  # ---------------------------------------------------------------------
+  # GitHub Actions workflow + composite-action linting.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
