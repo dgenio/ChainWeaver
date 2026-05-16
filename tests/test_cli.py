@@ -422,3 +422,356 @@ class TestCheckCommand:
         captured = capsys.readouterr()
         assert exit_code == 0
         assert "1 valid" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# run command (issue #129)
+# ---------------------------------------------------------------------------
+
+
+def _write_runnable_flow(path: Path) -> None:
+    """Serialize a tiny linear flow whose single step is the 'double' tool."""
+    flow = Flow(
+        name="run_double",
+        version="0.1.0",
+        description="Doubles a number on disk.",
+        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+    )
+    path.write_text(flow.to_yaml(), encoding="utf-8")
+
+
+def _write_tools_module(path: Path, *, name: str = "double") -> str:
+    """Write a temporary Python module exposing a single ``Tool`` at top level.
+
+    Returns the import path (e.g. ``"toolmod_double"``).  Adds the module's
+    parent directory to ``sys.path`` for the duration of the test process.
+    """
+    module_name = f"toolmod_{name}_{path.stem.replace('.', '_')}"
+    module_path = path / f"{module_name}.py"
+    module_path.write_text(
+        "from __future__ import annotations\n"
+        "from typing import Any\n"
+        "from pydantic import BaseModel\n"
+        "from chainweaver import Tool\n"
+        "\n"
+        "class _NumberInput(BaseModel):\n"
+        "    number: int\n"
+        "\n"
+        "class _ValueOutput(BaseModel):\n"
+        "    value: int\n"
+        "\n"
+        "def _fn(inp: _NumberInput) -> dict[str, Any]:\n"
+        "    return {'value': inp.number * 2}\n"
+        "\n"
+        f"{name} = Tool(\n"
+        f"    name='{name}',\n"
+        "    description='Doubles.',\n"
+        "    input_schema=_NumberInput,\n"
+        "    output_schema=_ValueOutput,\n"
+        "    fn=_fn,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    return module_name
+
+
+@pytest.fixture()
+def _module_sys_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Make modules written under tmp_path importable for the test process."""
+    import sys
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    # Drop any cached temp modules so re-runs see fresh contents.
+    for key in list(sys.modules):
+        if key.startswith("toolmod_"):
+            sys.modules.pop(key, None)
+    return tmp_path
+
+
+class TestRunCommand:
+    def test_happy_path_table_output(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                '{"number": 5}',
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "run_double" in captured.out
+        assert "double" in captured.out
+        assert "ok" in captured.out
+        assert "success: true" in captured.out
+        assert '"value": 10' in captured.out
+
+    def test_json_format_emits_machine_readable(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                '{"number": 3}',
+                "--format",
+                "json",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        payload = json.loads(captured.out)
+        assert payload["flow_name"] == "run_double"
+        assert payload["success"] is True
+        assert payload["final_output"]["value"] == 6
+        assert len(payload["execution_log"]) == 1
+        assert payload["execution_log"][0]["tool_name"] == "double"
+
+    def test_input_file_flag(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+        input_path = _module_sys_path / "in.json"
+        input_path.write_text('{"number": 7}', encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input-file",
+                str(input_path),
+                "--format",
+                "json",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert json.loads(captured.out)["final_output"]["value"] == 14
+
+    def test_quiet_suppresses_output(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                '{"number": 1}',
+                "--quiet",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_missing_flow_file_returns_two(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = cli.main(
+            [
+                "run",
+                str(tmp_path / "nope.flow.yaml"),
+                "--input",
+                "{}",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "file not found" in captured.err
+
+    def test_unimportable_tools_module_returns_two(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                "definitely_not_a_real_module_xyz_123",
+                "--input",
+                '{"number": 1}',
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "tools module not importable" in captured.err
+
+    def test_missing_tool_returns_one(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        # Write a tools module that does NOT export the 'double' tool.
+        module_name = "toolmod_empty_run"
+        (_module_sys_path / f"{module_name}.py").write_text("x = 1\n", encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module_name,
+                "--input",
+                '{"number": 1}',
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "double" in captured.err
+
+    def test_malformed_input_returns_one(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                "{not valid json",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "malformed JSON" in captured.err
+
+    def test_non_object_input_returns_one(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                "[1, 2, 3]",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "must be a JSON object" in captured.err
+
+    def test_missing_input_flag_returns_one(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "--input" in captured.err
+
+    def test_input_and_input_file_mutually_exclusive(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        module = _write_tools_module(_module_sys_path, name="double")
+        input_path = _module_sys_path / "in.json"
+        input_path.write_text('{"number": 1}', encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--tools",
+                module,
+                "--input",
+                '{"number": 1}',
+                "--input-file",
+                str(input_path),
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "mutually exclusive" in captured.err
+
+    def test_invalid_flow_file_returns_one(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        bad = tmp_path / "broken.flow.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        exit_code = cli.main(
+            [
+                "run",
+                str(bad),
+                "--input",
+                "{}",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        # FlowSerializationError surfaces via stderr.
+        assert captured.err

@@ -469,6 +469,37 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 
 ---
 
+## Command-line interface
+
+ChainWeaver ships a `chainweaver` console script with five subcommands:
+
+```bash
+# Run a flow from disk — no Python required.
+chainweaver run flows/etl.flow.yaml \
+    --tools my_pkg.tools \
+    --input '{"date": "2026-05-15"}'
+
+# Validate a flow file (used by CI gates and editor tooling).
+chainweaver validate flows/etl.flow.yaml
+chainweaver check flows/                  # whole-directory variant
+
+# Render a registered flow as ASCII or Graphviz DOT.
+chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
+
+# Inspect a registered flow's structure (table or JSON).
+chainweaver inspect my_flow --format json
+```
+
+`run` is the fastest path from a fresh install to seeing a flow execute:
+point it at a `.flow.yaml`/`.flow.json` file, pass `--tools <module>` (the
+import path of a Python module that exposes `Tool` instances at top
+level), and supply the initial input as JSON. Every subcommand also
+supports `--format json` for machine consumption, and shares the same
+exit-code contract (`0` success, `1` business-logic error, `2`
+file-not-found / argument error).
+
+---
+
 ## Development
 
 ```bash
