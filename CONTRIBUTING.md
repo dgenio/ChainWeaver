@@ -10,6 +10,7 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 ## Table of Contents
 
 - [Dev environment setup](#dev-environment-setup)
+- [Pre-commit hooks](#pre-commit-hooks)
 - [Running tests](#running-tests)
 - [Code style](#code-style)
 - [PR process](#pr-process)
@@ -36,6 +37,46 @@ pip install -e ".[dev]"
 ```
 
 Python 3.10 or later is required.
+
+---
+
+## Pre-commit hooks
+
+ChainWeaver ships a [`.pre-commit-config.yaml`](.pre-commit-config.yaml) that
+mirrors the four CI checks plus a few hygiene hooks. Set it up once per
+clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+After installation, the hooks run automatically on every `git commit`.
+You can also run them manually against the whole tree:
+
+```bash
+pre-commit run --all-files
+```
+
+The hooks invoke exactly the commands documented in
+[`AGENTS.md` §7](AGENTS.md#7-validation-commands) — same scope
+(`chainweaver/ tests/ examples/`), same flags — so a clean local run
+matches a clean CI run.
+
+### Secret scanning
+
+[`detect-secrets`](https://github.com/Yelp/detect-secrets) runs as part of
+the hooks and is gated by a committed baseline at
+[`.secrets.baseline`](.secrets.baseline). If you legitimately add a
+secret-shaped string (e.g. a new test fixture), update the baseline:
+
+```bash
+detect-secrets scan --baseline .secrets.baseline
+detect-secrets audit .secrets.baseline
+```
+
+Do **not** suppress the hook with `--no-verify`. Fix the underlying issue
+or update the baseline with an audit trail.
 
 ---
 
