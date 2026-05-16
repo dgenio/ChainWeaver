@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -215,18 +216,56 @@ def _print_table(report: dict[str, Any]) -> None:
         print(f"  → speedup: {speedup:.2f}x, LLM calls avoided: {avoided}")
 
 
+_TIMING_KEYS = ("total_duration_ms", "tool_execution_ms", "overhead_ms")
+
+
+def _median_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate ``N`` rows of the same approach into one median-of-N row.
+
+    Timing fields (``total_duration_ms``, ``tool_execution_ms``,
+    ``overhead_ms``) are reduced to their median across runs. Non-timing
+    fields (``approach``, ``n_steps``, ``llm_delay_ms``, ``tool_delay_ms``,
+    ``llm_calls_count``, ``final_value``) are taken from the first run —
+    they are configuration, not measurements, and are identical across
+    repeats by construction.
+    """
+    if not rows:
+        raise ValueError("Cannot take median of zero rows.")
+    aggregated = dict(rows[0])
+    for key in _TIMING_KEYS:
+        aggregated[key] = statistics.median(row[key] for row in rows)
+    aggregated["repeats"] = len(rows)
+    return aggregated
+
+
 def run_cases(
     cases: list[tuple[int, float, float]],
     *,
     verify_correctness: bool = True,
+    repeats: int = 1,
 ) -> dict[str, Any]:
-    """Run one benchmark case per ``(n_steps, llm_delay_s, tool_delay_s)`` tuple."""
+    """Run one benchmark case per ``(n_steps, llm_delay_s, tool_delay_s)`` tuple.
+
+    Each case runs ``repeats`` times for each approach; the reported row
+    is the median across those runs. ``repeats=1`` preserves the
+    pre-#144 behavior (single sample per row, no ``repeats`` field).
+    """
+    if repeats < 1:
+        raise ValueError("repeats must be >= 1.")
     output_cases: list[dict[str, Any]] = []
     for n_steps, llm_delay_s, tool_delay_s in cases:
-        naive = benchmark_naive_chaining(
-            n_steps=n_steps, llm_delay_s=llm_delay_s, tool_delay_s=tool_delay_s
-        )
-        compiled = benchmark_compiled_flow(n_steps=n_steps, tool_delay_s=tool_delay_s)
+        naive_runs = [
+            benchmark_naive_chaining(
+                n_steps=n_steps, llm_delay_s=llm_delay_s, tool_delay_s=tool_delay_s
+            )
+            for _ in range(repeats)
+        ]
+        compiled_runs = [
+            benchmark_compiled_flow(n_steps=n_steps, tool_delay_s=tool_delay_s)
+            for _ in range(repeats)
+        ]
+        naive = _median_row(naive_runs) if repeats > 1 else naive_runs[0]
+        compiled = _median_row(compiled_runs) if repeats > 1 else compiled_runs[0]
 
         if verify_correctness and naive["final_value"] != compiled["final_value"]:
             raise RuntimeError(
@@ -249,7 +288,40 @@ def run_cases(
                 "llm_calls_avoided": naive["llm_calls_count"] - compiled["llm_calls_count"],
             }
         )
-    return {"cases": output_cases}
+    return {"cases": output_cases, "repeats": repeats}
+
+
+def to_customsmallerisbetter(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the report into ``benchmark-action`` customSmallerIsBetter records.
+
+    Each case emits two metrics — ``naive`` and ``compiled`` —
+    ``total_duration_ms``, plus the per-case ``compiled overhead_ms`` so
+    the chart shows orchestration cost separately. Wall-clock is the
+    primary regression signal; overhead is the diagnostic.
+    """
+    records: list[dict[str, Any]] = []
+    for case in report["cases"]:
+        n = case["n_steps"]
+        llm = int(case["llm_delay_ms"])
+        tool = int(case["tool_delay_ms"])
+        suffix = f"steps={n}, llm={llm}ms, tool={tool}ms"
+        for row in case["rows"]:
+            records.append(
+                {
+                    "name": f"{row['approach']} total_duration_ms ({suffix})",
+                    "unit": "ms",
+                    "value": row["total_duration_ms"],
+                }
+            )
+        compiled_row = next(r for r in case["rows"] if r["approach"] == "compiled")
+        records.append(
+            {
+                "name": f"compiled overhead_ms ({suffix})",
+                "unit": "ms",
+                "value": compiled_row["overhead_ms"],
+            }
+        )
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +358,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional path to write the machine-readable JSON report.",
     )
     parser.add_argument(
+        "--benchmark-action-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to write a flat JSON array in the "
+            "`benchmark-action/github-action-benchmark` customSmallerIsBetter "
+            "format. Used by the CI bench guard (see .github/workflows/bench.yml)."
+        ),
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help=(
+            "Run each case this many times and report the median timing. "
+            "Default: 1 (no aggregation; preserves pre-#144 behavior)."
+        ),
+    )
+    parser.add_argument(
         "--no-verify",
         action="store_true",
         help="Skip the correctness assertion between naive and compiled runs.",
@@ -307,13 +398,25 @@ def main(argv: list[str] | None = None) -> int:
             (5, 0.500, 0.050),
         ]
 
-    report = run_cases(cases, verify_correctness=not args.no_verify)
+    report = run_cases(
+        cases,
+        verify_correctness=not args.no_verify,
+        repeats=args.repeats,
+    )
     _print_table(report)
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"\nJSON report written to {args.output}")
+
+    if args.benchmark_action_output is not None:
+        args.benchmark_action_output.parent.mkdir(parents=True, exist_ok=True)
+        records = to_customsmallerisbetter(report)
+        args.benchmark_action_output.write_text(
+            json.dumps(records, indent=2), encoding="utf-8"
+        )
+        print(f"benchmark-action report written to {args.benchmark_action_output}")
 
     return 0
 
