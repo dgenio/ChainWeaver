@@ -1,0 +1,82 @@
+# Pre-commit hooks for ChainWeaver.
+#
+# These hooks mirror AGENTS.md §7 "Validation commands" exactly so the
+# local gate matches CI. Run `pre-commit install` once after cloning,
+# then every `git commit` triggers them.
+#
+# All versions are pinned. See CONTRIBUTING.md § "Pre-commit hooks" for
+# install instructions and the policy on hook failures.
+
+repos:
+  # ---------------------------------------------------------------
+  # Stdlib hygiene
+  # ---------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # benchmarks/baseline.json is JSON, not YAML — skip via files filter.
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # ---------------------------------------------------------------
+  # Ruff: lint + format-check — must match AGENTS.md §7 verbatim
+  # ---------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        name: ruff check (chainweaver/ tests/ examples/)
+        args:
+          - check
+          - chainweaver/
+          - tests/
+          - examples/
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format --check (chainweaver/ tests/ examples/)
+        args:
+          - --check
+          - chainweaver/
+          - tests/
+          - examples/
+        pass_filenames: false
+
+  # ---------------------------------------------------------------
+  # Mypy strict type-check — must match AGENTS.md §7 verbatim
+  # ---------------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: python -m mypy chainweaver/ tests/
+        args:
+          - chainweaver/
+          - tests/
+        pass_filenames: false
+        additional_dependencies:
+          - pydantic>=2.0
+          - tenacity>=8.0
+          - typer>=0.9
+          - types-pyyaml>=6.0
+
+  # ---------------------------------------------------------------
+  # Secret scanning — gitleaks (richer than detect-private-key alone)
+  # ---------------------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ---------------------------------------------------------------
+  # actionlint — keep .github/workflows/*.yml syntactically valid
+  # ---------------------------------------------------------------
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.4
+    hooks:
+      - id: actionlint
