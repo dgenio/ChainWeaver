@@ -67,6 +67,13 @@ python -m pytest tests/ -v
 - **Assertion density:** one logical assertion per test when practical.
 - **Mocking:** no mocking of internal ChainWeaver classes unless testing integration boundaries.
 - **Coverage:** test both success and failure/error paths.
+- **Property tests:** Hypothesis-based determinism tests live in
+  `tests/property/` and are tagged `@pytest.mark.property`. They run by
+  default and additionally as a separate `pytest -m property` CI step on
+  the Ubuntu / Python 3.10 lane with `--hypothesis-show-statistics` so
+  the seed is preserved in CI logs for repro. Strategy modules import
+  helpers from `tests/helpers.py` via the bare module name — do not
+  generate arbitrary Pydantic schemas at runtime.
 
 ---
 
