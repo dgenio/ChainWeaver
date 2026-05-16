@@ -1,0 +1,86 @@
+name: chainweaver
+description: |
+  Run ``chainweaver check`` (or another ``chainweaver`` CLI command) against
+  a directory of ``.flow.yaml`` / ``.flow.json`` files. Fails the workflow
+  step when validation finds an error.
+
+inputs:
+  directory:
+    description: "Directory to scan for flow files. Recursive."
+    required: false
+    default: "."
+  command:
+    description: |
+      Which ``chainweaver`` subcommand to invoke. Defaults to ``check``.
+      Set to ``validate``, ``inspect``, ``viz``, etc. as those verbs ship.
+    required: false
+    default: "check"
+  format:
+    description: "Output format: ``table`` (human) or ``json`` (machine)."
+    required: false
+    default: "table"
+  python-version:
+    description: "Python version to set up. Must be one of ChainWeaver's supported versions (3.10-3.13)."
+    required: false
+    default: "3.10"
+  chainweaver-version:
+    description: |
+      Version of the ``chainweaver`` package to install from PyPI. Pinned by
+      default to a known-good release; pass an empty string to install the
+      latest published version, or a path / VCS spec to install from there.
+    required: false
+    default: "0.4.0"
+  extra-args:
+    description: |
+      Additional arguments appended verbatim to the ``chainweaver``
+      invocation (e.g. ``--quiet``). Use this to forward flags that future
+      subcommands accept without waiting for an action update.
+    required: false
+    default: ""
+
+outputs:
+  exit-code:
+    description: "Exit code from the ``chainweaver`` invocation. 0 on success, 1 on validation errors, 2 on missing directory."
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install chainweaver
+      shell: bash
+      env:
+        CW_VERSION: ${{ inputs.chainweaver-version }}
+      run: |
+        set -euo pipefail
+        if [ -z "${CW_VERSION}" ]; then
+          pip install chainweaver
+        else
+          pip install "chainweaver==${CW_VERSION}"
+        fi
+        chainweaver --help > /dev/null
+
+    - name: Run chainweaver ${{ inputs.command }}
+      id: run
+      shell: bash
+      env:
+        CW_COMMAND: ${{ inputs.command }}
+        CW_DIRECTORY: ${{ inputs.directory }}
+        CW_FORMAT: ${{ inputs.format }}
+        CW_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set +e
+        # shellcheck disable=SC2086  # CW_EXTRA_ARGS is intentionally split.
+        chainweaver "${CW_COMMAND}" "${CW_DIRECTORY}" --format "${CW_FORMAT}" ${CW_EXTRA_ARGS}
+        rc=$?
+        set -e
+        echo "exit-code=${rc}" >> "${GITHUB_OUTPUT}"
+        exit "${rc}"
+
+branding:
+  icon: link
+  color: blue
