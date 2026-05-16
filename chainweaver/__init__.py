@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
+from chainweaver.analyzer import ChainAnalyzer, ToolChain
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
 from chainweaver.compiler import (
@@ -108,6 +109,7 @@ logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 __version__ = "0.4.0"
 
 __all__ = [
+    "ChainAnalyzer",
     "ChainWeaverError",
     "CompatibilityIssue",
     "CompilationError",
@@ -149,6 +151,7 @@ __all__ = [
     "StepPlan",
     "StepRecord",
     "Tool",
+    "ToolChain",
     "ToolDefinitionError",
     "ToolNotFoundError",
     "ToolOutputSizeError",

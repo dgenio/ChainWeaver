@@ -29,6 +29,7 @@ and tools, the same flow produces the same output every time.
 | `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
+| `analyzer.py` | `ChainAnalyzer`: offline schema-compatibility analysis — compatibility matrix, chain enumeration, suggested flows (#77) | Pure static pass: no LLM, no network, no randomness; cycle-free DFS bounded by `max_depth` |
 | `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection | **No LLM, no network I/O, no randomness** |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
@@ -95,7 +96,7 @@ files that conflict with these names:
 
 | Reserved name | Issue | Purpose |
 |---------------|-------|---------|
-| `analyzer.py` | #77 | Offline flow analyzer |
+| ~~`analyzer.py`~~ | #77 ✅ | Offline schema-compatibility analyzer (delivered) |
 | `observer.py` | #78 | Runtime flow observer |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
