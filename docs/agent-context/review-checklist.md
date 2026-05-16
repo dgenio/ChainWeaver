@@ -41,6 +41,10 @@
 - [ ] New public symbols added to `chainweaver/__init__.py` `__all__`.
 - [ ] New exceptions: `__init__.py` + `__all__` + README error table — all updated.
 - [ ] `StepRecord` / `ExecutionResult` remain as dataclasses (not converted to Pydantic).
+- [ ] If `__all__`, a public class's attributes/methods, a public function's
+      signature, or a Pydantic model's fields changed, run
+      `python tests/scripts/regen_public_api.py` and commit
+      `tests/fixtures/public_api.json` in the same PR.
 
 ---
 
