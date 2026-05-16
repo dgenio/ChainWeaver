@@ -1343,7 +1343,18 @@ class FlowExecutor:
             completed_steps=completed_steps,
             tool_schema_hashes=tool_hashes,
         )
-        self._checkpointer.save(snapshot)
+        # A failed snapshot write is an observability bug, not a flow
+        # bug — preserve the executor's "errors recorded, not raised"
+        # contract by swallowing and logging.  Mirrors the
+        # middleware-hook-exception semantics.
+        try:
+            self._checkpointer.save(snapshot)
+        except Exception:
+            _logger.warning(
+                "Checkpoint write failed for trace_id=%s; flow continues without this snapshot.",
+                trace_id,
+                exc_info=True,
+            )
 
     def _save_dag_snapshot(
         self,
@@ -1380,7 +1391,16 @@ class FlowExecutor:
             completed_dag_levels=completed_levels,
             tool_schema_hashes=tool_hashes,
         )
-        self._checkpointer.save(snapshot)
+        # See _save_linear_snapshot — checkpoint write failures must
+        # not abort flows.
+        try:
+            self._checkpointer.save(snapshot)
+        except Exception:
+            _logger.warning(
+                "Checkpoint write failed for trace_id=%s; flow continues without this snapshot.",
+                trace_id,
+                exc_info=True,
+            )
 
     def resume_flow(self, trace_id: str) -> ExecutionResult:
         """Resume an in-flight execution from a stored snapshot (issue #128).

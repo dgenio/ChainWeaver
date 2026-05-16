@@ -593,6 +593,191 @@ def test_dag_snapshot_saved_at_level_boundary() -> None:
     assert final_snap.completed_dag_levels == 2  # two levels, both done
 
 
+def _simulate_mid_dag_crash() -> tuple[FlowExecutor, InMemoryCheckpointer, str]:
+    """Run a 2-level DAG whose second-level tool always raises.
+
+    Returns ``(executor, checkpointer, trace_id)`` so the caller can
+    swap in a working tool and call :meth:`FlowExecutor.resume_flow`.
+    """
+    ck = InMemoryCheckpointer()
+
+    def _explode(_inp: ValueInput) -> dict[str, Any]:
+        raise RuntimeError("simulated DAG crash")
+
+    dag = DAGFlow(
+        name="ckpt_dag_crash",
+        version="0.1.0",
+        description="",
+        steps=[
+            DAGFlowStep(
+                step_id="a",
+                tool_name="double",
+                input_mapping={"number": "number"},
+            ),
+            DAGFlowStep(
+                step_id="b",
+                tool_name="bad",
+                input_mapping={"value": "value"},
+                depends_on=["a"],
+            ),
+        ],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(dag)
+    ex = FlowExecutor(registry=registry, checkpointer=ck)
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="bad",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_explode,
+        )
+    )
+
+    result = ex.execute_flow("ckpt_dag_crash", {"number": 5})
+    assert result.success is False
+    return ex, ck, result.trace_id
+
+
+def test_dag_resume_picks_up_where_a_crash_left_off() -> None:
+    """End-to-end DAG crash → resume — guards the ``_resume_dag_flow`` path.
+
+    Without this test, a regression in ``_resume_dag_flow`` (e.g. losing
+    ``trace_id``/``started_at`` preservation, mis-slicing
+    ``levels[start_level:]``, or skipping the resume-snapshot seed) would
+    silently restart the DAG from level 0 with a fresh ``trace_id`` and
+    delete the original snapshot via ``_make_result``'s
+    ``delete_on_success`` — leaving no recovery evidence behind.
+    """
+    ex, ck, trace_id = _simulate_mid_dag_crash()
+
+    snapshot = ck.load(trace_id)
+    assert snapshot is not None
+    # Level 0 completed before the level-1 tool crashed.
+    assert snapshot.completed_dag_levels == 1
+
+    # Swap the failing tool with a working implementation (simulates
+    # the operator deploying a fix between processes).
+    ex.register_tool(
+        Tool(
+            name="bad",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        )
+    )
+
+    resumed = ex.resume_flow(trace_id)
+
+    assert resumed.success is True
+    assert resumed.trace_id == trace_id
+    # Both levels' records present after resume.
+    tool_names = [r.tool_name for r in resumed.execution_log]
+    assert tool_names == ["double", "bad"]
+    assert resumed.final_output == {"number": 5, "value": 20}
+    # Snapshot deleted on success.
+    assert ck.load(trace_id) is None
+
+
+# ---------------------------------------------------------------------------
+# Checkpointer save failures must not abort flows
+# ---------------------------------------------------------------------------
+
+
+class _RaisingCheckpointer(InMemoryCheckpointer):
+    """In-memory checkpointer whose :meth:`save` always raises."""
+
+    def save(self, snapshot: ExecutionSnapshot) -> None:
+        raise OSError("simulated disk-full on snapshot write")
+
+
+def test_linear_flow_survives_checkpointer_save_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A raising checkpointer must not abort an otherwise-successful flow.
+
+    Observability bugs (failed snapshot writes) must not be more
+    catastrophic than tool bugs — the contract documented on
+    ``FlowExecutor.execute_flow`` is that errors are recorded in the
+    execution log via ``ExecutionResult.success``, not raised.  Mirrors
+    the middleware-hook-exception semantics.
+    """
+    flow = Flow(
+        name="ckpt_raises",
+        version="0.1.0",
+        description="",
+        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    ex = FlowExecutor(registry=registry, checkpointer=_RaisingCheckpointer())
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+
+    with caplog.at_level("WARNING", logger="chainweaver.executor"):
+        result = ex.execute_flow("ckpt_raises", {"number": 4})
+
+    assert result.success is True
+    assert result.final_output == {"number": 4, "value": 8}
+    assert any("Checkpoint write failed" in record.message for record in caplog.records), (
+        "expected a WARNING when the checkpointer raises"
+    )
+
+
+def test_dag_flow_survives_checkpointer_save_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same contract as the linear case, exercised via the DAG path."""
+    dag = DAGFlow(
+        name="ckpt_dag_raises",
+        version="0.1.0",
+        description="",
+        steps=[
+            DAGFlowStep(
+                step_id="a",
+                tool_name="double",
+                input_mapping={"number": "number"},
+            ),
+        ],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(dag)
+    ex = FlowExecutor(registry=registry, checkpointer=_RaisingCheckpointer())
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+
+    with caplog.at_level("WARNING", logger="chainweaver.executor"):
+        result = ex.execute_flow("ckpt_dag_raises", {"number": 4})
+
+    assert result.success is True
+    assert any("Checkpoint write failed" in record.message for record in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # Combined: no-op when no checkpointer
 # ---------------------------------------------------------------------------
