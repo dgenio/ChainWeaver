@@ -1,0 +1,73 @@
+name: Bench
+
+# CI performance-budget guard (issue #144).
+#
+# Runs the naive-vs-compiled benchmark on PRs and pushes to ``main`` and
+# uploads the results to ``benchmark-action/github-action-benchmark``.
+# History is stored in the repo's ``gh-pages`` branch (a one-off manual
+# init step; see ``benchmarks/README.md``).
+#
+# Regression contract: a compiled metric that grows by more than 25%
+# vs. the recorded baseline fails the PR. ``customSmallerIsBetter``
+# means smaller values are better; the action emits a PR comment when
+# the threshold trips.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Run-to-completion semantics — never overlap on the same ref, never
+# skip in-flight runs by cancelling older ones.
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # Required for benchmark-action/github-action-benchmark to push history
+  # to the gh-pages branch and post PR comments.
+  contents: write
+  deployments: write
+  pull-requests: write
+
+jobs:
+  bench:
+    name: bench (ubuntu-22.04, Python 3.10)
+    # Pinned runner OS to avoid the glibc-driven variance documented at
+    # https://codspeed.io/blog/unrelated-benchmark-regression — wall-clock
+    # microbenchmarks are noticeably sensitive to runner image bumps.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install ChainWeaver (dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Run benchmark
+        run: |
+          python benchmarks/bench_naive_vs_compiled.py \
+            --repeats 5 \
+            --output bench.json
+
+      - name: Upload benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: ChainWeaver microbenchmarks
+          tool: customSmallerIsBetter
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          # Fail the PR if any compiled metric regresses > 25% vs. the
+          # historical baseline on the same branch / gh-pages page.
+          alert-threshold: "125%"
+          fail-on-alert: true
+          comment-on-alert: true
+          alert-comment-cc-users: "@dgenio"
