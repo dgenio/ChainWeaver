@@ -1,0 +1,69 @@
+name: Bench
+
+# Performance-budget guard for ChainWeaver (issue #144).
+#
+# Runs the naive-vs-compiled benchmark on every PR and on push to main,
+# then hands the result to `benchmark-action/github-action-benchmark`,
+# which stores history on the repo's own `gh-pages` branch and posts a
+# PR comment when `total_duration_ms` regresses beyond the alert
+# threshold (125% = +25%).
+#
+# Variance trade-offs:
+#   - OS pinned to `ubuntu-22.04` to avoid glibc-driven variance per
+#     https://codspeed.io/blog/unrelated-benchmark-regression.
+#   - No matrix — macOS / Windows wall-clock is too noisy for a hard
+#     gate. This is documented in benchmarks/README.md.
+#   - --repeats 5 with median reporting smooths transient runner jitter.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write       # auto-push history to gh-pages
+  pull-requests: write  # post the regression comment on PRs
+
+jobs:
+  bench:
+    name: Performance budget guard
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # The CI invocation is intentionally cheaper than the local sweep
+      # in `benchmarks/baseline.json` — 50 steps × 10 ms LLM delay gives
+      # ~500 ms naive vs ~0.6 ms compiled, comfortably above the
+      # runner's noise floor while keeping wall-clock under 30 s.
+      - name: Run benchmark
+        run: |
+          python benchmarks/bench_naive_vs_compiled.py \
+            --steps 50 \
+            --llm-ms 10 \
+            --tool-ms 0 \
+            --repeats 5 \
+            --benchmark-action-output bench-result.json
+
+      - name: Publish + alert on regression
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: ChainWeaver naive-vs-compiled
+          tool: customSmallerIsBetter
+          output-file-path: bench-result.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: 125%
+          comment-on-alert: true
+          fail-on-alert: true
+          alert-comment-cc-users: "@dgenio"
