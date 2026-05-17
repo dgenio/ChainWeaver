@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-17
+
 ### Changed
 
 - **PR #136 review-feedback fixes** for the executor extensibility
@@ -264,5 +266,6 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/dgenio/ChainWeaver/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dgenio/ChainWeaver/releases/tag/v0.4.0
