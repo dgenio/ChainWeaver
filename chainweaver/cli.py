@@ -93,6 +93,61 @@ def get_default_registry() -> FlowRegistry | None:
     return _DEFAULT_REGISTRY
 
 
+# ---------------------------------------------------------------------------
+# Shared private helpers
+# ---------------------------------------------------------------------------
+
+
+def _require_existing_file(path: Path) -> None:
+    """Exit with code 2 if *path* is missing or is not a regular file.
+
+    Error messages match the contract documented in the module-level
+    exit-code table: 'file not found' / 'not a file'.
+    """
+    if not path.exists():
+        typer.echo(f"chainweaver: file not found: {path}", err=True)
+        raise typer.Exit(code=2)
+    if not path.is_file():
+        typer.echo(f"chainweaver: not a file: {path}", err=True)
+        raise typer.Exit(code=2)
+
+
+def _require_existing_dir(path: Path) -> None:
+    """Exit with code 2 if *path* is missing or is not a directory."""
+    if not path.exists():
+        typer.echo(f"chainweaver: directory not found: {path}", err=True)
+        raise typer.Exit(code=2)
+    if not path.is_dir():
+        typer.echo(f"chainweaver: not a directory: {path}", err=True)
+        raise typer.Exit(code=2)
+
+
+def _load_flow_from_registry(flow_name: str) -> Flow | DAGFlow:
+    """Resolve *flow_name* from the default registry.
+
+    Exits with code 1 when the registry is unset (with a how-to-fix
+    message) or when the flow is not registered.
+    """
+    registry = _DEFAULT_REGISTRY
+    if registry is None:
+        typer.echo(
+            "No registry configured. Call chainweaver.cli.set_default_registry(...) "
+            "before invoking the CLI.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    try:
+        return registry.get_flow(flow_name)
+    except FlowNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _emit_json(payload: object) -> None:
+    """Write *payload* to stdout as pretty-printed JSON with stable encoding."""
+    typer.echo(json.dumps(payload, indent=2, default=str))
+
+
 class OutputFormat(str, Enum):
     """Output format options for ``chainweaver inspect``."""
 
@@ -123,23 +178,10 @@ def inspect_command(
     Exit codes: 0 on success, 1 if the flow is not registered or the
     registry has not been configured via :func:`set_default_registry`.
     """
-    registry = _DEFAULT_REGISTRY
-    if registry is None:
-        typer.echo(
-            "No registry configured. Call chainweaver.cli.set_default_registry(...) "
-            "before invoking the CLI.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    try:
-        flow = registry.get_flow(flow_name)
-    except FlowNotFoundError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+    flow = _load_flow_from_registry(flow_name)
 
     if output_format is OutputFormat.JSON:
-        typer.echo(json.dumps(_flow_to_dict(flow), indent=2, default=str))
+        _emit_json(_flow_to_dict(flow))
     else:
         typer.echo(_flow_to_table(flow))
 
@@ -181,20 +223,7 @@ def viz_command(
 
     Exit codes: 0 = success, 1 = flow not found or no registry configured.
     """
-    registry = _DEFAULT_REGISTRY
-    if registry is None:
-        typer.echo(
-            "No registry configured. Call chainweaver.cli.set_default_registry(...) "
-            "before invoking the CLI.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    try:
-        flow = registry.get_flow(flow_name)
-    except FlowNotFoundError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+    flow = _load_flow_from_registry(flow_name)
 
     if output_format is VizFormat.DOT:
         typer.echo(flow_to_dot(flow), nl=False)
@@ -269,40 +298,27 @@ def validate_command(
 
     Exit codes: 0 = valid, 1 = validation error, 2 = file not found.
     """
-    if not file_path.exists():
-        typer.echo(f"chainweaver: file not found: {file_path}", err=True)
-        raise typer.Exit(code=2)
-    if not file_path.is_file():
-        typer.echo(f"chainweaver: not a file: {file_path}", err=True)
-        raise typer.Exit(code=2)
+    _require_existing_file(file_path)
 
     try:
         flow = _load_flow_file(file_path)
     except FlowSerializationError as exc:
         if output_format is OutputFormat.JSON:
-            typer.echo(
-                json.dumps(
-                    {"path": str(file_path), "valid": False, "error": exc.detail},
-                    indent=2,
-                )
-            )
+            _emit_json({"path": str(file_path), "valid": False, "error": exc.detail})
         else:
             typer.echo(f"INVALID  {file_path}: {exc.detail}", err=True)
         raise typer.Exit(code=1) from exc
 
     if output_format is OutputFormat.JSON:
-        typer.echo(
-            json.dumps(
-                {
-                    "path": str(file_path),
-                    "valid": True,
-                    "name": flow.name,
-                    "version": flow.version,
-                    "type": "DAGFlow" if isinstance(flow, DAGFlow) else "Flow",
-                    "step_count": len(flow.steps),
-                },
-                indent=2,
-            )
+        _emit_json(
+            {
+                "path": str(file_path),
+                "valid": True,
+                "name": flow.name,
+                "version": flow.version,
+                "type": "DAGFlow" if isinstance(flow, DAGFlow) else "Flow",
+                "step_count": len(flow.steps),
+            }
         )
     else:
         kind = "DAGFlow" if isinstance(flow, DAGFlow) else "Flow"
@@ -325,12 +341,7 @@ def check_command(
     Exit codes: 0 = all valid, 1 = at least one invalid file, 2 = directory
     not found.
     """
-    if not directory.exists():
-        typer.echo(f"chainweaver: directory not found: {directory}", err=True)
-        raise typer.Exit(code=2)
-    if not directory.is_dir():
-        typer.echo(f"chainweaver: not a directory: {directory}", err=True)
-        raise typer.Exit(code=2)
+    _require_existing_dir(directory)
 
     flow_files = _iter_flow_files(directory)
     results: list[dict[str, Any]] = []
@@ -362,16 +373,13 @@ def check_command(
             typer.echo(f"OK       {path}: {flow.name} v{flow.version} [{kind}]")
 
     if output_format is OutputFormat.JSON:
-        typer.echo(
-            json.dumps(
-                {
-                    "directory": str(directory),
-                    "valid_count": valid_count,
-                    "invalid_count": invalid_count,
-                    "results": results,
-                },
-                indent=2,
-            )
+        _emit_json(
+            {
+                "directory": str(directory),
+                "valid_count": valid_count,
+                "invalid_count": invalid_count,
+                "results": results,
+            }
         )
     elif not quiet:
         typer.echo(f"\n{valid_count} valid, {invalid_count} invalid")
