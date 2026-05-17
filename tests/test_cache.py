@@ -108,6 +108,22 @@ def test_compute_input_value_hash_differs_for_different_values() -> None:
     assert compute_input_value_hash(V(n=1)) != compute_input_value_hash(V(n=2))
 
 
+def test_compute_input_value_hash_is_re_exported_at_package_root() -> None:
+    """Pins AGENTS.md invariant 5: public symbols live on the top-level package.
+
+    A regression that removes the re-export from ``chainweaver/__init__.py``
+    would not fail the rest of the suite (which imports from
+    ``chainweaver.cache`` directly), so guard the public surface here.
+    """
+    import chainweaver
+
+    assert "compute_input_value_hash" in chainweaver.__all__
+    # Function identity — same object as the cache-module import.
+    from chainweaver.cache import compute_input_value_hash as _from_cache
+
+    assert chainweaver.compute_input_value_hash is _from_cache
+
+
 # ---------------------------------------------------------------------------
 # InMemoryStepCache
 # ---------------------------------------------------------------------------

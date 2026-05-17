@@ -8,6 +8,12 @@ process can then call
 :meth:`~chainweaver.executor.FlowExecutor.resume_flow` with the
 original ``trace_id`` to pick up where the crashed run left off.
 
+Snapshot-write failures (``OSError``, custom :class:`Checkpointer`
+subclasses that raise) are caught by the executor and logged at
+``WARNING`` — flows continue without that snapshot rather than aborting
+mid-run.  An operator inspecting the logs can decide whether to address
+the storage issue and accept that the affected steps are not resumable.
+
 The snapshot carries everything needed to reconstruct an
 :class:`~chainweaver.executor.ExecutionResult`: the original trace
 id, the flow name / version, the merged execution context after the
@@ -55,8 +61,12 @@ class ExecutionSnapshot(BaseModel):
     """Persisted state of an in-flight :class:`FlowExecutor.execute_flow` run.
 
     Snapshots are written after every successful step (linear) or DAG
-    level (DAG).  The schema is fully JSON-serializable; the same
-    convention as :class:`~chainweaver.executor.ExecutionResult`.
+    level (DAG).  Snapshot-write failures (``OSError`` etc.) are caught
+    by the executor and logged at ``WARNING`` rather than propagated,
+    so a single failed write leaves only that step / level
+    non-resumable — the flow itself still completes.  The schema is
+    fully JSON-serializable; the same convention as
+    :class:`~chainweaver.executor.ExecutionResult`.
 
     Attributes:
         trace_id: Original trace id of the in-flight execution.  Used

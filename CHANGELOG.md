@@ -51,6 +51,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New regression test pins the resume-log invariant:
     ``len(resumed.execution_log) == len(snapshot.execution_log) +
     steps_remaining``.
+  - **Checkpointer save failures no longer abort flows.**
+    ``FlowExecutor._save_linear_snapshot`` and
+    ``FlowExecutor._save_dag_snapshot`` now catch ``Exception`` from
+    ``Checkpointer.save`` and log at ``WARNING`` via
+    ``chainweaver.executor`` — mirroring the middleware-hook-exception
+    semantics so persistence bugs (disk full, permission denied,
+    custom ``Checkpointer.save`` raising) are never more catastrophic
+    than tool bugs.  A failed write leaves only the affected step /
+    level non-resumable; the flow itself still completes and the
+    ``ExecutionResult`` is returned normally.  AGENTS.md and the
+    ``chainweaver.checkpoint`` docstrings updated to describe the new
+    contract.
+  - ``compute_input_value_hash`` is now re-exported from
+    ``chainweaver.__all__`` (it was already public from
+    ``chainweaver.cache.__all__`` but missing from the top-level
+    surface — fixes an invariant-5 gap).
 
 ### Added
 

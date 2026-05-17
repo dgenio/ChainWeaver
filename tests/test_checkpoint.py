@@ -593,13 +593,21 @@ def test_dag_snapshot_saved_at_level_boundary() -> None:
     assert final_snap.completed_dag_levels == 2  # two levels, both done
 
 
-def _simulate_mid_dag_crash() -> tuple[FlowExecutor, InMemoryCheckpointer, str]:
+def _simulate_mid_dag_crash() -> tuple[FlowExecutor, InMemoryCheckpointer, str, list[int]]:
     """Run a 2-level DAG whose second-level tool always raises.
 
-    Returns ``(executor, checkpointer, trace_id)`` so the caller can
-    swap in a working tool and call :meth:`FlowExecutor.resume_flow`.
+    Returns ``(executor, checkpointer, trace_id, double_calls)`` — the
+    fourth element is a single-element list holding the number of times
+    the level-0 ``double`` tool has been invoked.  Callers can assert
+    against it after a resume to prove that ``_resume_dag_flow`` did
+    not re-run already-completed levels.
     """
     ck = InMemoryCheckpointer()
+    double_calls = [0]
+
+    def _counting_double(inp: NumberInput) -> dict[str, Any]:
+        double_calls[0] += 1
+        return _double_fn(inp)
 
     def _explode(_inp: ValueInput) -> dict[str, Any]:
         raise RuntimeError("simulated DAG crash")
@@ -631,7 +639,7 @@ def _simulate_mid_dag_crash() -> tuple[FlowExecutor, InMemoryCheckpointer, str]:
             description="",
             input_schema=NumberInput,
             output_schema=ValueOutput,
-            fn=_double_fn,
+            fn=_counting_double,
         )
     )
     ex.register_tool(
@@ -646,7 +654,7 @@ def _simulate_mid_dag_crash() -> tuple[FlowExecutor, InMemoryCheckpointer, str]:
 
     result = ex.execute_flow("ckpt_dag_crash", {"number": 5})
     assert result.success is False
-    return ex, ck, result.trace_id
+    return ex, ck, result.trace_id, double_calls
 
 
 def test_dag_resume_picks_up_where_a_crash_left_off() -> None:
@@ -658,8 +666,13 @@ def test_dag_resume_picks_up_where_a_crash_left_off() -> None:
     silently restart the DAG from level 0 with a fresh ``trace_id`` and
     delete the original snapshot via ``_make_result``'s
     ``delete_on_success`` — leaving no recovery evidence behind.
+
+    The ``double_calls`` counter is the load-bearing assertion: a broken
+    resume that returns the right trace_id and log shape but re-executes
+    level 0 would push ``double_calls[0]`` to 2 and trip this test.
     """
-    ex, ck, trace_id = _simulate_mid_dag_crash()
+    ex, ck, trace_id, double_calls = _simulate_mid_dag_crash()
+    assert double_calls[0] == 1  # original run executed level 0 exactly once
 
     snapshot = ck.load(trace_id)
     assert snapshot is not None
@@ -686,6 +699,9 @@ def test_dag_resume_picks_up_where_a_crash_left_off() -> None:
     tool_names = [r.tool_name for r in resumed.execution_log]
     assert tool_names == ["double", "bad"]
     assert resumed.final_output == {"number": 5, "value": 20}
+    # The level-0 tool was NOT re-run on resume — proves that
+    # `_resume_dag_flow` honors `snapshot.completed_dag_levels`.
+    assert double_calls[0] == 1
     # Snapshot deleted on success.
     assert ck.load(trace_id) is None
 
@@ -775,6 +791,9 @@ def test_dag_flow_survives_checkpointer_save_failure(
         result = ex.execute_flow("ckpt_dag_raises", {"number": 4})
 
     assert result.success is True
+    # A regression where the DAG path survives the checkpoint
+    # exception but returns an incomplete result would trip this.
+    assert result.final_output == {"number": 4, "value": 8}
     assert any("Checkpoint write failed" in record.message for record in caplog.records)
 
 
