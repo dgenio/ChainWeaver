@@ -117,6 +117,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
                 flow_version=ctx.flow_version,
                 initial_input=dict(ctx.initial_input),
                 total_steps=ctx.total_steps,
+                is_resume=ctx.is_resume,
             )
         )
 
@@ -1082,15 +1083,34 @@ class FlowExecutor:
 
             # Crash-resume checkpoint (issue #128) — write after every
             # successful step so a fresh process can resume from here.
-            self._save_linear_snapshot(
-                trace_id=trace_id,
-                flow=flow,
-                initial_input=initial_input,
-                started_at=flow_started_at,
-                context=context,
-                log=log,
-                completed_steps=idx + 1,
-            )
+            # Checkpoint persistence is observability-tier infrastructure:
+            # a failure here (disk full, permission denied, user
+            # ``Checkpointer.save`` bug) must not propagate past the
+            # middleware lifecycle.  Mirror the catch-and-log contract
+            # already in place for :class:`FlowExecutorMiddleware`
+            # hooks so ``on_flow_end`` always fires and downstream
+            # observability state (OTel parent spans, etc.) stays
+            # consistent.
+            try:
+                self._save_linear_snapshot(
+                    trace_id=trace_id,
+                    flow=flow,
+                    initial_input=initial_input,
+                    started_at=flow_started_at,
+                    context=context,
+                    log=log,
+                    completed_steps=idx + 1,
+                )
+            except Exception:
+                # Observability-tier failure — log and continue.
+                _logger.warning(
+                    "Checkpoint write failed at step %d (flow '%s', trace_id=%s); "
+                    "continuing without snapshot",
+                    idx,
+                    flow_name,
+                    trace_id,
+                    exc_info=True,
+                )
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
@@ -1324,6 +1344,15 @@ class FlowExecutor:
         No-op when no checkpointer is configured.  Captures every
         relevant tool's current ``schema_hash`` so resume can detect
         drift since the snapshot was written.
+
+        Performance: the snapshot includes the full ``execution_log``
+        so far, so the cost of a single save scales linearly with the
+        step index — and the cost across a full flow run is
+        therefore ``O(N²)`` in serialization terms (each successful
+        step writes a snapshot containing every prior step's record).
+        For flows with more than ~100 steps this can dominate
+        wall-clock time; users who need that scale should plug in a
+        custom append-only :class:`Checkpointer` implementation.
         """
         if self._checkpointer is None:
             return
@@ -1361,6 +1390,12 @@ class FlowExecutor:
         DAG resume uses level granularity — within a level all steps
         run sequentially, but on resume the level is replayed from
         scratch.  No-op when no checkpointer is configured.
+
+        Performance: same ``O(N²)`` cumulative serialization caveat
+        as :meth:`_save_linear_snapshot` — each completed level
+        writes the full ``execution_log`` to date.  For DAGs with
+        many small levels this can dominate; consider an append-only
+        :class:`Checkpointer` for that scale.
         """
         if self._checkpointer is None:
             return
@@ -1477,11 +1512,38 @@ class FlowExecutor:
                 initial_input=dict(snapshot.initial_input),
                 started_at=flow_started_at,
                 total_steps=len(flow.steps),
+                is_resume=True,
             )
         )
 
+        # Re-validate the snapshot's initial_input against the current
+        # flow.input_schema.  The schema may have been tightened (or
+        # newly attached) since the original run; silently bypassing
+        # validation on resume would let a no-longer-valid input slip
+        # through.  The schema_hash check on tools already enforces
+        # similar drift detection for tool I/O.
         context: dict[str, Any] = dict(snapshot.context)
         log: list[StepRecord] = list(snapshot.execution_log)
+        if flow.input_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=dict(snapshot.initial_input),
+                schema=flow.input_schema,
+                step_index=-1,
+                context_label="flow_input",
+            )
+            if validation_record is not None:
+                log.append(validation_record)
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                )
 
         for idx in range(snapshot.completed_steps, len(flow.steps)):
             step = flow.steps[idx]
@@ -1503,15 +1565,28 @@ class FlowExecutor:
             assert record.outputs is not None  # success guarantees outputs
             context.update(record.outputs)
 
-            self._save_linear_snapshot(
-                trace_id=trace_id,
-                flow=flow,
-                initial_input=snapshot.initial_input,
-                started_at=flow_started_at,
-                context=context,
-                log=log,
-                completed_steps=idx + 1,
-            )
+            # See ``execute_flow`` for the catch-and-log rationale —
+            # checkpoint writes are not allowed to abort flows.
+            try:
+                self._save_linear_snapshot(
+                    trace_id=trace_id,
+                    flow=flow,
+                    initial_input=snapshot.initial_input,
+                    started_at=flow_started_at,
+                    context=context,
+                    log=log,
+                    completed_steps=idx + 1,
+                )
+            except Exception:
+                # Observability-tier failure — log and continue.
+                _logger.warning(
+                    "Checkpoint write failed at step %d (flow '%s', trace_id=%s) on resume; "
+                    "continuing without snapshot",
+                    idx,
+                    flow_name,
+                    trace_id,
+                    exc_info=True,
+                )
 
         # Flow-level output validation (mirrors execute_flow).
         if flow.output_schema is not None:
@@ -2116,11 +2191,16 @@ class FlowExecutor:
                 initial_input=dict(initial_input),
                 started_at=flow_started_at,
                 total_steps=len(flow.steps),
+                is_resume=resume is not None,
             )
         )
 
-        # -- Flow-level input validation (skipped on resume — already done) ----
-        if resume is None and flow.input_schema is not None:
+        # -- Flow-level input validation -----------------------------------
+        # Always re-validate, including on resume: the schema may have
+        # been tightened (or newly attached) since the snapshot was
+        # written, and silently bypassing it would let a stale input
+        # through.  Matches ``_resume_linear_flow``.
+        if flow.input_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
                 payload=initial_input,
@@ -2286,15 +2366,28 @@ class FlowExecutor:
             # restarts from the next un-completed level — within a
             # level there is no checkpoint, so the level is replayed
             # from scratch on resume (the simplest correct semantics).
-            self._save_dag_snapshot(
-                trace_id=trace_id,
-                flow=flow,
-                initial_input=initial_input,
-                started_at=flow_started_at,
-                context=context,
-                log=log,
-                completed_levels=absolute_level_idx + 1,
-            )
+            # Same catch-and-log contract as the linear path: a
+            # ``Checkpointer.save`` raise must not skip ``on_flow_end``.
+            try:
+                self._save_dag_snapshot(
+                    trace_id=trace_id,
+                    flow=flow,
+                    initial_input=initial_input,
+                    started_at=flow_started_at,
+                    context=context,
+                    log=log,
+                    completed_levels=absolute_level_idx + 1,
+                )
+            except Exception:
+                # Observability-tier failure — log and continue.
+                _logger.warning(
+                    "Checkpoint write failed at DAG level %d (flow '%s', trace_id=%s); "
+                    "continuing without snapshot",
+                    absolute_level_idx,
+                    flow.name,
+                    trace_id,
+                    exc_info=True,
+                )
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:

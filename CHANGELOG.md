@@ -51,6 +51,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New regression test pins the resume-log invariant:
     ``len(resumed.execution_log) == len(snapshot.execution_log) +
     steps_remaining``.
+- **PR #136 Phase 2 audit follow-ups** (M1–M6):
+  - **M1**: ``_save_linear_snapshot`` / ``_save_dag_snapshot`` calls in
+    ``execute_flow``, ``_resume_linear_flow``, and ``_execute_dag_flow``
+    are now wrapped in ``try/except Exception`` that logs a
+    ``WARNING`` and continues.  Mirrors the catch-and-log contract
+    for ``FlowExecutorMiddleware`` hooks — observability failures
+    (disk full, permission denied, user-Checkpointer bug) can no
+    longer abort the flow or skip ``on_flow_end``.  New regression
+    tests in ``tests/test_checkpoint.py`` pin the contract for both
+    linear and DAG paths.
+  - **M2**: ``compute_input_value_hash`` is now re-exported from
+    ``chainweaver/__init__.py`` and listed in the top-level
+    ``__all__``.  Closes an invariant 5 violation flagged by the
+    audit — users writing custom ``StepCache`` backends can now
+    reach the canonical input-value hashing helper from the package
+    surface.
+  - **M3**: new end-to-end regression test
+    ``test_resume_dag_flow_continues_from_completed_level`` pins
+    ``_resume_dag_flow``'s level-skip / ``trace_id`` /
+    ``started_at`` preservation.  Closes the DAG-resume coverage
+    gap.
+  - **M4**: new ``is_resume: bool = False`` field on
+    ``FlowStartContext`` and ``FlowEvent`` (``flow_start`` variant).
+    ``OTelTraceExporter.on_flow_start`` now anchors the resumed
+    parent span at wall-clock-now when ``ctx.is_resume`` is true —
+    so Jaeger / Tempo / Honeycomb no longer render a multi-hour
+    span covering the crash → resume gap.  The original ``trace_id``
+    and ``started_at`` remain on ``chainweaver.*`` span attributes
+    for correlation.
+  - **M5**: ``_resume_linear_flow`` and ``_execute_dag_flow`` (on
+    resume) now re-run flow-level ``input_schema`` validation
+    against ``snapshot.initial_input``.  Closes a silent-bypass
+    edge case where an ``input_schema`` is tightened or newly
+    attached after a crash without rolling the flow version.
+  - **M6**: ``_save_linear_snapshot`` and ``_save_dag_snapshot``
+    docstrings now spell out the ``O(N²)`` cumulative
+    serialization cost of the per-step snapshot pattern and point
+    users at append-only ``Checkpointer`` backends for very long
+    flows.
+- ``FlowExecutor.resume_flow`` ``Raises:`` docstring no longer lists
+  the stale ``ValueError`` entry — only the new typed exceptions.
 
 ### Added
 

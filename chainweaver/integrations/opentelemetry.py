@@ -33,7 +33,7 @@ extra raises a clear :class:`ImportError` instead of a cryptic
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 try:  # Optional dependency.
@@ -182,7 +182,18 @@ class OTelTraceExporter(BaseMiddleware):
         self._step_spans: dict[str, Span] = {}
 
     def on_flow_start(self, ctx: FlowStartContext) -> None:
-        start_ns = _datetime_to_ns(ctx.started_at)
+        # On resume, ``ctx.started_at`` is the *original* run's start —
+        # using it would produce a parent span that visually covers the
+        # crash → resume gap as one giant span (potentially hours
+        # long in Jaeger / Tempo / Honeycomb).  Anchor the resumed
+        # parent span at wall-clock-now so the rendered duration
+        # covers only the resume work; the original ``trace_id`` and
+        # ``started_at`` remain on the ``chainweaver.*`` attributes
+        # for correlation with the original ChainWeaver execution log.
+        if ctx.is_resume:
+            start_ns = _datetime_to_ns(datetime.now(timezone.utc))
+        else:
+            start_ns = _datetime_to_ns(ctx.started_at)
         span = self._tracer.start_span(
             f"{_FLOW_SPAN_PREFIX}{ctx.flow_name}",
             start_time=start_ns,
@@ -191,6 +202,12 @@ class OTelTraceExporter(BaseMiddleware):
         span.set_attribute("chainweaver.flow_name", ctx.flow_name)
         span.set_attribute("chainweaver.flow_version", ctx.flow_version)
         span.set_attribute("chainweaver.total_steps", ctx.total_steps)
+        span.set_attribute("chainweaver.is_resume", ctx.is_resume)
+        if ctx.is_resume:
+            # Preserve the original wall-clock start for correlation
+            # with the persisted ExecutionResult.started_at field
+            # (which still carries the pre-crash timestamp).
+            span.set_attribute("chainweaver.original_started_at", ctx.started_at.isoformat())
         self._flow_spans[ctx.trace_id] = span
 
     def on_step_start(self, ctx: StepStartContext) -> None:

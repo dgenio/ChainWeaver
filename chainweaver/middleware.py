@@ -53,7 +53,20 @@ class FlowStartContext(BaseModel):
         initial_input: The initial context dictionary passed to
             :meth:`~chainweaver.executor.FlowExecutor.execute_flow`.
         started_at: UTC timestamp recorded at the very top of the execution.
+            For resumes this is the **original** start time from the
+            snapshot — middlewares that want wall-clock-now should
+            branch on ``is_resume`` and use ``datetime.now(timezone.utc)``
+            instead, otherwise observability spans cover the crash →
+            resume gap.
         total_steps: Number of steps in the flow (``len(flow.steps)``).
+        is_resume: ``True`` when fired from
+            :meth:`~chainweaver.executor.FlowExecutor.resume_flow` (or a
+            DAG resume), ``False`` otherwise.  Middlewares that publish
+            parent observability spans (notably the OpenTelemetry
+            exporter) should treat resume as a fresh span boundary so
+            the visible duration covers only the resume work — not the
+            original-start → now wall-clock window.  Default ``False``
+            for backward compatibility.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
@@ -64,6 +77,7 @@ class FlowStartContext(BaseModel):
     initial_input: dict[str, Any]
     started_at: datetime
     total_steps: int
+    is_resume: bool = False
 
 
 class StepStartContext(BaseModel):

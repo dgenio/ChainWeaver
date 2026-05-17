@@ -41,7 +41,13 @@ import logging
 
 from chainweaver import cli
 from chainweaver.builder import FlowBuilder, FlowBuilderError
-from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
+from chainweaver.cache import (
+    FileStepCache,
+    InMemoryStepCache,
+    StepCache,
+    StepCacheKey,
+    compute_input_value_hash,
+)
 from chainweaver.checkpoint import (
     Checkpointer,
     ExecutionSnapshot,
@@ -205,6 +211,7 @@ __all__ = [
     "check_flow_compatibility",
     "cli",
     "compile_flow",
+    "compute_input_value_hash",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",

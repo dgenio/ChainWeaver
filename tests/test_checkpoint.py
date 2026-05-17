@@ -24,6 +24,7 @@ from chainweaver.checkpoint import (
 from chainweaver.exceptions import CheckpointDriftError
 from chainweaver.executor import ExecutionResult, FlowExecutor, StepRecord
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
+from chainweaver.middleware import BaseMiddleware, FlowEndContext
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -591,6 +592,234 @@ def test_dag_snapshot_saved_at_level_boundary() -> None:
     final_snap = ck.load(result.trace_id)
     assert final_snap is not None
     assert final_snap.completed_dag_levels == 2  # two levels, both done
+
+
+def test_resume_dag_flow_continues_from_completed_level() -> None:
+    """End-to-end: a DAG that crashes between levels resumes from the next level.
+
+    Pins the contract for ``_resume_dag_flow`` so a future refactor
+    that drifts level indexing, ``flat_index`` seeding, or
+    ``trace_id`` / ``started_at`` preservation trips red.  The
+    coverage gap was flagged in the Phase 2 audit of #136.
+    """
+    ck = InMemoryCheckpointer()
+    fail_state = {"fired": False}
+
+    def _flaky_add_ten(inp: ValueInput) -> dict[str, Any]:
+        if not fail_state["fired"]:
+            fail_state["fired"] = True
+            raise RuntimeError("simulated crash on first attempt at level 2")
+        return _add_ten_fn(inp)
+
+    dag = DAGFlow(
+        name="ckpt_dag_resume",
+        version="0.1.0",
+        description="",
+        steps=[
+            DAGFlowStep(
+                step_id="a",
+                tool_name="double",
+                input_mapping={"number": "number"},
+            ),
+            DAGFlowStep(
+                step_id="b",
+                tool_name="flaky_add_ten",
+                input_mapping={"value": "value"},
+                depends_on=["a"],
+            ),
+        ],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(dag)
+    ex = FlowExecutor(registry=registry, checkpointer=ck, delete_on_success=False)
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="flaky_add_ten",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_flaky_add_ten,
+        )
+    )
+
+    first = ex.execute_flow("ckpt_dag_resume", {"number": 3})
+
+    # The first run crashes at level 2's only step; level 1's snapshot
+    # should remain (level 2 never reached the post-level save).
+    assert first.success is False
+    trace_ids = ck.list_trace_ids()
+    assert trace_ids == [first.trace_id]
+    snap = ck.load(first.trace_id)
+    assert snap is not None
+    assert snap.completed_dag_levels == 1
+    assert len(snap.execution_log) == 1
+    assert snap.execution_log[0].tool_name == "double"
+    assert snap.execution_log[0].success is True
+
+    # Resume — the flaky tool succeeds on its second call, so the DAG
+    # picks up at level 2 and completes.
+    resumed = ex.resume_flow(first.trace_id)
+
+    assert resumed.success is True
+    # trace_id and started_at preserve the original run's identity.
+    assert resumed.trace_id == first.trace_id
+    assert resumed.started_at == snap.started_at
+    # The execution_log carries level 1's successful step plus level 2's
+    # newly-successful step — exactly one new record on top of the
+    # snapshot.
+    assert len(resumed.execution_log) == len(snap.execution_log) + 1
+    assert resumed.execution_log[0].tool_name == "double"
+    assert resumed.execution_log[1].tool_name == "flaky_add_ten"
+    assert resumed.execution_log[1].success is True
+    # Final context merges level 1 and level 2 outputs.
+    assert resumed.final_output == {"number": 3, "value": 16}
+
+
+# ---------------------------------------------------------------------------
+# Catch-and-log contract: Checkpointer.save raises must not abort flows
+# ---------------------------------------------------------------------------
+
+
+class _BrokenCheckpointer:
+    """Checkpointer whose ``save`` always raises — for the M1 regression."""
+
+    def save(self, snapshot: ExecutionSnapshot) -> None:
+        raise OSError("simulated disk-full / permission-denied during snapshot write")
+
+    def load(self, trace_id: str) -> ExecutionSnapshot | None:
+        return None
+
+    def delete(self, trace_id: str) -> None:  # pragma: no cover — exercised indirectly
+        pass
+
+    def list_trace_ids(self) -> list[str]:  # pragma: no cover — not used in this test
+        return []
+
+
+def test_checkpoint_save_failure_does_not_abort_linear_flow() -> None:
+    """Phase 2 audit M1: a Checkpointer.save raise must not abort the flow.
+
+    Mirrors the catch-and-log contract for :class:`FlowExecutorMiddleware`
+    hooks — observability bugs never abort production flows.  The
+    middleware-side ``on_flow_end`` hook must still fire so downstream
+    observability state (OTel parent spans, etc.) is released cleanly
+    even when persistence fails.
+    """
+    flow_end_count = {"n": 0}
+
+    class _FlowEndCounter(BaseMiddleware):
+        def on_flow_end(self, ctx: FlowEndContext) -> None:
+            flow_end_count["n"] += 1
+
+    flow = Flow(
+        name="resilient_linear",
+        version="0.1.0",
+        description="",
+        steps=[
+            FlowStep(tool_name="double", input_mapping={"number": "number"}),
+            FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
+        ],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    ex = FlowExecutor(
+        registry=registry,
+        checkpointer=_BrokenCheckpointer(),
+        middleware=[_FlowEndCounter()],
+    )
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="add_ten",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        )
+    )
+
+    result = ex.execute_flow("resilient_linear", {"number": 4})
+
+    # Despite every snapshot save raising, the flow ran to completion
+    # and on_flow_end fired exactly once.
+    assert result.success is True
+    assert flow_end_count["n"] == 1
+    assert result.final_output == {"number": 4, "value": 18}
+
+
+def test_checkpoint_save_failure_does_not_abort_dag_flow() -> None:
+    """M1 contract holds on the DAG path too."""
+    flow_end_count = {"n": 0}
+
+    class _FlowEndCounter(BaseMiddleware):
+        def on_flow_end(self, ctx: FlowEndContext) -> None:
+            flow_end_count["n"] += 1
+
+    dag = DAGFlow(
+        name="resilient_dag",
+        version="0.1.0",
+        description="",
+        steps=[
+            DAGFlowStep(
+                step_id="a",
+                tool_name="double",
+                input_mapping={"number": "number"},
+            ),
+            DAGFlowStep(
+                step_id="b",
+                tool_name="add_ten",
+                input_mapping={"value": "value"},
+                depends_on=["a"],
+            ),
+        ],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(dag)
+    ex = FlowExecutor(
+        registry=registry,
+        checkpointer=_BrokenCheckpointer(),
+        middleware=[_FlowEndCounter()],
+    )
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="add_ten",
+            description="",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        )
+    )
+
+    result = ex.execute_flow("resilient_dag", {"number": 5})
+
+    assert result.success is True
+    assert flow_end_count["n"] == 1
 
 
 # ---------------------------------------------------------------------------

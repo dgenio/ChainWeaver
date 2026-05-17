@@ -59,17 +59,18 @@ class FlowEvent(BaseModel):
     exactly which of the optional fields are populated depends on
     ``kind``:
 
-    +--------------+----------------------------------------------------+
-    | ``kind``     | Populated fields                                   |
-    +==============+====================================================+
-    | flow_start   | ``flow_version``, ``initial_input``, ``total_steps``|
-    +--------------+----------------------------------------------------+
-    | step_start   | ``step_index``, ``tool_name``, ``inputs``          |
-    +--------------+----------------------------------------------------+
-    | step_end     | ``step_index``, ``tool_name``, ``step_record``     |
-    +--------------+----------------------------------------------------+
-    | flow_end     | ``result``                                         |
-    +--------------+----------------------------------------------------+
+    +--------------+--------------------------------------------------------------+
+    | ``kind``     | Populated fields                                             |
+    +==============+==============================================================+
+    | flow_start   | ``flow_version``, ``initial_input``, ``total_steps``,        |
+    |              | ``is_resume``                                                |
+    +--------------+--------------------------------------------------------------+
+    | step_start   | ``step_index``, ``tool_name``, ``inputs``                    |
+    +--------------+--------------------------------------------------------------+
+    | step_end     | ``step_index``, ``tool_name``, ``step_record``               |
+    +--------------+--------------------------------------------------------------+
+    | flow_end     | ``result``                                                   |
+    +--------------+--------------------------------------------------------------+
 
     All variants populate ``flow_name``, ``trace_id``, and ``timestamp``.
 
@@ -84,6 +85,10 @@ class FlowEvent(BaseModel):
         flow_version: PEP 440 flow version (``flow_start`` only).
         initial_input: Initial context dictionary (``flow_start`` only).
         total_steps: ``len(flow.steps)`` (``flow_start`` only).
+        is_resume: ``True`` when the event was emitted by
+            :meth:`FlowExecutor.resume_flow` (``flow_start`` only).
+            Mirrors the field of the same name on
+            :class:`~chainweaver.middleware.FlowStartContext`.
         step_index: Zero-based step position (``step_start`` /
             ``step_end`` only).
         tool_name: Name of the tool being invoked (``step_start`` /
@@ -106,6 +111,7 @@ class FlowEvent(BaseModel):
     flow_version: str | None = None
     initial_input: dict[str, Any] | None = None
     total_steps: int | None = None
+    is_resume: bool | None = None
     step_index: int | None = None
     tool_name: str | None = None
     inputs: dict[str, Any] | None = None
