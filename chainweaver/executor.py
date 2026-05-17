@@ -1404,8 +1404,6 @@ class FlowExecutor:
             An :class:`ExecutionResult` for the (now-completed) flow.
 
         Raises:
-            ValueError: When no checkpointer is configured, or when no
-                snapshot exists for *trace_id*.
             CheckpointerNotConfiguredError: When no checkpointer was
                 passed to ``FlowExecutor(...)``.
             CheckpointNotFoundError: When no snapshot exists for
