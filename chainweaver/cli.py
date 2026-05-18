@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import statistics
 import sys
 from enum import Enum
 from pathlib import Path
@@ -620,8 +621,6 @@ def _percentiles(values: list[float]) -> dict[str, float]:
     collapse to that value and ``stdev`` is ``0.0``.  Returns zeros for
     an empty input — caller decides whether that is meaningful.
     """
-    import statistics
-
     if not values:
         return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "mean": 0.0, "stdev": 0.0}
     if len(values) == 1:
@@ -633,7 +632,7 @@ def _percentiles(values: list[float]) -> dict[str, float]:
         "p95": _quantile(sorted_vals, 0.95),
         "p99": _quantile(sorted_vals, 0.99),
         "mean": float(statistics.fmean(sorted_vals)),
-        "stdev": float(statistics.pstdev(sorted_vals)),
+        "stdev": float(statistics.stdev(sorted_vals)),
     }
 
 
