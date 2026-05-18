@@ -83,6 +83,8 @@ guarantees apply in full.
   (issue #45 ✅).
 - [ ] `chainweaver viz <flow>` — ASCII / DOT rendering
   (issue #46 ✅).
+- [ ] `chainweaver run <file>` — execute a flow from disk with
+  user-supplied tools and initial input (issue #129).
 - [ ] All CLI commands honor `--format json` for machine consumption.
 - [ ] Documented exit-code contract (0 / 1 / 2) covered by tests.
 
