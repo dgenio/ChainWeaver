@@ -570,9 +570,12 @@ def run_command(
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    if quiet:
+        raise typer.Exit(code=0 if result.success else 1)
+
     if not result.success:
         # Surface the first failing step to stderr so CI / scripts can grep
-        # without parsing the table output. Mirrors validate/check style.
+        # without parsing the table output.
         for record in result.execution_log:
             if not record.success:
                 typer.echo(
@@ -581,9 +584,6 @@ def run_command(
                     err=True,
                 )
                 break
-
-    if quiet:
-        raise typer.Exit(code=0 if result.success else 1)
 
     if output_format is OutputFormat.JSON:
         _emit_json(json.loads(result.model_dump_json()))
