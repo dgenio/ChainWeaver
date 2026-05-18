@@ -16,6 +16,8 @@ Available commands
 - ``chainweaver viz <flow>`` — render a registered flow as ASCII or DOT
   (Graphviz) text. Pipe the DOT output through ``dot -Tpng`` to produce
   an image (issue #46).
+- ``chainweaver run <file>`` — load a flow file from disk, register tools
+  from one or more Python modules, and execute the flow (issue #129).
 
 Programmatic registration entry point
 -------------------------------------
@@ -50,18 +52,26 @@ Exit codes:
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from enum import Enum
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import typer
 
-from chainweaver.exceptions import FlowNotFoundError, FlowSerializationError
+from chainweaver.exceptions import (
+    ChainWeaverError,
+    FlowNotFoundError,
+    FlowSerializationError,
+)
+from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, Flow
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml
+from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_dot
 
 app = typer.Typer(
@@ -388,6 +398,203 @@ def check_command(
         raise typer.Exit(code=1)
 
 
+# ---------------------------------------------------------------------------
+# run command (issue #129)
+# ---------------------------------------------------------------------------
+
+
+def _import_tools_from(module_name: str) -> list[Tool]:
+    """Import *module_name* and return every :class:`Tool` found at top level.
+
+    Args:
+        module_name: A Python import path (e.g. ``"my_pkg.tools"``).  The
+            module must be importable from the current ``sys.path``.
+
+    Returns:
+        A list of :class:`Tool` instances, in the order they appear in
+        ``vars(module).values()``.  Duplicates (same ``Tool.name`` registered
+        twice in one module) are returned as-is; the caller decides whether
+        to deduplicate.
+
+    Raises:
+        typer.Exit: Wraps any :class:`ImportError` or :class:`ModuleNotFoundError`
+            with a clear stderr message; exit code is ``2`` (module is treated
+            like a missing file, consistent with the CLI's exit-code contract).
+    """
+    try:
+        module: ModuleType = importlib.import_module(module_name)
+    except (ImportError, ModuleNotFoundError) as exc:
+        typer.echo(f"chainweaver: tools module not importable: {module_name}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    return [obj for obj in vars(module).values() if isinstance(obj, Tool)]
+
+
+def _parse_initial_input(*, input_arg: str | None, input_file: Path | None) -> dict[str, Any]:
+    """Resolve the initial input dict from CLI flags.
+
+    Exactly one of ``input_arg`` (JSON string) or ``input_file`` (path) must
+    be provided.  Returns the parsed dict, or exits with the appropriate
+    code on a malformed or missing argument.
+    """
+    if input_arg is None and input_file is None:
+        typer.echo(
+            "chainweaver: one of --input or --input-file is required.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if input_arg is not None and input_file is not None:
+        typer.echo(
+            "chainweaver: --input and --input-file are mutually exclusive.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if input_file is not None:
+        _require_existing_file(input_file)
+        raw = input_file.read_text(encoding="utf-8")
+        source_label = str(input_file)
+    else:
+        # input_arg is non-None here; mypy needs the assert.
+        assert input_arg is not None
+        raw = input_arg
+        source_label = "--input"
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        typer.echo(
+            f"chainweaver: malformed JSON in {source_label}: {exc.msg}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    if not isinstance(parsed, dict):
+        typer.echo(
+            f"chainweaver: initial input must be a JSON object, got {type(parsed).__name__}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return parsed
+
+
+_RUN_FILE_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file.",
+)
+_RUN_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help=(
+        "Python module path that exposes Tool instances at top level "
+        "(e.g. 'my_pkg.tools'). Repeatable."
+    ),
+)
+_RUN_INPUT_OPTION = typer.Option(
+    None,
+    "--input",
+    "-i",
+    help="JSON object string passed to the flow as initial input.",
+)
+_RUN_INPUT_FILE_OPTION = typer.Option(
+    None,
+    "--input-file",
+    help="Path to a JSON file holding the initial input object.",
+)
+_RUN_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+_RUN_QUIET_OPTION = typer.Option(
+    False,
+    "--quiet",
+    "-q",
+    help="Suppress all output; communicate the result through the exit code only.",
+)
+
+
+@app.command("run")
+def run_command(
+    flow_file: Path = _RUN_FILE_ARG,
+    tools: list[str] = _RUN_TOOLS_OPTION,
+    input_arg: str | None = _RUN_INPUT_OPTION,
+    input_file: Path | None = _RUN_INPUT_FILE_OPTION,
+    output_format: OutputFormat = _RUN_FORMAT_OPTION,
+    quiet: bool = _RUN_QUIET_OPTION,
+) -> None:
+    """Execute a flow loaded from disk and print its result.
+
+    Loads ``flow_file``, imports every module listed in ``--tools`` and
+    registers all top-level :class:`~chainweaver.tools.Tool` instances
+    found, then runs the flow with the supplied initial input.
+
+    Exit codes:
+
+    - ``0`` — flow executed successfully (``result.success is True``).
+    - ``1`` — flow execution failed, or CLI-level error (missing tool,
+      malformed input, etc.).
+    - ``2`` — flow file or tools module not found / not importable.
+    """
+    _require_existing_file(flow_file)
+
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    initial_input = _parse_initial_input(input_arg=input_arg, input_file=input_file)
+
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    executor = FlowExecutor(registry=registry)
+
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            executor.register_tool(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+
+    try:
+        result = executor.execute_flow(flow.name, initial_input)
+    except ChainWeaverError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if quiet:
+        raise typer.Exit(code=0 if result.success else 1)
+
+    if not result.success:
+        # Surface the first failing step to stderr so CI / scripts can grep
+        # without parsing the table output.
+        for record in result.execution_log:
+            if not record.success:
+                typer.echo(
+                    f"chainweaver: step {record.step_index} "
+                    f"(tool '{record.tool_name}') failed: {record.error_message}",
+                    err=True,
+                )
+                break
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(json.loads(result.model_dump_json()))
+    else:
+        typer.echo(_run_result_to_table(result))
+
+    if not result.success:
+        raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``chainweaver`` console script.
 
@@ -477,6 +684,37 @@ def _flow_to_table(flow: Flow | DAGFlow) -> str:
         for idx, lin_step in enumerate(flow.steps):
             rows.append(f"{idx:<3} {lin_step.tool_name:<22}  {dict(lin_step.input_mapping)}")
     return "\n".join([*header, *rows])
+
+
+def _run_result_to_table(result: Any) -> str:
+    """Render an :class:`~chainweaver.executor.ExecutionResult` for terminal display.
+
+    Lays out one row per executed step with its tool name, duration in
+    milliseconds, and OK/ERROR status, followed by total wall-clock and a
+    pretty-printed ``final_output`` JSON block.
+    """
+    header = [
+        f"flow: {result.flow_name}  (trace_id={result.trace_id})",
+        "─" * 60,
+        "step  tool                       duration_ms   status",
+    ]
+    body: list[str] = []
+    for record in result.execution_log:
+        status = "ok" if record.success else "ERR"
+        body.append(
+            f"{record.step_index:<5} {record.tool_name:<26} "
+            f"{record.duration_ms:>10.1f}    {status}"
+        )
+    footer = [
+        "─" * 60,
+        f"Total: {result.total_duration_ms:.1f} ms  ·  success: {str(result.success).lower()}",
+        "",
+        "final_output:",
+        json.dumps(result.final_output, indent=2, default=str)
+        if result.final_output is not None
+        else "(none — flow failed)",
+    ]
+    return "\n".join([*header, *body, *footer])
 
 
 # Module-level invocation guard (so ``python -m chainweaver.cli`` works).
