@@ -39,6 +39,7 @@
 ## Public API
 
 - [ ] New public symbols added to `chainweaver/__init__.py` `__all__`.
+- [ ] Intentional public API changes regenerate `tests/fixtures/public_api.json` with `python tests/scripts/regen_public_api.py`.
 - [ ] New exceptions: `__init__.py` + `__all__` + README error table — all updated.
 - [ ] `StepRecord` / `ExecutionResult` remain as dataclasses (not converted to Pydantic).
 
