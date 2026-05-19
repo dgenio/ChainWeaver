@@ -379,6 +379,32 @@ result = executor.execute_flow("my_flow", {"key": "value"})
 Runs a flow step-by-step with full schema validation and structured logging.
 **No LLM calls are made at any point.**
 
+#### `ChainAnalyzer`
+
+```python
+from chainweaver import ChainAnalyzer, ToolChain
+
+analyzer = ChainAnalyzer(tools=[tool_a, tool_b, tool_c])
+
+# All schema-compatible pairs
+matrix: dict[str, list[str]] = analyzer.compatibility_matrix()
+
+# All valid tool sequences up to length 3
+chains: list[ToolChain] = analyzer.find_chains(max_depth=3)
+
+# Filter by start or end tool
+chains = analyzer.find_chains(max_depth=3, start="tool_a", end="tool_c")
+
+# Promote chains to ready-to-register Flow objects
+flows = analyzer.suggest_flows(max_depth=3, min_depth=2)
+```
+
+Discovers schema-compatible tool combinations **offline**, before any flow is
+registered or executed. `compatibility_matrix()` checks that every required
+input field of a consumer tool appears in the output of the producer with a
+matching type. `suggest_flows()` auto-wires `input_mapping` by name-matching
+and returns `Flow` objects ready for `FlowRegistry.register_flow()`.
+
 ### Data flow
 
 ```
