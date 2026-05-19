@@ -42,6 +42,13 @@ import logging
 from chainweaver import cli
 from chainweaver.analyzer import ChainAnalyzer, ToolChain
 from chainweaver.builder import FlowBuilder, FlowBuilderError
+from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
+from chainweaver.checkpoint import (
+    Checkpointer,
+    ExecutionSnapshot,
+    FileCheckpointer,
+    InMemoryCheckpointer,
+)
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
 from chainweaver.compiler import (
     CompilationError,
@@ -51,8 +58,12 @@ from chainweaver.compiler import (
 )
 from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decorators import tool
+from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     ChainWeaverError,
+    CheckpointDriftError,
+    CheckpointerNotConfiguredError,
+    CheckpointNotFoundError,
     DAGDefinitionError,
     FlowAlreadyExistsError,
     FlowExecutionError,
@@ -88,6 +99,14 @@ from chainweaver.flow import (
     validate_dag_topology,
 )
 from chainweaver.log_utils import RedactionPolicy
+from chainweaver.middleware import (
+    BaseMiddleware,
+    FlowEndContext,
+    FlowExecutorMiddleware,
+    FlowStartContext,
+    StepEndContext,
+    StepStartContext,
+)
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import (
@@ -102,6 +121,17 @@ from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
 
+# Resolve forward references in middleware context, event, and snapshot
+# models — ``StepRecord`` and ``ExecutionResult`` are defined in
+# ``chainweaver.executor`` (imported above), so they are now available
+# for Pydantic to bind into the ``StepEndContext`` / ``FlowEndContext``
+# schemas, ``FlowEvent``, and ``ExecutionSnapshot``.
+_forward_namespace = {"StepRecord": StepRecord, "ExecutionResult": ExecutionResult}
+StepEndContext.model_rebuild(_types_namespace=_forward_namespace)
+FlowEndContext.model_rebuild(_types_namespace=_forward_namespace)
+FlowEvent.model_rebuild(_types_namespace=_forward_namespace)
+ExecutionSnapshot.model_rebuild(_types_namespace=_forward_namespace)
+
 # Follow Python library best practice: attach only a NullHandler so that
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
@@ -109,8 +139,13 @@ logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 __version__ = "0.4.0"
 
 __all__ = [
+    "BaseMiddleware",
     "ChainAnalyzer",
     "ChainWeaverError",
+    "CheckpointDriftError",
+    "CheckpointNotFoundError",
+    "Checkpointer",
+    "CheckpointerNotConfiguredError",
     "CompatibilityIssue",
     "CompilationError",
     "CompilationResult",
@@ -123,19 +158,28 @@ __all__ = [
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
+    "ExecutionSnapshot",
+    "FileCheckpointer",
+    "FileStepCache",
     "FileStore",
     "Flow",
     "FlowAlreadyExistsError",
     "FlowBuilder",
     "FlowBuilderError",
+    "FlowEndContext",
+    "FlowEvent",
     "FlowExecutionError",
     "FlowExecutor",
+    "FlowExecutorMiddleware",
     "FlowNotFoundError",
     "FlowRegistry",
     "FlowSerializationError",
+    "FlowStartContext",
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "InMemoryCheckpointer",
+    "InMemoryStepCache",
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
@@ -147,9 +191,13 @@ __all__ = [
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "StepCache",
+    "StepCacheKey",
     "StepDiff",
+    "StepEndContext",
     "StepPlan",
     "StepRecord",
+    "StepStartContext",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",

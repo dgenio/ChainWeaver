@@ -8,8 +8,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-17
+
+### Changed
+
+- **PR #136 review-feedback fixes** for the executor extensibility
+  stack (#126/#127/#128/#131/#134):
+  - `FileStepCache._file_path` now includes a SHA-256 digest of the
+    original ``tool_name`` in the filename, eliminating a silent
+    cross-tool cache-collision when distinct tool names sanitize to
+    the same form (e.g. ``"foo/bar"`` vs ``"foo_bar"``) and share
+    schemas + inputs.
+  - `FileStepCache.set` is now atomic (``tempfile.mkstemp`` +
+    ``os.replace``), matching the pre-existing ``FileCheckpointer.save``
+    pattern.  Corrupt files left behind by older non-atomic writes
+    are still treated as misses.
+  - `OTelTraceExporter` keeps its open spans in dicts keyed by
+    ``trace_id`` rather than scalar instance attributes, so sharing a
+    single exporter across executors no longer leaks the first
+    flow's parent span.
+  - `FlowExecutor.resume_flow` now raises two typed exceptions
+    inheriting from `ChainWeaverError` — ``CheckpointerNotConfiguredError``
+    and ``CheckpointNotFoundError`` — instead of the previous opaque
+    `ValueError`s.  Both are exported in ``chainweaver.__all__``.
+  - `_datetime_to_ns` in the OTel integration now asserts
+    ``dt.tzinfo is not None`` rather than silently reinterpreting
+    naive datetimes as UTC.
+  - `stream_flow` emits a ``WARNING`` via the ``chainweaver.executor``
+    logger when the consumer breaks out of iteration mid-flow (the
+    background thread still runs to completion — cancellation lands
+    with #80).
+  - ``FlowExecutor`` class docstring now explicitly states the
+    single-thread-per-instance contract; ``InMemoryStepCache`` /
+    ``InMemoryCheckpointer`` docstrings note their dict-backed,
+    no-internal-locking semantics.
+  - ``ExecutionResult.total_duration_ms`` docstring now explains that
+    after a ``resume_flow`` it covers only the resume process's
+    wall-clock (not the elapsed time across the original crash and
+    resume).
+  - Test suite no longer reaches into ``FlowExecutor._middleware``
+    or ``FlowExecutor._tools`` private attributes — uses public
+    ``register_tool`` re-registration and behavioral assertions
+    instead.
+  - New regression test pins the resume-log invariant:
+    ``len(resumed.execution_log) == len(snapshot.execution_log) +
+    steps_remaining``.
+
 ### Added
 
+- **OpenTelemetry trace exporter** (#126): new
+  `chainweaver/integrations/opentelemetry.py` module exposing
+  `OTelTraceExporter` (a `FlowExecutorMiddleware` that emits one
+  parent `chainweaver.flow.{name}` span + one child
+  `chainweaver.tool.{name}` span per `StepRecord`) and
+  `export_result_to_otel(result, tracer=...)` for after-the-fact
+  emission from a completed `ExecutionResult`.  Span attributes
+  carry `chainweaver.trace_id`, `chainweaver.flow_version`,
+  `chainweaver.total_steps`, `chainweaver.step_index`,
+  `chainweaver.tool_name`, `chainweaver.step.success`,
+  `chainweaver.step.duration_ms`, `chainweaver.step.retry_count`,
+  `chainweaver.step.cached`, `chainweaver.step.skipped`, and on
+  failure `chainweaver.step.error_type`; the span status is set to
+  `ERROR` and the message becomes the status description.
+  `chainweaver.step.input_keys` reports the sorted list of input
+  field names (not values — a privacy and cardinality hazard).
+  Pre-resolution failures (tool-not-found / input-mapping) emit a
+  zero-duration step span at `on_step_end` so the failure is still
+  visible.  Optional dependency declared as `chainweaver[otel]`;
+  importing the module without the extra raises a clear
+  `ImportError`.  See `examples/otel_export.py`.
+- **Crash-resume checkpointing** (#128): new `chainweaver/checkpoint.py`
+  module with a `Checkpointer` `typing.Protocol`, an
+  `ExecutionSnapshot` Pydantic model, `InMemoryCheckpointer`
+  (dict-backed), and `FileCheckpointer` (JSON-on-disk, one file per
+  `trace_id`, written atomically via `tempfile.mkstemp` +
+  `os.replace`).  `FlowExecutor.__init__` accepts a `checkpointer=`
+  argument and a `delete_on_success=True` flag; when set, an
+  `ExecutionSnapshot` is written after every successful linear step
+  or DAG level.  New `FlowExecutor.resume_flow(trace_id)` loads a
+  snapshot, validates the recorded flow version and every relevant
+  tool's `schema_hash` against the current registry (mismatches raise
+  the new `CheckpointDriftError`), and continues execution with the
+  original trace id — the resulting `ExecutionResult.execution_log`
+  contains both recovered and freshly executed records.  On terminal
+  success the snapshot is deleted; on failure it is preserved so
+  operators can fix the underlying issue and call `resume_flow`
+  again.  DAG checkpoints live at level boundaries (within a level
+  the steps are replayed from scratch on resume — the simplest
+  correct semantics).  See `examples/checkpoint_resume.py`.
+- **Step-result caching layer** (#127): new `chainweaver/cache.py`
+  module with a `StepCache` `typing.Protocol`, `InMemoryStepCache`
+  (dict-backed), `FileStepCache` (JSON-on-disk, one file per
+  `(tool, schema, input)` triple), and a `StepCacheKey` Pydantic
+  model.  `FlowExecutor.__init__` accepts an optional `step_cache=`
+  argument; when set, eligible step outputs are read from / written
+  to the cache around the step boundary.  Cache keys include the
+  tool's `schema_hash`, so schema changes invalidate entries
+  automatically.  Cache hits skip `Tool.fn` entirely — including
+  retries and `timeout_seconds` — and the resulting record reports
+  `StepRecord.cached=True`.  Cache writes happen *after* output
+  schema validation so invalid output never poisons the cache; on
+  disk, corrupt cache files are treated as misses.  `Tool` gains a
+  `cacheable: bool = True` parameter — set `cacheable=False` for
+  tools with side effects or that read external state to force them
+  to always run.  `replay_flow` always bypasses the cache (replay
+  must always re-execute).
+- **Streaming `stream_flow` generator** (#134): new
+  `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)`
+  method returns a sync `Iterator[FlowEvent]` that yields lifecycle
+  events as the flow runs (`flow_start` → `(step_start, step_end)*` →
+  `flow_end`).  Implementation reuses the lifecycle hook seam from
+  #131 — an internal `_StreamCollectorMiddleware` writes events to a
+  `queue.Queue` from a worker thread.  `flow_end` always fires (even
+  on failure); steps that fail before input resolution emit
+  `step_end` without a preceding `step_start`, matching the
+  middleware lifecycle contract.  `FlowEvent` is a frozen Pydantic
+  model that round-trips through `model_dump_json` /
+  `model_validate_json`.  Sync-variant cancellation is intentionally
+  not supported: if the consumer stops iterating, the background
+  worker runs the flow to completion and exits.  The async variant
+  (`stream_flow_async`) is gated on issue #80.  See
+  `examples/streaming_flow.py`.
+- **Middleware lifecycle seam** (#131): new `chainweaver/middleware.py`
+  module exposing a `FlowExecutorMiddleware` `typing.Protocol` with
+  four hooks — `on_flow_start`, `on_step_start`, `on_step_end`,
+  `on_flow_end` — plus the matching Pydantic context models
+  (`FlowStartContext`, `StepStartContext`, `StepEndContext`,
+  `FlowEndContext`) and an optional `BaseMiddleware` no-op base class.
+  `FlowExecutor` accepts a `middleware=` list and exposes
+  `add_middleware(...)`; hooks fire in registration order at fixed
+  boundaries.  Middleware exceptions are caught and logged at
+  `WARNING` via the `chainweaver.middleware` logger — observability
+  bugs cannot abort a flow execution.  Steps that fail before input
+  resolution (tool-not-found, input-mapping) emit `on_step_end`
+  without a preceding `on_step_start`; every other code path emits
+  the symmetric `start` / `end` pair.  This is the extension point
+  the upcoming OpenTelemetry exporter (#126), step-result cache
+  (#127), `Checkpointer` (#128), and streaming-events generator
+  (#134) will all plug into.  In-tree migration of `log_utils` and
+  cost reporting onto the seam will follow in a separate change.
 - **`Tool.from_flow`** (#24): wrap a registered `Flow` or `DAGFlow` as a
   single `Tool` whose `fn` delegates back to a `FlowExecutor`.  The
   resulting tool is registrable like any other tool, so a compiled flow
@@ -129,5 +266,6 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/dgenio/ChainWeaver/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dgenio/ChainWeaver/releases/tag/v0.4.0

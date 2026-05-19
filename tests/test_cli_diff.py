@@ -176,13 +176,20 @@ class TestDiffDivergent:
         assert exit_code == 1
         payload = json.loads(captured.out)
         assert payload["identical"] is False
-        # final_output diff is populated.
-        assert payload["final_output"]
-        # The single step diff names the diverging step.
+        # Snapshot: exact DeepDiff serialization contract for a scalar change.
+        # DeepDiff names paths as "root['key']" in tree-view mode.
+        assert "values_changed" in payload["final_output"]
+        row_diff = payload["final_output"]["values_changed"]["root['rows']"]
+        assert row_diff["new_value"] == 99
+        assert row_diff["old_value"] == 42
+        # The single step diff names the diverging step with the same shape.
         assert len(payload["steps"]) == 1
         assert payload["steps"][0]["step_index"] == 1
         assert payload["steps"][0]["tool_name"] == "store"
-        assert "outputs" in payload["steps"][0]
+        assert "values_changed" in payload["steps"][0]["outputs"]
+        step_row_diff = payload["steps"][0]["outputs"]["values_changed"]["root['rows']"]
+        assert step_row_diff["new_value"] == 99
+        assert step_row_diff["old_value"] == 42
 
     def test_error_vs_success_divergence(
         self,

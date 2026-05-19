@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.4.0"
+version = "0.5.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -37,6 +37,9 @@ chainweaver = "chainweaver.cli:main"
 yaml = [
     "pyyaml>=6.0",
 ]
+otel = [
+    "opentelemetry-api>=1.20",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -44,6 +47,8 @@ dev = [
     "mypy>=1.0",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
 ]
 
 [project.urls]
