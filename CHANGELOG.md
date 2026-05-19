@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-19
+
+### Added
+
+- **`ChainAnalyzer`** (#77): new `chainweaver/analyzer.py` module with a
+  `ChainAnalyzer` class for offline, static schema-compatibility analysis.
+  Answers three questions: pairwise compatibility
+  (`ChainAnalyzer.compatibility_matrix`), N-step chain enumeration
+  (`ChainAnalyzer.find_chains(max_depth, *, start, end)`), and flow
+  suggestion (`ChainAnalyzer.suggest_flows(...)`) which promotes discovered
+  chains to ready-to-register `Flow` objects with auto-wired
+  `input_mapping`.  The analysis is a pure-Python static pass — no LLM, no
+  network, no randomness.  `ChainAnalyzer` and the `ToolChain` type alias
+  are exported in `chainweaver.__all__`.  See `examples/chain_analyzer.py`.
+- **CLI `run`** (#129): `chainweaver run <file.flow.yaml|json>` executes a
+  flow definition from disk.  Accepts `--tools` (repeatable Python module
+  path to import `Tool` instances from), `--input` (JSON string) or
+  `--input-file` (path to a JSON object file), `--format table|json`, and
+  `--quiet` (suppress all output, communicate result via exit code only).
+  Exit codes: 0 = success, 1 = flow/import failure, 2 = file or module not
+  found.
+- **CLI `profile`** (#147): `chainweaver profile <trace.json>...` analyzes
+  `ExecutionResult` JSON files and surfaces bottlenecks.  Single-file mode
+  renders a per-step duration bar chart with total / step-sum /
+  orchestration-overhead metrics.  Multi-file mode (all files must share
+  `flow_name` and step count) computes p50 / p95 / p99 / mean / stdev per
+  step and flags consistency warnings when stdev exceeds 50 % of mean.
+  Supports `--top N` and `--format table|json`.
+  Exit codes: 0 = ok, 1 = malformed trace or incompatible aggregation,
+  2 = file not found.
+- **CLI `diff`** (#148): `chainweaver diff <a.json> <b.json>` compares two
+  `ExecutionResult` JSON files step-by-step.  Aligns records by position
+  and checks `outputs` / `error_type` / `error_message` / `success`;
+  non-deterministic fields (`trace_id`, timestamps, durations) are ignored
+  by default.  Optional `--perf-tolerance N` (percent) flags per-step
+  duration regressions.  Output uses `deepdiff` for nested-dict semantics.
+  Supports `--format table|json`.
+  Exit codes: 0 = identical, 1 = differs, 2 = file not found or malformed.
+
 ## [0.5.0] - 2026-05-17
 
 ### Changed
