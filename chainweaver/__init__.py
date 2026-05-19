@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
+from chainweaver.analyzer import ChainAnalyzer, ToolChain
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
 from chainweaver.checkpoint import (
@@ -139,6 +140,7 @@ __version__ = "0.4.0"
 
 __all__ = [
     "BaseMiddleware",
+    "ChainAnalyzer",
     "ChainWeaverError",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
@@ -197,6 +199,7 @@ __all__ = [
     "StepRecord",
     "StepStartContext",
     "Tool",
+    "ToolChain",
     "ToolDefinitionError",
     "ToolNotFoundError",
     "ToolOutputSizeError",

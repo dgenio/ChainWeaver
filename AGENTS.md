@@ -42,6 +42,7 @@ chainweaver/
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
+├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
