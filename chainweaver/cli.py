@@ -66,6 +66,7 @@ from types import ModuleType
 from typing import Any
 
 import typer
+from deepdiff import DeepDiff
 
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -864,8 +865,6 @@ def _step_outputs_diff(
     "identical".  ``None`` operands are passed through as-is — DeepDiff
     handles the ``None vs dict`` case correctly.
     """
-    from deepdiff import DeepDiff
-
     diff = DeepDiff(expected, actual, ignore_order=True, view="tree")
     # to_dict() emits a plain, JSON-friendly representation.
     return diff.to_dict() if diff else {}
