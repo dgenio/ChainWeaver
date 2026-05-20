@@ -46,7 +46,12 @@ def _snapshot_symbol(obj: object) -> dict[str, Any]:
         "qualname": getattr(obj, "__qualname__", getattr(obj, "__name__", None)),
     }
 
-    if (inspect.isclass(obj) and not issubclass(obj, Enum)) or inspect.isfunction(obj):
+    if (
+        inspect.isclass(obj)
+        and not isinstance(obj, types.GenericAlias)
+        and not issubclass(obj, Enum)
+        and not issubclass(obj, BaseModel)
+    ) or inspect.isfunction(obj):
         entry["signature"] = _safe_signature(obj)
 
     if _is_pydantic_model(obj):
@@ -62,6 +67,8 @@ def _snapshot_symbol(obj: object) -> dict[str, Any]:
 def _symbol_kind(obj: object) -> str:
     if inspect.ismodule(obj):
         return "module"
+    if isinstance(obj, types.GenericAlias):
+        return type(obj).__name__
     if inspect.isclass(obj):
         if issubclass(obj, Enum):
             return "enum"
@@ -140,6 +147,13 @@ def _annotation_repr(value: object) -> str:
         return "None"
     if value is Any:
         return "Any"
+
+    forward_arg = getattr(value, "__forward_arg__", None)
+    if isinstance(forward_arg, str):
+        public_obj = getattr(chainweaver, forward_arg, None)
+        if public_obj is not None:
+            return _name_or_repr(public_obj)
+        return f"ForwardRef({forward_arg!r})"
 
     origin = get_origin(value)
     args = get_args(value)
