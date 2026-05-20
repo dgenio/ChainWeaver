@@ -43,6 +43,7 @@ chainweaver/
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
+├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
@@ -84,6 +85,7 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 - `FlowExecutor.get_drift_report()` → `list[DriftInfo]`
 - `FlowExecutor.accept_drift(flow_name)` → re-snapshot hashes, restore ACTIVE status
 - `compile_flow(flow, tools)` → `CompilationResult`
+- `attest_flow(flow, executor, n, repeats, seed, seed_inputs=None)` → `AttestationReport` (#154); observed-determinism evidence via N×M execution loop with seeded input generation. Emits a reproducible `aggregate_fingerprint` when all repeats agree.
 
 ---
 

@@ -472,6 +472,7 @@ All errors are typed and traceable:
 | `ToolTimeoutError` | A `Tool` with `timeout_seconds` set exceeds the configured wall-clock cap |
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
+| `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -497,7 +498,7 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with five subcommands:
+ChainWeaver ships a `chainweaver` console script with eight subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
@@ -514,6 +515,15 @@ chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 
 # Inspect a registered flow's structure (table or JSON).
 chainweaver inspect my_flow --format json
+
+# Analyze execution traces for bottlenecks.
+chainweaver profile trace1.json trace2.json
+
+# Compare two execution results step-by-step.
+chainweaver diff a.json b.json
+
+# Observed-determinism attestation: run N inputs × M repeats.
+chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 3
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:
