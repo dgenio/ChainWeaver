@@ -8,6 +8,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Typed step input / output contracts** (#172): `FlowStep` gains
+  optional `input_contract` and `output_contract` fields (each a
+  `"module:qualname"` string ref to a Pydantic `BaseModel` subclass).
+  When set, `FlowExecutor` validates the resolved inputs against
+  `input_contract` *before* the tool runs and the tool's outputs against
+  `output_contract` *after* the tool runs.  Failures surface as
+  `SchemaValidationError` with `context="step_input_contract"` /
+  `"step_output_contract"` and abort the step.  `FlowStep` exposes
+  `resolved_input_contract` / `resolved_output_contract` properties and
+  a `contract_ref_from(cls)` static helper mirroring
+  `Flow.schema_ref_from`.  `DAGFlowStep` inherits both fields; the
+  executor forwards them through the DAG-step proxy.
+- **`Flow.context_schema_ref` / `DAGFlow.context_schema_ref`** (#152):
+  optional class ref to a Pydantic `BaseModel` describing the shape of
+  the accumulated execution context.  The executor validates the final
+  context against the resolved schema at flow end (mirroring
+  `output_schema_ref`).  Primary value is static typing — mypy + IDE
+  autocomplete over a single source of truth for context keys; runtime
+  validation at the flow boundary is a secondary safety net.  Both
+  models expose a lazy `.context_schema` property.
+- **JSON Schema export for flow files** (#135): new `chainweaver/schemas.py`
+  module exposing `flow_schema_json()` which returns a draft-2020-12
+  JSON Schema describing the on-disk `.flow.json` / `.flow.yaml`
+  format.  Derived from the live Pydantic models via
+  `model_json_schema()` so it never drifts from the runtime types.
+  Combined `oneOf` over Flow and DAGFlow discriminated by the existing
+  `type` field; nested `$defs` are merged.  Exported in
+  `chainweaver.__all__`.
+- **CLI `dump-schema`** (#135): `chainweaver dump-schema [--output PATH] [--check]`
+  writes the schema to disk (default stdout) and supports a CI-friendly
+  `--check` mode that fails with exit 1 when the on-disk artifact
+  drifts from the Pydantic source of truth.  Recommended in-repo path:
+  `schemas/flow.schema.json` (now checked in).
+- **SchemaStore submission template** (#139): new
+  `schemas/schemastore-catalog-entry.json` (maintainer-facing payload
+  to drop into SchemaStore/schemastore's `catalog.json`) plus
+  `docs/json-schema.md` documenting the editor setup today (VS Code
+  YAML, JetBrains) and the upstream submission workflow.
+- **`@tool(output_schema=…)` keyword** (#118): the decorator now
+  accepts an explicit `output_schema` parameter so user code can type
+  the function body's return as `dict[str, Any]` without
+  `# type: ignore[return-value]`.  When unset, the existing
+  return-annotation path still works.  Function bodies may now also
+  return a `BaseModel` instance directly; the adapter calls
+  `model_dump()` on the way out.  All 22 `type: ignore[return-value]`
+  suppressions in `tests/test_decorators.py` were removed.
+
 ## [0.7.0] - 2026-05-20
 
 ### Added

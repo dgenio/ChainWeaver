@@ -4,16 +4,32 @@ The :func:`tool` decorator creates a :class:`~chainweaver.tools.Tool` from a
 type-annotated Python function, eliminating the need to manually define
 Pydantic input/output schemas and the ``Tool()`` constructor call.
 
-Example::
+Two complementary forms are supported (issue #118):
 
-    from chainweaver import tool
+1. **Annotated return** — type the function's return as a
+   :class:`~pydantic.BaseModel` subclass.  The decorator extracts the
+   output schema from the annotation::
 
-    class ValueOutput(BaseModel):
-        value: int
+       class ValueOutput(BaseModel):
+           value: int
 
-    @tool(description="Doubles a number.")
-    def double(number: int) -> ValueOutput:
-        return {"value": number * 2}
+       @tool(description="Doubles a number.")
+       def double(number: int) -> ValueOutput:
+           return ValueOutput(value=number * 2)
+
+2. **Explicit ``output_schema=``** — declare the output schema as a
+   keyword to the decorator.  The function is then free to type its
+   return as ``dict[str, Any]`` (or anything compatible with
+   ``output_schema.model_validate``) without triggering a mypy
+   ``[return-value]`` error::
+
+       @tool(output_schema=ValueOutput)
+       def double(number: int) -> dict[str, Any]:
+           return {"value": number * 2}
+
+When both an explicit ``output_schema=`` and a ``BaseModel`` return
+annotation are given the explicit kwarg wins; the annotation is used as
+a tie-breaker only when ``output_schema`` is omitted.
 """
 
 from __future__ import annotations
@@ -64,6 +80,7 @@ def _build_tool(
     *,
     name: str | None,
     description: str | None,
+    output_schema: type[BaseModel] | None,
 ) -> _DecoratedTool:
     """Build a :class:`_DecoratedTool` from a type-annotated function."""
     tool_name = name if name is not None else fn.__name__
@@ -80,24 +97,35 @@ def _build_tool(
         ) from exc
     sig = inspect.signature(fn)
 
-    # -- Validate return type -----------------------------------------------
-    return_type = hints.get("return")
-    if return_type is None:
-        raise ToolDefinitionError(
-            fn.__name__,
-            "Missing a return type annotation. "
-            "The return type must be a BaseModel subclass. "
-            "Use the explicit Tool() constructor for functions without full type hints.",
-        )
+    # -- Resolve output schema (issue #118) ---------------------------------
+    # Explicit ``output_schema=`` wins.  Otherwise, fall back to the
+    # function's return annotation, which must be a BaseModel subclass.
+    resolved_output_schema: type[BaseModel]
+    if output_schema is not None:
+        if not (isinstance(output_schema, type) and issubclass(output_schema, BaseModel)):
+            raise ToolDefinitionError(
+                fn.__name__,
+                f"output_schema must be a BaseModel subclass, got '{output_schema!r}'.",
+            )
+        resolved_output_schema = output_schema
+    else:
+        return_type = hints.get("return")
+        if return_type is None:
+            raise ToolDefinitionError(
+                fn.__name__,
+                "Missing a return type annotation. "
+                "Either annotate the return type as a BaseModel subclass "
+                "or pass output_schema=... to the decorator.",
+            )
 
-    if not (isinstance(return_type, type) and issubclass(return_type, BaseModel)):
-        raise ToolDefinitionError(
-            fn.__name__,
-            f"Return type must be a BaseModel subclass, got '{return_type}'. "
-            f"Use the explicit Tool() constructor for functions without full type hints.",
-        )
+        if not (isinstance(return_type, type) and issubclass(return_type, BaseModel)):
+            raise ToolDefinitionError(
+                fn.__name__,
+                f"Return type must be a BaseModel subclass, got '{return_type}'. "
+                f"Pass output_schema=... explicitly if the function returns a dict.",
+            )
 
-    output_schema = return_type
+        resolved_output_schema = return_type
 
     # -- Build input schema fields ------------------------------------------
     fields: dict[str, Any] = {}
@@ -137,15 +165,26 @@ def _build_tool(
     input_schema: type[BaseModel] = create_model(f"{tool_name}_input", **fields)
 
     # -- Create adapter for Tool.fn signature --------------------------------
+    # The adapter accepts a Pydantic model, projects it back to **kwargs
+    # for the user's function, and trusts ``Tool.run`` to validate the
+    # returned dict against ``resolved_output_schema``.  Callers may
+    # return either a dict OR a BaseModel — Pydantic accepts both via
+    # ``model_validate`` (see ``Tool.run``).
     def _adapter(inp: Any) -> dict[str, Any]:
-        return fn(**inp.model_dump())  # type: ignore[no-any-return]
+        result = fn(**inp.model_dump())
+        if isinstance(result, BaseModel):
+            return result.model_dump()
+        # Trust the caller: ``Tool.run`` re-validates via
+        # ``output_schema.model_validate(raw_output)`` so any non-dict
+        # / non-BaseModel return is rejected with a clear ValidationError.
+        return result  # type: ignore[no-any-return]
 
     return _DecoratedTool(
         original_fn=fn,
         name=tool_name,
         description=tool_description,
         input_schema=input_schema,
-        output_schema=output_schema,
+        output_schema=resolved_output_schema,
         fn=_adapter,
     )
 
@@ -159,6 +198,7 @@ def tool(
     *,
     name: str | None = ...,
     description: str | None = ...,
+    output_schema: type[BaseModel] | None = ...,
 ) -> Callable[[Callable[..., Any]], _DecoratedTool]: ...
 
 
@@ -167,6 +207,7 @@ def tool(
     *,
     name: str | None = None,
     description: str | None = None,
+    output_schema: type[BaseModel] | None = None,
 ) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]:
     """Create a :class:`~chainweaver.tools.Tool` from a type-annotated function.
 
@@ -178,11 +219,17 @@ def tool(
         @tool
         def greet(name: str) -> GreetOutput:
             \"\"\"Say hello.\"\"\"
-            return {"message": f"Hello, {name}!"}
+            return GreetOutput(message=f"Hello, {name}!")
 
         @tool(name="custom_double", description="Doubles a number.")
         def double(number: int) -> ValueOutput:
-            return {"value": number * 2}
+            return ValueOutput(value=number * 2)
+
+        @tool(output_schema=ValueOutput)
+        def triple(number: int) -> dict[str, Any]:
+            # Returning a dict is mypy-clean when ``output_schema`` is
+            # passed explicitly — no ``# type: ignore`` needed.
+            return {"value": number * 3}
 
     Args:
         fn: The function to wrap (used when the decorator is applied without
@@ -190,19 +237,25 @@ def tool(
         name: Override the tool name.  Defaults to the function name.
         description: Tool description.  Falls back to the function's docstring
             if not provided.
+        output_schema: Explicit output schema.  When set, the function may
+            type its return as ``dict[str, Any]`` (or any other type
+            compatible with ``output_schema.model_validate``).  When unset,
+            the decorator falls back to the function's return annotation,
+            which must be a :class:`~pydantic.BaseModel` subclass.
 
     Returns:
         A :class:`~chainweaver.tools.Tool` that is also directly callable with
         the original function's signature.
 
     Raises:
-        ToolDefinitionError: When type hints are missing or the return type is
+        ToolDefinitionError: When type hints are missing, when no output
+            schema can be derived, or when the resolved output schema is
             not a :class:`~pydantic.BaseModel` subclass.
     """
     if fn is not None:
-        return _build_tool(fn, name=name, description=description)
+        return _build_tool(fn, name=name, description=description, output_schema=output_schema)
 
     def _decorator(fn: Callable[..., Any]) -> _DecoratedTool:
-        return _build_tool(fn, name=name, description=description)
+        return _build_tool(fn, name=name, description=description, output_schema=output_schema)
 
     return _decorator

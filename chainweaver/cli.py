@@ -26,6 +26,9 @@ Available commands
 - ``chainweaver attest <flow>`` — observed-determinism attestation:
   run a flow N x M times and emit a reproducible JSON artifact
   (issue #154).
+- ``chainweaver dump-schema`` — emit the JSON Schema for
+  ``.flow.json`` / ``.flow.yaml`` files derived from the live Pydantic
+  models; supports ``--check`` for CI drift detection (issue #135).
 
 Programmatic registration entry point
 -------------------------------------
@@ -1211,6 +1214,91 @@ def attest_command(
 
     if not report.observed_deterministic:
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# ``chainweaver dump-schema`` (issue #135)
+# ---------------------------------------------------------------------------
+
+
+_DUMP_SCHEMA_OUTPUT_OPTION = typer.Option(
+    None,
+    "--output",
+    "-o",
+    help=(
+        "Write the JSON Schema to this path. Default: stdout. "
+        "Recommended path inside the repo: 'schemas/flow.schema.json'."
+    ),
+)
+_DUMP_SCHEMA_CHECK_OPTION = typer.Option(
+    False,
+    "--check",
+    help=(
+        "Do not write anything. Exit 0 if the file at --output already "
+        "matches the current schema, 1 if it would change. Useful as a "
+        "CI guard to make sure the checked-in schema stays in sync with "
+        "the Pydantic source of truth."
+    ),
+)
+
+
+@app.command("dump-schema")
+def dump_schema_command(
+    output: Path | None = _DUMP_SCHEMA_OUTPUT_OPTION,
+    check: bool = _DUMP_SCHEMA_CHECK_OPTION,
+) -> None:
+    """Emit the JSON Schema for ``.flow.json`` / ``.flow.yaml`` files.
+
+    Derived from the Pydantic models in :mod:`chainweaver.flow` via
+    :func:`chainweaver.schemas.flow_schema_json`. Editors that consume
+    JSON Schema (VS Code via ``redhat.vscode-yaml``, JetBrains, etc.)
+    get autocomplete, hover docs, and inline validation for flow files
+    once they point ``yaml.schemas`` (or equivalent) at the published
+    schema URL.
+
+    Exit codes:
+
+    - ``0`` — schema written / printed successfully, or (with
+      ``--check``) the on-disk file already matches.
+    - ``1`` — (with ``--check``) the file would change, or
+      ``--output`` could not be written.
+    - ``2`` — ``--check`` requires ``--output``.
+    """
+    from chainweaver.schemas import flow_schema_json
+
+    schema_dict = flow_schema_json()
+    rendered = json.dumps(schema_dict, indent=2, sort_keys=True) + "\n"
+
+    if check:
+        if output is None:
+            typer.echo("chainweaver: --check requires --output PATH.", err=True)
+            raise typer.Exit(code=2)
+        if not output.exists():
+            typer.echo(
+                f"chainweaver: schema file '{output}' does not exist. "
+                "Run `chainweaver dump-schema --output {path}` to create it.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        existing = output.read_text(encoding="utf-8")
+        if existing != rendered:
+            typer.echo(
+                f"chainweaver: schema file '{output}' is out of date. "
+                "Re-run `chainweaver dump-schema --output {path}` and commit "
+                "the result.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo(f"chainweaver: schema file '{output}' is up to date.")
+        return
+
+    if output is None:
+        typer.echo(rendered, nl=False)
+        return
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(rendered, encoding="utf-8")
+    typer.echo(f"chainweaver: wrote schema to '{output}'.")
 
 
 def _attest_report_to_table(report: AttestationReport) -> str:

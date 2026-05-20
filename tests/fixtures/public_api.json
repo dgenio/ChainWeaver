@@ -75,6 +75,7 @@
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
@@ -88,7 +89,7 @@
   ],
   "python_version": [
     3,
-    14
+    11
   ],
   "symbols": {
     "AttestationInputError": {
@@ -220,6 +221,7 @@
     "DAGFlow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
         "input_schema_ref": "str | NoneType",
@@ -233,15 +235,17 @@
       },
       "module": "chainweaver.flow",
       "qualname": "DAGFlow",
-      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.DAGFlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
+      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.DAGFlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, context_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
     },
     "DAGFlowStep": {
       "kind": "pydantic-model",
       "model_fields": {
         "capability_id": "str | NoneType",
         "depends_on": "list[str]",
+        "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
+        "output_contract": "str | NoneType",
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
         "step_id": "str",
         "step_type": "Literal['tool', 'capability']",
@@ -249,7 +253,7 @@
       },
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep",
-      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail', step_id: str, depends_on: list[str] = <factory>, step_type: Literal['tool', 'capability'] = 'tool', capability_id: str | NoneType = None) -> None"
+      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail', input_contract: str | NoneType = None, output_contract: str | NoneType = None, step_id: str, depends_on: list[str] = <factory>, step_type: Literal['tool', 'capability'] = 'tool', capability_id: str | NoneType = None) -> None"
     },
     "DriftInfo": {
       "kind": "class",
@@ -327,6 +331,7 @@
     "Flow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
         "input_schema_ref": "str | NoneType",
@@ -340,7 +345,7 @@
       },
       "module": "chainweaver.flow",
       "qualname": "Flow",
-      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.FlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
+      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.FlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, context_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
     },
     "FlowAlreadyExistsError": {
       "kind": "class",
@@ -455,14 +460,16 @@
     "FlowStep": {
       "kind": "pydantic-model",
       "model_fields": {
+        "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
+        "output_contract": "str | NoneType",
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
         "tool_name": "str"
       },
       "module": "chainweaver.flow",
       "qualname": "FlowStep",
-      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail') -> None"
+      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail', input_contract: str | NoneType = None, output_contract: str | NoneType = None) -> None"
     },
     "InMemoryCheckpointer": {
       "kind": "class",
@@ -749,6 +756,12 @@
       "qualname": "flow_from_yaml",
       "signature": "(data: str) -> AnyFlow"
     },
+    "flow_schema_json": {
+      "kind": "function",
+      "module": "chainweaver.schemas",
+      "qualname": "flow_schema_json",
+      "signature": "() -> dict[str, Any]"
+    },
     "flow_to_ascii": {
       "kind": "function",
       "module": "chainweaver.viz",
@@ -801,7 +814,7 @@
       "kind": "function",
       "module": "chainweaver.decorators",
       "qualname": "tool",
-      "signature": "(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
+      "signature": "(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None, output_schema: type[BaseModel] | None = None) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
     },
     "validate_dag_topology": {
       "kind": "function",
