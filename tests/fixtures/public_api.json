@@ -86,6 +86,10 @@
     "tool",
     "validate_dag_topology"
   ],
+  "python_version": [
+    3,
+    14
+  ],
   "symbols": {
     "AttestationInputError": {
       "kind": "class",

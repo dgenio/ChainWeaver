@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 import types
 from collections.abc import Mapping, Sequence
 from dataclasses import fields, is_dataclass
@@ -23,6 +24,7 @@ def build_public_api_snapshot() -> Snapshot:
     public_names = sorted(chainweaver.__all__)
     return {
         "__all__": public_names,
+        "python_version": list(sys.version_info[:2]),
         "symbols": {name: _snapshot_symbol(getattr(chainweaver, name)) for name in public_names},
     }
 
