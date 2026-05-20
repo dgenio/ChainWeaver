@@ -54,7 +54,7 @@ from datetime import datetime, timezone
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from chainweaver.exceptions import ChainWeaverError
 from chainweaver.executor import ExecutionResult, FlowExecutor
@@ -87,6 +87,14 @@ class AttestationInputError(ChainWeaverError):
 # ---------------------------------------------------------------------------
 # Input generator (seeded, stdlib-only)
 # ---------------------------------------------------------------------------
+
+
+class _UnsupportedAnnotation(Exception):
+    """Internal: raised when _generate_value cannot handle an annotation."""
+
+    def __init__(self, annotation_repr: str) -> None:
+        self.annotation_repr = annotation_repr
+        super().__init__(annotation_repr)
 
 
 def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -> Any:
@@ -151,7 +159,7 @@ def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -
             for name, info in annotation.model_fields.items()
         }
 
-    return None
+    raise _UnsupportedAnnotation(repr(annotation))
 
 
 def _generate_inputs(
@@ -176,9 +184,18 @@ def _generate_inputs(
                 payload[name] = _generate_value(info.annotation, rng)
             except RecursionError as exc:
                 raise AttestationInputError(name, repr(info.annotation)) from exc
+            except _UnsupportedAnnotation as exc:
+                raise AttestationInputError(name, exc.annotation_repr) from exc
         # Validate by constructing the model; .model_dump() normalizes.
         try:
             validated = schema(**payload)
+        except ValidationError as exc:
+            errors = exc.errors()
+            field_name = ".".join(str(loc) for loc in errors[0]["loc"]) if errors else "?"
+            raise AttestationInputError(
+                field_name,
+                f"validation failed for generated payload: {errors[0]['msg']}",
+            ) from exc
         except Exception as exc:
             raise AttestationInputError(
                 "?", f"validation failed for generated payload: {exc}"
@@ -194,7 +211,13 @@ def _generate_inputs(
 
 def _canonical_json(payload: object) -> str:
     """Return a stable, attestation-friendly JSON encoding of *payload*."""
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+    def _stable_default(obj: object) -> Any:
+        if isinstance(obj, (set, frozenset)):
+            return sorted(obj, key=str)
+        return str(obj)
+
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_stable_default)
 
 
 def _hash(text: str) -> str:
@@ -249,6 +272,9 @@ class AttestationReport(BaseModel):
         aggregate_fingerprint: SHA-256 over the sorted concatenation of
             each input's per-input fingerprint.  Reproducible: re-running
             with the same flow, tools, and seed yields the same value.
+            Only meaningful when ``observed_deterministic`` is ``True``;
+            when divergences exist, the fingerprint covers only the
+            passing subset and should not be used for comparison.
         divergences: One entry per input that disagreed across repeats,
             naming the diverging step where possible.
     """

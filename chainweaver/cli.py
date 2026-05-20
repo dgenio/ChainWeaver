@@ -66,7 +66,7 @@ import sys
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -81,6 +81,9 @@ from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml
 from chainweaver.tools import Tool
 from chainweaver.viz import _render_step_bar_chart, flow_to_ascii, flow_to_dot
+
+if TYPE_CHECKING:
+    from chainweaver.attest import AttestationReport
 
 app = typer.Typer(
     name="chainweaver",
@@ -1212,7 +1215,7 @@ def attest_command(
         raise typer.Exit(code=1)
 
 
-def _attest_report_to_table(report: Any) -> str:
+def _attest_report_to_table(report: AttestationReport) -> str:
     """Render an :class:`AttestationReport` for terminal display."""
     status = "PASS ✓" if report.observed_deterministic else "FAIL ✗"
     lines = [
