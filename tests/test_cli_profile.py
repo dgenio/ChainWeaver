@@ -285,6 +285,31 @@ class TestProfileMulti:
         assert exit_code == 1
         assert "different step counts" in captured.err
 
+    def test_mismatched_tool_at_step_returns_one(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Same step count, but trace B uses a different tool at index 1.
+        # Without the guard, aggregates would be silently mislabelled
+        # under whichever name the first trace happened to record.
+        path_a = tmp_path / "a.json"
+        path_b = tmp_path / "b.json"
+        _write_trace(
+            path_a,
+            _make_result(durations=[("fetch", 40.0), ("store", 20.0)]),
+        )
+        _write_trace(
+            path_b,
+            _make_result(durations=[("fetch", 40.0), ("archive", 20.0)]),
+        )
+        exit_code = cli.main(["profile", str(path_a), str(path_b)])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "disagree on tool at step 1" in captured.err
+        assert "archive" in captured.err
+        assert "store" in captured.err
+
     def test_consistency_warning_surfaces(
         self,
         tmp_path: Path,

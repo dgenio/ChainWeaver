@@ -153,12 +153,16 @@ def _annotation_repr(value: object) -> str:
     # whether Pydantic has *resolved* them depends on what other tests
     # have run in the same process — which made the snapshot order-
     # dependent.  Normalise via the public ``__all__`` surface so the
-    # rendered annotation is the resolved class either way.
+    # rendered annotation is the resolved class either way; restrict the
+    # lookup to exported symbols so we never accidentally surface a
+    # private/internal name that happens to share an attribute slot on
+    # the ``chainweaver`` module.
     forward_arg = getattr(value, "__forward_arg__", None)
     if isinstance(forward_arg, str):
-        public_obj = getattr(chainweaver, forward_arg, None)
-        if public_obj is not None:
-            return _name_or_repr(public_obj)
+        if forward_arg in chainweaver.__all__:
+            public_obj = getattr(chainweaver, forward_arg, None)
+            if public_obj is not None:
+                return _name_or_repr(public_obj)
         return f"ForwardRef({forward_arg!r})"
 
     origin = get_origin(value)

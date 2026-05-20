@@ -855,6 +855,19 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
     for step_index in range(step_count):
         per_step_records = [r.execution_log[step_index] for r in results]
         durations = [rec.duration_ms for rec in per_step_records]
+        # Guard: every trace must use the same tool at this step_index,
+        # otherwise the aggregated metrics would be silently mixed under
+        # whichever name the first trace happened to record.  Matches the
+        # mismatched-step-count guard above.
+        tool_names_here = {rec.tool_name for rec in per_step_records}
+        if len(tool_names_here) > 1:
+            typer.echo(
+                f"chainweaver: traces disagree on tool at step {step_index}: "
+                f"{sorted(tool_names_here)}. Aggregation requires identical "
+                "step-to-tool wiring across all traces.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         tool_name = per_step_records[0].tool_name
         all_success = all(rec.success for rec in per_step_records)
         stats = _percentiles(durations)
@@ -1326,10 +1339,12 @@ def doctor_command(
     Exit codes:
 
     - ``0`` — no drift detected for any flow.
-    - ``1`` — drift detected for at least one flow, malformed flow file,
-      or no ``--check-drift`` mode was selected.
-    - ``2`` — *path* not found / not a flow file or directory, or a
-      ``--tools`` module is not importable.
+    - ``1`` — drift detected for at least one flow, an unreadable /
+      malformed / unrecognised-extension flow file (surfaced under
+      ``load_errors`` in the JSON payload), or no ``--check-drift``
+      mode was selected.
+    - ``2`` — *path* itself does not exist, is neither a file nor a
+      directory, or a ``--tools`` module is not importable.
     """
     if not check_drift:
         typer.echo(

@@ -80,10 +80,12 @@ def _write_double_tools_module(
     )
     # Drop any cached version so subsequent imports see the latest contents.
     sys.modules.pop(module_name, None)
-    # Recompute the current fingerprint the way ``Tool.schema_hash`` does:
-    # SHA-256 of the input-schema's canonical JSON + the output's, joined.
-    # We compute it here so callers can build flows with either matching
-    # or stale ``tool_schema_hashes`` deterministically.
+    # Return the live Tool's ``schema_hash`` so callers can build flows
+    # with either a matching or a stale ``tool_schema_hashes`` snapshot
+    # deterministically.  ``Tool.schema_hash`` is the SHA-256 of the
+    # concatenated ``input_schema_hash`` + ``output_schema_hash``
+    # (each itself a SHA-256-derived fingerprint of the model's JSON
+    # Schema); we just read it back rather than recomputing.
     import importlib
 
     mod = importlib.import_module(module_name)
