@@ -65,9 +65,23 @@ tests/
 ├── helpers.py         Shared Pydantic schemas and tool functions
 ├── test_*.py          Test files
 examples/
-└── simple_linear_flow.py   Runnable standalone usage example
-pyproject.toml             Ruff, mypy, pytest config (source of truth for tooling)
-.github/workflows/         CI (ci.yml) and publish (publish.yml) pipelines
+├── simple_linear_flow.py    Runnable standalone usage example
+├── coding_agent_*.py        Coding-agent workflow templates (#173): PR review, changelog, debug-log triage
+├── cookbook/                Paired scripts for docs/cookbook/ recipes (#146)
+└── (other domain-specific demos)
+docs/
+├── index.md                 Hosted-site landing page
+├── boundaries.md            Fit / non-fit guidance (#169)
+├── comparisons.md           vs LangChain / Prefect / Dagster / Temporal / LangGraph (#141)
+├── data-integrity.md        Five formal guarantees for compiled flow execution (#104)
+├── cookbook/                Six runnable recipes for the hosted docs site (#146)
+├── getting-started/, concepts/, reference/   Hosted-site nav sections (#133)
+├── cli.md, security.md, versioning-policy.md, v1-release-criteria.md
+└── agent-context/           Agent-specific deep-dive docs
+mkdocs.yml                   MkDocs Material site config (#133)
+.readthedocs.yaml            Read the Docs build config (#133)
+pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
+.github/workflows/           CI (ci.yml) and publish (publish.yml) pipelines
 ```
 
 ### Key entry points

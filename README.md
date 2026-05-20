@@ -38,7 +38,7 @@ result = executor.execute_flow("calc", {"number": 5})
 
 > See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
 
-**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Roadmap](#roadmap)**
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
 
 ---
 
@@ -95,6 +95,48 @@ Think of it as the difference between an **interpreter** and a **compiler**:
 | Schema validation | Ad-hoc / none | Pydantic enforced |
 | Observability | Prompt logs only | Structured step logs |
 | Reusability | Prompt templates | Registered, versioned flows |
+
+---
+
+## Is this for me?
+
+ChainWeaver is built for one specific shape of problem. The
+[full fit/non-fit page](https://chainweaver.readthedocs.io/en/latest/boundaries/) covers
+the nuances; the short version:
+
+**Use ChainWeaver when**
+
+- The chain is predictable — you can name the next tool from the previous output
+  without asking a model to decide.
+- Determinism matters — same input must produce the same output, same execution path,
+  same trace.
+- You want strict schemas, audit-grade traces, and zero LLM calls between deterministic
+  steps.
+
+**Don't use ChainWeaver when**
+
+- Every step requires open-ended reasoning to pick the next one (use an agent
+  framework: LangGraph, the OpenAI / Anthropic SDK tool-use loops).
+- You need a general workflow engine for scheduled / durable jobs across time
+  (use Prefect, Dagster, or Temporal).
+- You expect the executor to call an LLM. It deliberately doesn't.
+
+### How ChainWeaver relates to neighbours
+
+| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
+|---|---|---|---|---|---|---|
+| LLM-free between steps (by design) | **Yes** | No | N/A | N/A | N/A | No |
+| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
+| Single-dep install | **Yes** | No | No | No | No | No |
+| File-serializable flow definitions | **Yes** (JSON / YAML) | No | Python | Python | Python | No |
+| Standalone (no server / scheduler) | **Yes** | Yes | No | No | No | Yes |
+| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
+| Graph branches on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
+
+The full one-paragraph-per-tool comparison lives at
+[docs/comparisons.md](docs/comparisons.md) and on the
+[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/). Re-evaluated
+on each minor release of any of the projects above.
 
 ---
 

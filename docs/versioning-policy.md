@@ -62,7 +62,7 @@ The public API is everything exported from `chainweaver/__init__.py`
    raised at first use via `warnings.warn(..., DeprecationWarning,
    stacklevel=2)` and document the replacement in its docstring.
 2. **List.**  Add an entry to the relevant
-   `## [x.y.z] - YYYY-MM-DD` section of [CHANGELOG.md](../CHANGELOG.md)
+   `## [x.y.z] - YYYY-MM-DD` section of [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md)
    under `### Deprecated`.
 3. **Retain.**  Keep the deprecated API functional for at least one
    minor release before removal.  For pre-1.0 releases this window may
@@ -102,7 +102,7 @@ by serialized flows **must** live at module top level.
 
 ## Tracking changes
 
-Every release adds a section to [CHANGELOG.md](../CHANGELOG.md) following
+Every release adds a section to [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md) following
 the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) convention.
 PRs that introduce user-visible changes are expected to add an
 `Unreleased` entry in the same commit; release tagging promotes the
