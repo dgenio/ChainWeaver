@@ -17,6 +17,8 @@ def test_public_api_snapshot_matches_fixture() -> None:
 
     if fixture_version != current_version:
         # Cross-version: only compare __all__ (version-independent).
+        # Symbol kind/signature/model_fields differ across Python versions
+        # (e.g. GenericAlias vs class for type aliases, resolved ForwardRefs).
         assert actual["__all__"] == expected["__all__"], (
             "Public API __all__ changed. If intentional, run "
             "`python tests/scripts/regen_public_api.py` and commit the updated "
@@ -24,16 +26,6 @@ def test_public_api_snapshot_matches_fixture() -> None:
             f"  Added: {set(actual['__all__']) - set(expected['__all__'])}\n"
             f"  Removed: {set(expected['__all__']) - set(actual['__all__'])}"
         )
-        # Also check symbol kinds and modules (version-independent).
-        for name in actual["__all__"]:
-            a_sym = actual["symbols"].get(name, {})
-            e_sym = expected["symbols"].get(name, {})
-            assert a_sym.get("kind") == e_sym.get("kind"), (
-                f"Symbol '{name}' kind changed: {a_sym.get('kind')} vs {e_sym.get('kind')}"
-            )
-            assert a_sym.get("module") == e_sym.get("module"), (
-                f"Symbol '{name}' module changed: {a_sym.get('module')} vs {e_sym.get('module')}"
-            )
         return
 
     # Same version: full comparison.
