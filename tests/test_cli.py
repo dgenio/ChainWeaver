@@ -775,3 +775,52 @@ class TestRunCommand:
         assert exit_code == 1
         # FlowSerializationError surfaces via stderr.
         assert captured.err
+
+    def test_quiet_with_failing_flow(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--quiet suppresses all output (stdout and stderr) even on failure."""
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        # No --tools: flow will fail with ToolNotRegisteredError ('double' not registered).
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--input",
+                '{"number": 1}',
+                "--quiet",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_json_format_failure_exits_one(
+        self,
+        _module_sys_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--format json on a failing flow emits success:false JSON and exits 1."""
+        flow_path = _module_sys_path / "run.flow.yaml"
+        _write_runnable_flow(flow_path)
+        # No --tools: flow will fail with ToolNotRegisteredError.
+        exit_code = cli.main(
+            [
+                "run",
+                str(flow_path),
+                "--input",
+                '{"number": 1}',
+                "--format",
+                "json",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        payload = json.loads(captured.out)
+        assert payload["success"] is False
+        assert payload["final_output"] is None
+        assert len(payload["execution_log"]) >= 1

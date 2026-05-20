@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import statistics
 import sys
 from enum import Enum
 from pathlib import Path
@@ -69,6 +70,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import typer
+from deepdiff import DeepDiff
 
 from chainweaver.exceptions import (
     ChainWeaverError,
@@ -577,9 +579,12 @@ def run_command(
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    if quiet:
+        raise typer.Exit(code=0 if result.success else 1)
+
     if not result.success:
         # Surface the first failing step to stderr so CI / scripts can grep
-        # without parsing the table output. Mirrors validate/check style.
+        # without parsing the table output.
         for record in result.execution_log:
             if not record.success:
                 typer.echo(
@@ -588,9 +593,6 @@ def run_command(
                     err=True,
                 )
                 break
-
-    if quiet:
-        raise typer.Exit(code=0 if result.success else 1)
 
     if output_format is OutputFormat.JSON:
         _emit_json(json.loads(result.model_dump_json()))
@@ -628,8 +630,6 @@ def _percentiles(values: list[float]) -> dict[str, float]:
     collapse to that value and ``stdev`` is ``0.0``.  Returns zeros for
     an empty input — caller decides whether that is meaningful.
     """
-    import statistics
-
     if not values:
         return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "mean": 0.0, "stdev": 0.0}
     if len(values) == 1:
@@ -641,7 +641,7 @@ def _percentiles(values: list[float]) -> dict[str, float]:
         "p95": _quantile(sorted_vals, 0.95),
         "p99": _quantile(sorted_vals, 0.99),
         "mean": float(statistics.fmean(sorted_vals)),
-        "stdev": float(statistics.pstdev(sorted_vals)),
+        "stdev": float(statistics.stdev(sorted_vals)),
     }
 
 
@@ -870,8 +870,6 @@ def _step_outputs_diff(
     "identical".  ``None`` operands are passed through as-is — DeepDiff
     handles the ``None vs dict`` case correctly.
     """
-    from deepdiff import DeepDiff
-
     diff = DeepDiff(expected, actual, ignore_order=True, view="tree")
     # to_dict() emits a plain, JSON-friendly representation.
     return diff.to_dict() if diff else {}

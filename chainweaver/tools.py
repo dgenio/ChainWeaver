@@ -108,6 +108,7 @@ class Tool:
         timeout_seconds: float | None = None,
         max_output_size: int | None = None,
         schema_version: str = "0.0.0",
+        cacheable: bool = True,
     ) -> None:
         self.name = name
         self.description = description
@@ -117,6 +118,13 @@ class Tool:
         self.timeout_seconds = timeout_seconds
         self.max_output_size = max_output_size
         self.schema_version = schema_version
+        # ``cacheable`` controls whether ``FlowExecutor``'s step cache
+        # (issue #127) is allowed to memoize this tool's outputs.
+        # Default ``True`` keeps the convenient "drop in a cache and it
+        # works for pure tools" experience; mark side-effecting or
+        # external-state-reading tools ``cacheable=False`` so they
+        # always run.  Has no effect when no step cache is configured.
+        self.cacheable = cacheable
 
     @cached_property
     def input_schema_hash(self) -> str:

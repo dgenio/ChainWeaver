@@ -114,9 +114,8 @@ class ChainAnalyzer:
         {'double': ['add_ten', 'format_result'], 'add_ten': ['format_result'],
          'format_result': []}
         >>> analyzer.find_chains(max_depth=2)
-        [('double',), ('add_ten',), ('format_result',),
-         ('double', 'add_ten'), ('double', 'format_result'),
-         ('add_ten', 'format_result')]
+        [('double',), ('double', 'add_ten'), ('double', 'format_result'),
+         ('add_ten',), ('add_ten', 'format_result'), ('format_result',)]
     """
 
     def __init__(self, tools: Iterable[Tool]) -> None:
