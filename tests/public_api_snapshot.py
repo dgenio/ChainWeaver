@@ -46,7 +46,7 @@ def _snapshot_symbol(obj: object) -> dict[str, Any]:
         "qualname": getattr(obj, "__qualname__", getattr(obj, "__name__", None)),
     }
 
-    if inspect.isclass(obj) or inspect.isfunction(obj):
+    if (inspect.isclass(obj) and not issubclass(obj, Enum)) or inspect.isfunction(obj):
         entry["signature"] = _safe_signature(obj)
 
     if _is_pydantic_model(obj):

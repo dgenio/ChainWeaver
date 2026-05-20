@@ -271,8 +271,7 @@
     "FlowStatus": {
       "kind": "enum",
       "module": "chainweaver.flow",
-      "qualname": "FlowStatus",
-      "signature": "(*values)"
+      "qualname": "FlowStatus"
     },
     "FlowStatusError": {
       "kind": "class",
@@ -357,8 +356,7 @@
     "ReplayMode": {
       "kind": "enum",
       "module": "chainweaver.executor",
-      "qualname": "ReplayMode",
-      "signature": "(*values)"
+      "qualname": "ReplayMode"
     },
     "ReplayResult": {
       "kind": "pydantic-model",
