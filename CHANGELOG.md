@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-20
+
+### Added
+
+- **Observed-determinism attestation** (#154): new `chainweaver/attest.py`
+  module exposing `attest_flow(flow, executor, n, repeats, seed,
+  seed_inputs=None)` → `AttestationReport`.  Runs a flow N×M times with
+  seeded inputs and verifies that every repeat for a given input produces
+  identical `final_output`.  Emits a reproducible `aggregate_fingerprint`
+  when all repeats agree; sets `observed_deterministic=False` on the first
+  divergence.  Input synthesis covers `int`, `float`, `bool`, `str`,
+  `list[...]`, `dict`, `Literal[...]`, `Optional[X]`, and nested Pydantic
+  `BaseModel` subclasses; unsupported annotations raise the new
+  `AttestationInputError`.  The private `random.Random(seed)` instance used
+  for input generation never touches the global random state, preserving
+  the executor's randomness-free invariant.  `attest_flow`,
+  `AttestationReport`, and `AttestationInputError` are exported in
+  `chainweaver.__all__`.
+- **CLI `attest`** (#154): `chainweaver attest <file.flow.yaml|json>`
+  runs observed-determinism attestation from the command line.  Accepts
+  `--tools` (repeatable Python module path), `--runs N` (number of seeded
+  inputs, default 3), `--repeats M` (executions per input, default 3),
+  `--seed` (integer seed for reproducibility), `--seed-input` (path to a
+  JSON object used as the single seed input), and `--format json|table`.
+  Default output is the full attestation JSON artifact; `table` prints a
+  compact human-readable summary.  Exit codes: 0 = observed deterministic,
+  1 = non-deterministic or attestation error, 2 = file or module not found.
+- **Public API snapshot guard** (#140): new `tests/test_public_api_snapshot.py`
+  and `tests/fixtures/public_api.json` that pin the exact set of exported
+  names in `chainweaver.__all__`, catching accidental additions or removals
+  before they reach a release.
+
+### Fixed
+
+- `attest_flow` now raises `AttestationInputError` immediately when `n < 1`
+  or `repeats < 1` rather than silently completing with an empty report.
+
 ## [0.6.0] - 2026-05-19
 
 ### Added
