@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI `doctor`** (#175): `chainweaver doctor --check-drift <path>`
+  loads every flow file under *path* (single file or recursive
+  directory), imports tools from the modules passed via `--tools`, and
+  reports per-flow `missing_tool` and `schema_mismatch` issues using
+  `check_flow_compatibility`.  Flows without a recorded
+  `tool_schema_hashes` snapshot are surfaced as
+  `fingerprints_present=False` so callers can distinguish "fingerprints
+  match" from "no fingerprints were recorded".  Supports
+  `--format table|json`.  Exit codes: 0 = no drift, 1 = drift detected
+  or malformed flow file, 2 = path or `--tools` module missing.
+- **`FlowExecutor.registered_tools`** (#178): public read-only accessor
+  that returns a snapshot of currently registered tools as
+  `dict[str, Tool]`.  Replaces ad-hoc private `_tools` access in
+  downstream consumers (the new `doctor` command is the first
+  in-tree user; future `attest`/optimizer consumers can follow).
+- **Profile reliability aggregates** (#176): `chainweaver profile`
+  JSON output now carries `retry_count`, `skipped`, `fallback_used`,
+  `cached`, and `error_type` on every step entry, plus an
+  `aggregates` block with totals (`retry_count`, `skip_count`,
+  `fallback_count`, `failure_count`, `cached_count`) and a `by_tool`
+  breakdown keyed by tool name with `invocation_count` and the same
+  per-bucket counts.  Multi-trace mode sums these across every trace.
+  The table view surfaces the same data as a "Reliability:" footer
+  plus a per-tool problem list (only emitted when at least one count
+  is non-zero, so happy-path runs keep their compact output).
+- **`StepRecord.fallback_used`** (#176): new boolean field set when
+  the step's `on_error="fallback:<tool_name>"` policy invoked a
+  fallback tool — set regardless of whether the fallback itself
+  succeeded or failed (covers the case where the configured fallback
+  tool is missing too).
+
+### Fixed
+
+- **Public API snapshot** order-independence (mirroring the fix being
+  shipped in #177): `tests/public_api_snapshot.py` now skips
+  constructor signatures for Pydantic models (which differ depending
+  on forward-ref resolution state inside the same pytest process),
+  treats `types.GenericAlias` (`ToolChain = tuple[str, ...]`) before
+  class inspection, and normalises unresolved forward references
+  through `chainweaver.__all__`.  Regenerated `tests/fixtures/public_api.json`
+  to match.
+
 ## [0.6.0] - 2026-05-19
 
 ### Added

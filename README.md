@@ -497,7 +497,7 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with five subcommands:
+ChainWeaver ships a `chainweaver` console script with the following subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
@@ -514,6 +514,16 @@ chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 
 # Inspect a registered flow's structure (table or JSON).
 chainweaver inspect my_flow --format json
+
+# Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
+# and per-step / per-tool retry / skip / fallback / failure aggregates.
+chainweaver profile trace_a.json trace_b.json --format json
+
+# Compare two ExecutionResult JSON files step-by-step.
+chainweaver diff baseline.json current.json --perf-tolerance 25
+
+# Check saved flows for tool schema drift against the live registry.
+chainweaver doctor flows/ --check-drift --tools my_pkg.tools
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:
