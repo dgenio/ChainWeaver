@@ -257,7 +257,8 @@ class AttestationReport(BaseModel):
         flow_name: The attested flow's ``name``.
         flow_version: The attested flow's ``version``.
         flow_schema_fingerprint: SHA-256 of the canonical JSON of the
-            flow's structural fields (step ordering, tool names, mappings).
+            flow's structural fields (name, version, step ordering, tool
+            names, mappings).
         tool_schema_hashes: Per-tool schema hashes captured at run-time
             (sourced from each registered :class:`~chainweaver.tools.Tool`).
         n: Number of distinct inputs generated.
@@ -441,6 +442,8 @@ def attest_flow(
     """
     if repeats < 2:
         raise ValueError(f"repeats must be >= 2, got {repeats}.")
+    if n < 1 and seed_inputs is None:
+        raise ValueError(f"n must be >= 1, got {n}.")
 
     from chainweaver import __version__ as cw_version
 

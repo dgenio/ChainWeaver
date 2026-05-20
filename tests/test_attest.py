@@ -171,6 +171,11 @@ class TestAttestFlowAPI:
         with pytest.raises(ValueError, match="repeats must be >= 2"):
             attest_flow(flow=flow, executor=executor, n=1, repeats=1, seed=0)
 
+    def test_n_below_one_raises(self) -> None:
+        executor, flow = _make_deterministic_executor()
+        with pytest.raises(ValueError, match="n must be >= 1"):
+            attest_flow(flow=flow, executor=executor, n=0, repeats=2, seed=0)
+
     def test_no_input_schema_without_seed_raises(self) -> None:
         # Flow with no input_schema_ref + no seed_inputs → raises.
         flow = Flow(
