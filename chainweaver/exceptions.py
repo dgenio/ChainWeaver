@@ -231,3 +231,48 @@ class CheckpointNotFoundError(ChainWeaverError):
     def __init__(self, trace_id: str) -> None:
         self.trace_id = trace_id
         super().__init__(f"No snapshot found for trace_id '{trace_id}'.")
+
+
+class DecisionCallbackError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.decisions.DecisionCallback` fails (issue #102).
+
+    Wraps both failure modes of the callback path: the callback raised, or
+    it returned a tool name outside the step's ``decision_candidates``
+    list.  The original exception (if any) is preserved on the
+    ``__cause__`` chain for debugging.
+
+    Attributes:
+        tool_name: Name of the step's static ``tool_name`` at the
+            decision point.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of the failure.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, detail: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.detail = detail
+        super().__init__(
+            f"Decision callback for step {step_index} (default tool '{tool_name}') failed: "
+            f"{detail}"
+        )
+
+
+class KernelInvocationError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`
+    cannot dispatch a capability step (issue #89).
+
+    Attributes:
+        capability_id: The capability identifier the executor tried to invoke.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of the failure.
+    """
+
+    def __init__(self, capability_id: str, step_index: int, detail: str) -> None:
+        self.capability_id = capability_id
+        self.step_index = step_index
+        self.detail = detail
+        super().__init__(
+            f"Kernel invocation for capability '{capability_id}' at step {step_index} "
+            f"failed: {detail}"
+        )

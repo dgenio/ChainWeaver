@@ -44,3 +44,24 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+  conformance:
+    name: weaver-spec conformance (#91)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # Dedicated gate so the conformance signal stays distinguishable
+      # in the CI matrix even when other lanes fail.  Mirrors the
+      # canonical command documented in docs/SPEC_COMPAT.md.
+      - name: Run weaver-spec conformance suite
+        run: python -m pytest tests/test_weaver_spec_conformance.py -v -m conformance

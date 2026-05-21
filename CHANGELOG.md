@@ -8,6 +8,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Weaver Stack execution backend** (#89): new
+  `chainweaver/integrations/agent_kernel.py` exposing
+  `KernelBackedExecutor`, a `FlowExecutor` subclass that delegates
+  `DAGFlowStep` instances with `step_type="capability"` through a
+  structural `KernelProtocol`.  Capability steps produce the same
+  `StepRecord` shape as tool steps, so observability and tracing are
+  uniform.  Ships an in-process `InMemoryKernel` for tests and offline
+  runs and a new `KernelInvocationError` exception.  No agent-kernel
+  PyPI dependency — `KernelProtocol` is a structural protocol so any
+  transport (in-process, gRPC, HTTP, stub) can satisfy it.
+- **Flow as Capability** (#90): `Flow` and `DAGFlow` gain an optional
+  `capability_id: str | None = None` field.  When set, the flow is
+  exposed as a routable Weaver Stack capability via
+  `flow_to_selectable_item()`.  Round-trips through `flow_to_dict` /
+  `flow_to_json` / `flow_to_yaml`.  See
+  `docs/agent-context/flow-as-capability.md` for the full semantics.
+- **Weaver-spec compatibility declaration + CI gate** (#91): new
+  `docs/SPEC_COMPAT.md` plus the
+  `chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION` constant
+  declare conformance to `weaver-spec` v0.1.0.  A new pytest
+  `conformance` marker tags
+  `tests/test_weaver_spec_conformance.py`; a dedicated CI job
+  (`.github/workflows/ci.yml` → `conformance`) runs `pytest -m
+  conformance` on the Python 3.10 / ubuntu-latest lane.
+- **`DecisionCallback` Protocol** (#102): new `chainweaver/decisions.py`
+  module with `DecisionCallback`, `DecisionContext`,
+  `BaseDecisionCallback`, `DecisionCallable`, and
+  `coerce_decision_callback`.  `FlowStep` gains an optional
+  `decision_candidates: list[str] | None` field; `FlowExecutor` gains
+  a `decision_callback=` constructor kwarg.  Steps with
+  `decision_candidates` set call the registered callback to pick which
+  candidate to invoke; failures (callback raises, or returns outside
+  the candidate set) abort the step with a new `DecisionCallbackError`
+  rather than silently falling back to the static `tool_name`.  Steps
+  without `decision_candidates` never invoke the callback — existing
+  flows behave identically.
+- **Contextweaver routing adapter** (#106): new
+  `chainweaver/integrations/contextweaver.py` exposing
+  `RoutingDecisionAdapter` (a `DecisionCallback` impl that asks a
+  duck-typed `ContextweaverClient` for a `RoutingDecision` and returns
+  the selected capability id), plus a `StaticRoutingClient` for tests
+  and offline runs.  No `contextweaver` PyPI dep.
+- **`SelectableItem` capability exporter** (#107): new
+  `chainweaver/integrations/weaver_spec.py` exposing the mirror types
+  `SelectableItem`, `RoutingDecision`, and `CapabilityToken` (matching
+  the weaver-spec v0.1.0 contract), plus the `flow_to_selectable_item()`
+  function that projects a `Flow` or `DAGFlow` to a `SelectableItem`
+  ready for contextweaver catalog ingestion.  Capability id resolves
+  via explicit kwarg → `flow.capability_id` → `flow.name`.  Schemas
+  are derived from `input_schema_ref` / `output_schema_ref` when set.
+- **`[weaver-stack]` optional extra** in `pyproject.toml`: placeholder
+  marker for the Weaver Stack sibling SDKs when they ship on PyPI.
+  The mirror types in `chainweaver.integrations.weaver_spec` keep the
+  integration self-contained until then.
+
+### Public API
+
+New symbols in `chainweaver.__all__`:
+`BaseDecisionCallback`, `DecisionCallable`, `DecisionCallback`,
+`DecisionContext`, `DecisionCallbackError`, `KernelInvocationError`,
+`coerce_decision_callback`.
+
+New integration symbols (import from the submodule — not re-exported
+from `chainweaver` to keep the public surface narrow):
+
+- `chainweaver.integrations.weaver_spec`: `WEAVER_SPEC_VERSION`,
+  `CapabilityToken`, `RoutingDecision`, `SelectableItem`,
+  `SpecCompatibilityReport`, `flow_to_selectable_item`,
+  `spec_compatibility_report`.
+- `chainweaver.integrations.contextweaver`: `ContextweaverClient`,
+  `RoutingDecisionAdapter`, `StaticRoutingClient`.
+- `chainweaver.integrations.agent_kernel`: `InMemoryKernel`,
+  `KernelBackedExecutor`, `KernelProtocol`.
+
 ## [0.7.0] - 2026-05-20
 
 ### Added

@@ -193,6 +193,15 @@ class FlowStep(BaseModel):
 
             An empty mapping (the default) means the tool receives the full
             current context as-is.
+        decision_candidates: Optional list of tool names that an external
+            :class:`~chainweaver.decisions.DecisionCallback` may pick from
+            at execution time (issue #102).  When ``None`` (the default)
+            the step always invokes ``tool_name``.  When set, the executor
+            calls the registered ``decision_callback`` with the candidate
+            list and the current context, and runs whichever tool the
+            callback selects.  The callback's return value must be a
+            member of ``decision_candidates``; if no callback is
+            registered the executor falls back to ``tool_name``.
 
     Example::
 
@@ -204,12 +213,30 @@ class FlowStep(BaseModel):
             tool_name="scale",
             input_mapping={"number": "value", "factor": 3},
         )
+
+        # Hybrid execution: let an external callback pick a tool
+        step = FlowStep(
+            tool_name="summarize_short",   # default if no callback set
+            decision_candidates=["summarize_short", "summarize_long"],
+        )
     """
 
     tool_name: str
     input_mapping: dict[str, Any] = Field(default_factory=dict)
     retry: RetryPolicy | None = None
     on_error: str = "fail"
+    decision_candidates: list[str] | None = None
+
+    @field_validator("decision_candidates")
+    @classmethod
+    def _validate_decision_candidates(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if len(value) < 1:
+            raise ValueError("decision_candidates must contain at least one tool name.")
+        if len(set(value)) != len(value):
+            raise ValueError("decision_candidates must not contain duplicates.")
+        return value
 
     @field_validator("on_error")
     @classmethod
@@ -256,6 +283,13 @@ class Flow(BaseModel):
             :class:`~chainweaver.executor.FlowExecutor` validates the
             accumulated context against the resolved schema **after** the
             last step finishes.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90).  When set, this flow is exposed as a routable capability
+            via :func:`chainweaver.integrations.weaver_spec.flow_to_selectable_item`
+            and can be addressed by a ``RoutingDecision`` from
+            contextweaver.  Should be a stable, dotted identifier (e.g.
+            ``"data.ingest"``); ``None`` (the default) means the flow is
+            not exposed as a capability.
 
     Example::
 
@@ -283,6 +317,7 @@ class Flow(BaseModel):
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -517,6 +552,8 @@ class DAGFlow(BaseModel):
             :class:`~pydantic.BaseModel` subclass validated against the
             final merged context after all steps finish.  Resolved lazily
             via the :attr:`output_schema` property.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90); see :attr:`Flow.capability_id` for full semantics.
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
@@ -549,6 +586,7 @@ class DAGFlow(BaseModel):
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:

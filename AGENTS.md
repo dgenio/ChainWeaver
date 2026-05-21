@@ -44,6 +44,7 @@ chainweaver/
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
+├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
 ├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
@@ -51,7 +52,10 @@ chainweaver/
 ├── checkpoint.py      Checkpointer Protocol + ExecutionSnapshot + InMemoryCheckpointer + FileCheckpointer (#128)
 ├── integrations/      Optional third-party adapters (each guards its extra import)
 │   ├── __init__.py    Package marker; documents available integrations
-│   └── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── weaver_spec.py    SelectableItem/RoutingDecision/CapabilityToken mirror types + flow_to_selectable_item (#91, #107)
+│   ├── contextweaver.py  RoutingDecisionAdapter (DecisionCallback impl) + ContextweaverClient Protocol (#106)
+│   └── agent_kernel.py   KernelBackedExecutor + KernelProtocol + InMemoryKernel (#89)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
@@ -72,6 +76,10 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 
 ### Key entry points
 
+- `FlowExecutor(..., decision_callback=...)` → wire a `DecisionCallback` for guided decision points (#102); steps with `decision_candidates` set call the callback to pick which tool to run.  Either a class with `decide(ctx)` or a bare callable is accepted (coerced via `coerce_decision_callback`).
+- `KernelBackedExecutor(..., kernel=...)` from `chainweaver.integrations.agent_kernel` (#89) → optional `FlowExecutor` subclass that delegates `DAGFlowStep` instances with `step_type="capability"` through a `KernelProtocol`.  The base `FlowExecutor` rejects capability steps; only this subclass dispatches them.
+- `flow_to_selectable_item(flow, *, capability_id=None, tags=())` from `chainweaver.integrations.weaver_spec` (#107) → project a `Flow` or `DAGFlow` to a weaver-spec `SelectableItem` for contextweaver catalog ingestion.
+- `RoutingDecisionAdapter(client=...)` from `chainweaver.integrations.contextweaver` (#106) → `DecisionCallback` impl that asks a `ContextweaverClient` for a `RoutingDecision` and returns the selected capability id.
 - `FlowExecutor.execute_flow(flow_name, initial_input, *, force=False)` → `ExecutionResult`
 - `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)` → `Iterator[FlowEvent]` (#134); yields `kind="flow_start"` → (`step_start` → `step_end`)* → `flow_end` events as the flow runs on a worker thread. Cancellation is not supported for the sync variant; the background thread runs to completion.
 - `FlowExecutor(..., step_cache=...)` → memoize step outputs across runs (#127); keyed by `(tool_name, schema_hash, input_value_hash)`. Cache hits skip `Tool.fn` entirely (including retries and timeout) and surface as `StepRecord.cached=True`. Tools mark themselves `cacheable=False` to always run (side-effects, external state). `replay_flow` always bypasses the cache.
@@ -129,6 +137,7 @@ For the full prohibited-actions list and anti-patterns, see
 | `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
 | `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
+| `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
 
 ### `FlowStep.input_mapping`
 
@@ -137,6 +146,18 @@ For the full prohibited-actions list and anti-patterns, see
 | `str` | Looked up as a key in the accumulated execution context. |
 | Non-string (`int`, `float`, `bool`, …) | Used as a literal constant. |
 | Empty `{}` (default) | The tool receives the full current context. |
+
+### `FlowStep.decision_candidates` (issue #102)
+
+Optional `list[str] | None` (default `None`).  When set together with an
+executor-level `decision_callback`, the executor asks the callback to
+choose which candidate tool to invoke for this step.  The callback
+receives a `DecisionContext` and must return a member of
+`decision_candidates`.  Callback failures (raise, or return outside the
+list) abort the step with `DecisionCallbackError`.  When
+`decision_candidates` is `None` *or* no callback is registered, the
+step's static `tool_name` is used — flows stay runnable without the
+integration.
 
 ### `ExecutionResult` (Pydantic `BaseModel`)
 
@@ -240,6 +261,8 @@ Full checklist: [review-checklist.md](docs/agent-context/review-checklist.md).
 | [lessons-learned.md](docs/agent-context/lessons-learned.md) | Recurring mistake patterns | Before proposing changes to avoid known pitfalls |
 | [review-checklist.md](docs/agent-context/review-checklist.md) | Definition-of-done, review gates | Before submitting a PR, during code review |
 | [versioning-policy.md](docs/versioning-policy.md) | SemVer policy, public-API scope, deprecation process | Adding / removing / renaming public symbols, planning a release |
+| [flow-as-capability.md](docs/agent-context/flow-as-capability.md) | Treating a flow as a Weaver Stack capability (#90); `Flow.capability_id`; `flow_to_selectable_item` exporter | Setting capability identity on a flow, exporting to contextweaver |
+| [SPEC_COMPAT.md](docs/SPEC_COMPAT.md) | Declared `weaver-spec` v0.1.0 compatibility (#91); conformance test + CI gate | Bumping the declared spec version, changing the weaver_spec mirror types |
 | [v1-release-criteria.md](docs/v1-release-criteria.md) | Measurable v1.0.0 release bar | Before tagging a release, when scoping issues against the v1.0 milestone |
 
 ---

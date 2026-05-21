@@ -30,11 +30,18 @@ from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_a
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
+from chainweaver.decisions import (
+    DecisionCallable,
+    DecisionCallback,
+    DecisionContext,
+    coerce_decision_callback,
+)
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    DecisionCallbackError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
@@ -509,6 +516,7 @@ class FlowExecutor:
         step_cache: StepCache | None = None,
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
+        decision_callback: DecisionCallback | DecisionCallable | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -516,6 +524,15 @@ class FlowExecutor:
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
         self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
+        # Guided decision-point callback (issue #102).  Wraps a bare
+        # callable in an adapter so the executor can call
+        # ``self._decision_callback.decide(ctx)`` uniformly regardless
+        # of whether the user passed a class or a function.  ``None``
+        # means decision_candidates steps fall back to their static
+        # ``tool_name``.
+        self._decision_callback: DecisionCallback | None = coerce_decision_callback(
+            decision_callback
+        )
         # Step-result cache (issue #127).  ``None`` (the default)
         # disables caching entirely — every tool runs every call.
         # When set, eligible step outputs are read from / written to
@@ -1650,6 +1667,59 @@ class FlowExecutor:
                 resolved[target_key] = source
         return resolved
 
+    def _execute_capability_step(
+        self,
+        step_index: int,
+        step: DAGFlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+    ) -> StepRecord:
+        """Dispatch a ``step_type != "tool"`` step (issue #89).
+
+        Hook for subclasses such as
+        :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`
+        to delegate capability steps to an external runner.  The base
+        :class:`FlowExecutor` does not know how to execute capabilities
+        and always returns a failed :class:`StepRecord` carrying a
+        :class:`~chainweaver.exceptions.FlowExecutionError`.
+
+        Args:
+            step_index: Zero-based position of the step in the flow.
+            step: The :class:`DAGFlowStep` whose ``step_type`` is not
+                ``"tool"``.
+            context: The current accumulated context (read-only here).
+            flow_name: Name of the enclosing flow, for diagnostics.
+            trace_id: Trace id of the enclosing execution, for diagnostics.
+
+        Returns:
+            A :class:`StepRecord` describing the failure.  Subclasses
+            return a successful record after dispatching the capability.
+        """
+        err = FlowExecutionError(
+            step.tool_name,
+            step_index,
+            f"Step '{step.step_id}' has step_type='{step.step_type}' "
+            f"which is not supported by FlowExecutor. "
+            f"Only step_type='tool' can be executed — use "
+            f"KernelBackedExecutor for capability-typed steps.",
+        )
+        log_step_error(_logger, step_index, step.tool_name, err)
+        err_type, err_msg = _exc_to_strings(err)
+        now = _now_utc()
+        return StepRecord(
+            step_index=step_index,
+            tool_name=step.tool_name,
+            inputs={},
+            outputs=None,
+            error_type=err_type,
+            error_message=err_msg,
+            success=False,
+            started_at=now,
+            ended_at=now,
+            duration_ms=0.0,
+        )
+
     def _execute_step(
         self,
         step_index: int,
@@ -1657,6 +1727,8 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        step_id: str | None = None,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -1687,6 +1759,82 @@ class FlowExecutor:
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Resolve guided decision points (issue #102).  When the step
+        # declares ``decision_candidates`` *and* the executor has a
+        # ``decision_callback`` registered, ask the callback which
+        # candidate to invoke and rebind the step to that tool for the
+        # remainder of this call.  No callback registered → fall back to
+        # the static ``tool_name`` so flows stay runnable without the
+        # integration.  Callback failures fail the step early via
+        # ``DecisionCallbackError`` — silent fall-through would mask
+        # configuration bugs.
+        if step.decision_candidates is not None and self._decision_callback is not None:
+            try:
+                chosen = self._decision_callback.decide(
+                    DecisionContext(
+                        trace_id=trace_id,
+                        flow_name=flow_name,
+                        step_index=step_index,
+                        step_id=step_id,
+                        default_tool_name=step.tool_name,
+                        candidates=list(step.decision_candidates),
+                        context=dict(context),
+                    )
+                )
+            except Exception as exc:
+                err = DecisionCallbackError(
+                    step.tool_name,
+                    step_index,
+                    f"callback raised {type(exc).__name__}: {exc}",
+                )
+                err.__cause__ = exc
+                log_step_error(_logger, step_index, step.tool_name, err)
+                err_type, err_msg = _exc_to_strings(err)
+                now = _now_utc()
+                record = StepRecord(
+                    step_index=step_index,
+                    tool_name=step.tool_name,
+                    inputs={},
+                    outputs=None,
+                    error_type=err_type,
+                    error_message=err_msg,
+                    success=False,
+                    started_at=started_at,
+                    ended_at=now,
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+                self._fire_step_end(
+                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+                )
+                return record
+            if chosen not in step.decision_candidates:
+                err = DecisionCallbackError(
+                    step.tool_name,
+                    step_index,
+                    f"callback returned '{chosen}' which is not in "
+                    f"decision_candidates={list(step.decision_candidates)!r}",
+                )
+                log_step_error(_logger, step_index, step.tool_name, err)
+                err_type, err_msg = _exc_to_strings(err)
+                now = _now_utc()
+                record = StepRecord(
+                    step_index=step_index,
+                    tool_name=step.tool_name,
+                    inputs={},
+                    outputs=None,
+                    error_type=err_type,
+                    error_message=err_msg,
+                    success=False,
+                    started_at=started_at,
+                    ended_at=now,
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+                self._fire_step_end(
+                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+                )
+                return record
+            if chosen != step.tool_name:
+                step = step.model_copy(update={"tool_name": chosen})
         # Mutable holder so ``_invoke_tool`` can report how many times the
         # primary tool was actually called.  Threading this through (instead
         # of deriving from ``len(retry_errors)``) keeps ``retry_count``
@@ -2162,50 +2310,91 @@ class FlowExecutor:
             level_records: list[StepRecord] = []
 
             for step in level_steps:
-                # Reject non-tool step types until KernelBackedExecutor exists.
+                # Dispatch ``step_type="capability"`` through the
+                # subclass hook (issue #89).  The base FlowExecutor
+                # rejects capability steps; KernelBackedExecutor
+                # overrides ``_execute_capability_step`` to delegate to
+                # an agent-kernel.  Either way the result is a
+                # StepRecord we can append and (on failure) abort the
+                # flow on.
                 if step.step_type != "tool":
-                    err = FlowExecutionError(
-                        step.tool_name,
-                        flat_index,
-                        f"Step '{step.step_id}' has step_type='{step.step_type}' "
-                        f"which is not supported by FlowExecutor. "
-                        f"Only step_type='tool' can be executed.",
+                    record = self._execute_capability_step(
+                        flat_index, step, context, flow.name, trace_id
                     )
-                    log_step_error(_logger, flat_index, step.tool_name, err)
-                    err_type, err_msg = _exc_to_strings(err)
-                    now = _now_utc()
-                    log.extend(level_records)
-                    log.append(
-                        StepRecord(
-                            step_index=flat_index,
-                            tool_name=step.tool_name,
-                            inputs={},
-                            error_type=err_type,
-                            error_message=err_msg,
+                    level_records.append(record)
+                    flat_index += 1
+                    if not record.success:
+                        log.extend(level_records)
+                        return self._make_result(
+                            flow_name=flow.name,
                             success=False,
-                            started_at=now,
-                            ended_at=now,
-                            duration_ms=0.0,
+                            final_output=None,
+                            execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
+                            initial_input=initial_input,
                         )
-                    )
-                    return self._make_result(
-                        flow_name=flow.name,
-                        success=False,
-                        final_output=None,
-                        execution_log=log,
-                        trace_id=trace_id,
-                        started_at=flow_started_at,
-                        perf_start=flow_t0,
-                        initial_input=initial_input,
-                    )
+                    assert record.outputs is not None
+                    for key, value in record.outputs.items():
+                        if key in level_outputs:
+                            conflict_err = FlowExecutionError(
+                                step.tool_name,
+                                record.step_index,
+                                f"Key '{key}' produced by both '{step.tool_name}' and a "
+                                f"sibling step in the same DAG level — execution "
+                                f"would be order-dependent.",
+                            )
+                            log_step_error(
+                                _logger, record.step_index, step.tool_name, conflict_err
+                            )
+                            err_type, err_msg = _exc_to_strings(conflict_err)
+                            now = _now_utc()
+                            level_records[-1] = StepRecord(
+                                step_index=record.step_index,
+                                tool_name=step.tool_name,
+                                inputs=record.inputs,
+                                outputs=None,
+                                error_type=err_type,
+                                error_message=err_msg,
+                                success=False,
+                                started_at=record.started_at,
+                                ended_at=now,
+                                duration_ms=record.duration_ms,
+                            )
+                            log.extend(level_records)
+                            return self._make_result(
+                                flow_name=flow.name,
+                                success=False,
+                                final_output=None,
+                                execution_log=log,
+                                trace_id=trace_id,
+                                started_at=flow_started_at,
+                                perf_start=flow_t0,
+                                initial_input=initial_input,
+                            )
+                        level_outputs[key] = value
+                    continue
 
                 # Build a lightweight FlowStep-compatible view so _execute_step
-                # can be reused without modification.
+                # can be reused without modification.  Forwarding
+                # ``decision_candidates`` lets the DAG path honour guided
+                # decision points (issue #102) just like linear flows.
                 proxy = FlowStep(
                     tool_name=step.tool_name,
                     input_mapping=step.input_mapping,
+                    retry=step.retry,
+                    on_error=step.on_error,
+                    decision_candidates=step.decision_candidates,
                 )
-                record = self._execute_step(flat_index, proxy, context, flow.name, trace_id)
+                record = self._execute_step(
+                    flat_index,
+                    proxy,
+                    context,
+                    flow.name,
+                    trace_id,
+                    step_id=step.step_id,
+                )
                 level_records.append(record)
                 flat_index += 1
 

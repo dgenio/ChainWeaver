@@ -58,6 +58,13 @@ from chainweaver.compiler import (
     compile_flow,
 )
 from chainweaver.cost import CostProfile, CostReport
+from chainweaver.decisions import (
+    BaseDecisionCallback,
+    DecisionCallable,
+    DecisionCallback,
+    DecisionContext,
+    coerce_decision_callback,
+)
 from chainweaver.decorators import tool
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
@@ -66,6 +73,7 @@ from chainweaver.exceptions import (
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     DAGDefinitionError,
+    DecisionCallbackError,
     FlowAlreadyExistsError,
     FlowExecutionError,
     FlowNotFoundError,
@@ -73,6 +81,7 @@ from chainweaver.exceptions import (
     FlowStatusError,
     InputMappingError,
     InvalidFlowVersionError,
+    KernelInvocationError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -142,6 +151,7 @@ __version__ = "0.4.0"
 __all__ = [
     "AttestationInputError",
     "AttestationReport",
+    "BaseDecisionCallback",
     "BaseMiddleware",
     "ChainAnalyzer",
     "ChainWeaverError",
@@ -158,6 +168,10 @@ __all__ = [
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionCallable",
+    "DecisionCallback",
+    "DecisionCallbackError",
+    "DecisionContext",
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
@@ -186,6 +200,7 @@ __all__ = [
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
+    "KernelInvocationError",
     "ObservedStep",
     "ObservedTrace",
     "RedactionPolicy",
@@ -211,6 +226,7 @@ __all__ = [
     "attest_flow",
     "check_flow_compatibility",
     "cli",
+    "coerce_decision_callback",
     "compile_flow",
     "flow_from_dict",
     "flow_from_json",
