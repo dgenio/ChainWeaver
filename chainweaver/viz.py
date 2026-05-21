@@ -221,6 +221,45 @@ def flow_to_dot(flow: Flow | DAGFlow) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Step bar chart (issue #147)
+# ---------------------------------------------------------------------------
+
+
+def _render_step_bar_chart(
+    rows: list[tuple[int, str, float, bool]],
+    *,
+    bar_width: int = 30,
+    name_width: int = 22,
+) -> str:
+    """Render a list of (step_index, tool_name, duration_ms, success) rows
+    as an ASCII bar chart.
+
+    Bars are scaled to ``bar_width`` characters relative to the longest
+    ``duration_ms`` in *rows*.  Tool names are right-truncated to
+    ``name_width`` characters.  A trailing ``ERR`` marker follows the bar
+    when ``success`` is ``False``.  Returns ``"(no steps)"`` when *rows*
+    is empty.
+
+    Used by :class:`~chainweaver.cli.profile_command` and is intentionally
+    side-effect free (pure string output).
+    """
+    if not rows:
+        return "(no steps)"
+    longest = max((r[2] for r in rows), default=0.0) or 1.0
+    lines: list[str] = []
+    for step_index, tool_name, duration_ms, success in rows:
+        bar_len = round((duration_ms / longest) * bar_width)
+        bar = "█" * bar_len + " " * (bar_width - bar_len)
+        short = tool_name[: name_width - 1] + "…"
+        truncated = tool_name if len(tool_name) <= name_width else short
+        status = "" if success else "  ERR"
+        lines.append(
+            f"{step_index:>4}  {truncated:<{name_width}}  {duration_ms:>9.1f} ms  |{bar}|{status}"
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # ExecutionResult → Mermaid (status overlay)
 # ---------------------------------------------------------------------------
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.4.0"
+version = "0.7.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -23,6 +23,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "deepdiff>=8.0",
     "packaging>=21.0",
     "pydantic>=2.0",
     "tenacity>=8.0",
@@ -36,6 +37,9 @@ chainweaver = "chainweaver.cli:main"
 yaml = [
     "pyyaml>=6.0",
 ]
+otel = [
+    "opentelemetry-api>=1.20",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -43,9 +47,8 @@ dev = [
     "mypy>=1.0",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
-    # Stable cross-Python introspection for the public-API snapshot test
-    # (tests/test_public_api_snapshot.py, issue #140).
-    "griffe>=1.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
 ]
 
 [project.urls]
@@ -85,14 +88,6 @@ skip-magic-trailing-comma = false
 [tool.mypy]
 python_version = "3.10"
 strict = true
-# tests/ is a namespace package (no __init__.py); helpers.py and the
-# tests/scripts/ dev utilities are reached the same way pytest reaches
-# them — by adding tests/ to the import path. ``mypy_path`` mirrors
-# pytest's behavior so mypy doesn't discover tests/scripts/*.py under
-# two module names (e.g. ``regen_public_api`` and ``scripts.regen_public_api``).
-mypy_path = "tests"
-explicit_package_bases = true
-namespace_packages = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"
