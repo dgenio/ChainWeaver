@@ -13,6 +13,7 @@
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "ContribError",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
@@ -48,6 +49,7 @@
     "InvalidFlowVersionError",
     "ObservedStep",
     "ObservedTrace",
+    "PluginDiscoveryError",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
@@ -73,6 +75,8 @@
     "check_flow_compatibility",
     "cli",
     "compile_flow",
+    "discover_flows",
+    "discover_tools",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -90,7 +94,7 @@
   ],
   "python_version": [
     3,
-    14
+    11
   ],
   "symbols": {
     "AttestationInputError": {
@@ -187,6 +191,12 @@
       "module": "chainweaver.compiler",
       "qualname": "CompilationWarning",
       "signature": "(step_index: int, tool_name: str, field_name: str | None, issue_type: str, detail: str) -> None"
+    },
+    "ContribError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "ContribError",
+      "signature": "(tool_name: str, detail: str) -> None"
     },
     "CostProfile": {
       "kind": "pydantic-model",
@@ -403,7 +413,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, discover_plugins: bool = False) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -421,7 +431,7 @@
       "kind": "class",
       "module": "chainweaver.registry",
       "qualname": "FlowRegistry",
-      "signature": "(store: RegistryStore | None = None) -> None"
+      "signature": "(store: RegistryStore | None = None, *, discover_plugins: bool = False) -> None"
     },
     "FlowSerializationError": {
       "kind": "class",
@@ -521,6 +531,12 @@
       "module": "chainweaver.observation",
       "qualname": "ObservedTrace",
       "signature": "(*, trace_id: str, source: str, started_at: datetime.datetime, ended_at: datetime.datetime | NoneType = None, steps: list[chainweaver.observation.ObservedStep] = <factory>) -> None"
+    },
+    "PluginDiscoveryError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "PluginDiscoveryError",
+      "signature": "(entry_point: str, detail: str) -> None"
     },
     "RedactionPolicy": {
       "kind": "pydantic-model",
@@ -745,6 +761,18 @@
       "module": "chainweaver.compiler",
       "qualname": "compile_flow",
       "signature": "(flow: Flow, tools: dict[str, Tool]) -> CompilationResult"
+    },
+    "discover_flows": {
+      "kind": "function",
+      "module": "chainweaver.plugins",
+      "qualname": "discover_flows",
+      "signature": "(*, group: str = 'chainweaver.flows', strict: bool = False) -> list[Flow | DAGFlow]"
+    },
+    "discover_tools": {
+      "kind": "function",
+      "module": "chainweaver.plugins",
+      "qualname": "discover_tools",
+      "signature": "(*, group: str = 'chainweaver.tools', strict: bool = False) -> list[Tool]"
     },
     "flow_from_dict": {
       "kind": "function",

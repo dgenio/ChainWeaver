@@ -51,7 +51,19 @@ chainweaver/
 ├── checkpoint.py      Checkpointer Protocol + ExecutionSnapshot + InMemoryCheckpointer + FileCheckpointer (#128)
 ├── integrations/      Optional third-party adapters (each guards its extra import)
 │   ├── __init__.py    Package marker; documents available integrations
-│   └── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── langchain.py   from_/to_langchain_tool + from_langchain_toolkit (#82); requires chainweaver[langchain]
+│   └── llamaindex.py  from_/to_llamaindex_tool (#82); requires chainweaver[llamaindex]
+├── contrib/           Curated deterministic stdlib tools (#145); pip install 'chainweaver[contrib]'
+│   ├── __init__.py    Re-exports the public tool set
+│   └── tools.py       passthrough, json_pluck, json_set, assert_equal, map_list, filter_list
+├── export/            Schema export adapters (#25) — no external dep imports
+│   ├── __init__.py    Re-exports flow_to_*, tool_to_*
+│   ├── _schema.py     Shared input/output schema derivation
+│   ├── openai.py      flow_to_openai_function + tool_to_openai_function
+│   ├── anthropic.py   flow_to_anthropic_tool + tool_to_anthropic_tool
+│   └── callable.py    flow_to_callable + tool_to_callable (plain dict → dict)
+├── plugins.py         discover_tools() + discover_flows() over importlib.metadata entry points (#130)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation

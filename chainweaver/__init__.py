@@ -65,6 +65,7 @@ from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    ContribError,
     DAGDefinitionError,
     FlowAlreadyExistsError,
     FlowExecutionError,
@@ -73,6 +74,7 @@ from chainweaver.exceptions import (
     FlowStatusError,
     InputMappingError,
     InvalidFlowVersionError,
+    PluginDiscoveryError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -109,6 +111,7 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.plugins import discover_flows, discover_tools
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import (
     flow_from_dict,
@@ -153,6 +156,7 @@ __all__ = [
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "ContribError",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
@@ -188,6 +192,7 @@ __all__ = [
     "InvalidFlowVersionError",
     "ObservedStep",
     "ObservedTrace",
+    "PluginDiscoveryError",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
@@ -213,6 +218,8 @@ __all__ = [
     "check_flow_compatibility",
     "cli",
     "compile_flow",
+    "discover_flows",
+    "discover_tools",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
