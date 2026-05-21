@@ -122,23 +122,13 @@ and stores the history on the repo's `gh-pages` branch.
 | Alert threshold | `125 %` — fail the PR if any compiled metric regresses > 25 % |
 | Comment | Posted on PR when the threshold trips |
 
-### One-time setup: `gh-pages` branch
+### `gh-pages` branch
 
-The first time this workflow runs, it needs a `gh-pages` branch to push
-its history to. Initialize it once with:
-
-```bash
-git checkout --orphan gh-pages
-git rm -rf .
-echo 'ChainWeaver benchmark history' > README.md
-git add README.md
-git commit -m "chore: initialize gh-pages branch for benchmark history"
-git push -u origin gh-pages
-git checkout main
-```
-
-Enable GitHub Pages from the `gh-pages` branch (Settings → Pages) so the
-historical chart renders publicly at the project's GitHub Pages URL.
+The workflow self-bootstraps the `gh-pages` branch on its first run
+(see the "Ensure gh-pages branch exists" step in
+`.github/workflows/bench.yml`), so no manual init is required. To
+publish the historical chart, enable GitHub Pages from the `gh-pages`
+branch (Settings → Pages) after the workflow's first push to it.
 
 ### Refreshing `benchmarks/baseline.json`
 
