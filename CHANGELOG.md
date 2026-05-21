@@ -8,6 +8,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Determinism + safety contracts** (#19): new `chainweaver/contracts.py`
+  module exposing `ToolSafetyContract` (Pydantic, frozen) plus the
+  `SideEffectLevel` / `StabilityLevel` / `DeterminismLevel` enums that
+  describe a tool's safety surface.  Defaults are maximally permissive
+  (`SideEffectLevel.NONE`, `StabilityLevel.STABLE`,
+  `DeterminismLevel.FULL`, `idempotent=True`, `cacheable=True`,
+  `requires_review=False`) so bare `Tool(...)` constructors keep working
+  unchanged.  `merge_safety(contracts)` computes the most-restrictive
+  contract across an iterable — used by `Tool.from_flow`.
+- **`Tool.safety` attribute and `Tool.from_flow(..., safety=...)` derivation**
+  (#125): every `Tool` instance now carries a `ToolSafetyContract`.
+  `Tool.from_flow` derives the wrapped flow's contract via `merge_safety`
+  over the constituent step tools (most-restrictive wins) and accepts an
+  explicit `safety=` override that bypasses derivation entirely.
+- **DAG conditional branching** (#9): `DAGFlowStep` gains two optional
+  fields — `branches: list[ConditionalEdge]` and `default_next: str | None`.
+  After a decision step runs, the executor evaluates each
+  `ConditionalEdge.predicate` against the merged context; the first match
+  picks the active downstream path.  Non-selected immediate dependents
+  are recorded as `StepRecord(skipped=True)`, and the skip propagates to
+  steps whose every predecessor is itself skipped.  `default_next` is the
+  fallback when no edge matches.  Branch targets must be direct dependents
+  — enforced at registration time by `validate_dag_topology`, which now
+  raises `DAGDefinitionError(reason="unknown_branch_target")`.
+- **Safe AST-based predicate evaluator** (#9): `evaluate_predicate(expr, ctx)`
+  parses the expression with `ast.parse(mode="eval")` and walks the tree
+  against an explicit node allow-list.  Supports variable lookups,
+  subscript, `==`/`!=`/`<`/`<=`/`>`/`>=`, `in`/`not in`,
+  `and`/`or`/`not`, and literal constants.  `eval`/`exec` are **never**
+  called.  Syntax errors, unsupported nodes, and unresolved names raise
+  the new `PredicateSyntaxError` exception.
+- **Structural determinism inference on flows** (#8): `Flow.determinism_level`
+  and `DAGFlow.determinism_level` computed properties return
+  `DeterminismLevel.FULL` / `PARTIAL` / `NONE`.  Linear `Flow` →
+  `FULL` (downgraded to `NONE` when `deterministic=False`); `DAGFlow`
+  with any non-empty `branches` → `PARTIAL` (downgraded to `NONE` when
+  `deterministic=False`).  Reflects flow *structure* only — tool-level
+  contracts are not consulted here.
+- **Hypothesis property-based determinism harness** (#143): new
+  `tests/property/` package with three property families — idempotence
+  across repeated executions, serialization round-trip (YAML and JSON)
+  equivalence, and linear/DAG execution agreement.  Strategies live in
+  `tests/property/strategies.py` and compose flows from the existing
+  helper tools in `tests/helpers.py`.  A regression guard
+  (`tests/property/test_nondeterminism_detection.py`) confirms the
+  harness still catches deliberate non-determinism (`random.randint`
+  inside a tool fn).  Marked `@pytest.mark.property` for selective runs.
+- **New optional extra `[test]`**: pulls `hypothesis>=6.150` for the
+  property test leg; kept out of the default install so the
+  single-runtime-dep promise (`pydantic`) is preserved.  Also added to
+  `[dev]` for local development.
+- **Public API exports** added to `chainweaver.__all__`:
+  `ConditionalEdge`, `DeterminismLevel`, `SideEffectLevel`,
+  `StabilityLevel`, `ToolSafetyContract`, `PredicateSyntaxError`,
+  `evaluate_predicate`, `merge_safety`.
+
 ## [0.7.0] - 2026-05-20
 
 ### Added

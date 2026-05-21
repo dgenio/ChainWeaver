@@ -37,9 +37,10 @@ chainweaver/
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
 ├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
+├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + safety vocabulary (#19, #125, #9, #8)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash; Tool.from_flow() wraps a Flow as a Tool (#24)
-├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
+├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass + ConditionalEdge (#9) + determinism_level property (#8)
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
@@ -129,6 +130,16 @@ For the full prohibited-actions list and anti-patterns, see
 | `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
 | `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
+| `determinism_level` | `DeterminismLevel` (computed) | — | Structural determinism inference (#8): linear `Flow` → `FULL` (or `NONE` if `deterministic=False`); `DAGFlow` with any conditional `branches` → `PARTIAL`. |
+
+### `DAGFlowStep` conditional branching (#9)
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `branches` | `list[ConditionalEdge]` | `[]` | Outgoing guards.  After this step runs, the first `ConditionalEdge` whose `predicate` evaluates truthy against the merged context picks the active downstream path; non-selected immediate dependents are recorded as `StepRecord(skipped=True)`.  Empty list (default) → unconditional fan-out, every dependent runs. |
+| `default_next` | `str \| None` | `None` | Fallback `target_step_id` when no `ConditionalEdge` matches.  Only meaningful alongside non-empty `branches`. |
+
+Predicates are evaluated by `chainweaver.contracts.evaluate_predicate`, which parses the string with `ast` and walks the tree by hand — `eval()` is **never** called.  Predicate syntax errors and unsupported AST nodes raise `PredicateSyntaxError` and abort the flow with a synthetic failed `StepRecord`.
 
 ### `FlowStep.input_mapping`
 

@@ -33,6 +33,21 @@ They are non-negotiable.
 > systems); every other field is fully deterministic given the same
 > input and tools.
 
+> **Predicate carve-out (since #9):** ``DAGFlowStep.branches`` introduce
+> conditional routing.  :func:`chainweaver.contracts.evaluate_predicate`
+> evaluates predicate strings by parsing them with :mod:`ast` and walking
+> the resulting tree against an explicit node allow-list — **no**
+> :func:`eval` / :func:`exec` is ever called.  The grammar is limited to
+> variable lookups, subscript, the six comparison operators, ``in`` /
+> ``not in``, ``and`` / ``or`` / ``not``, and literal constants — no
+> attribute access, no function calls, no arithmetic.  Any rejected node
+> raises :class:`~chainweaver.exceptions.PredicateSyntaxError`.  The
+> evaluator is pure-Python and deterministic: same predicate + same
+> context always yields the same boolean.  Branching makes the
+> *executed path* data-dependent, which is why
+> :attr:`DAGFlow.determinism_level` downgrades to ``PARTIAL`` when any
+> step carries non-empty ``branches``.
+
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 

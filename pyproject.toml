@@ -40,6 +40,13 @@ yaml = [
 otel = [
     "opentelemetry-api>=1.20",
 ]
+# Property-based testing extra (issue #143).  Kept out of the default install
+# and out of [dev] so the existing single-dep promise (pydantic only) holds
+# for end users and CI lanes that don't run the property tests.  Enable via
+# ``pip install 'chainweaver[test]'`` (CI does this on the property leg).
+test = [
+    "hypothesis>=6.150",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -49,6 +56,7 @@ dev = [
     "types-pyyaml>=6.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
+    "hypothesis>=6.150",
 ]
 
 [project.urls]
@@ -61,6 +69,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "property: Hypothesis property-based determinism tests (issue #143). Opt-in via `pytest -m property`; default suite still runs them but CI gates on a separate fast-feedback leg.",
+]
 
 [tool.ruff]
 target-version = "py310"
