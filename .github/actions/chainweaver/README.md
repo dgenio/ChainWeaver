@@ -30,7 +30,7 @@ jobs:
 | `command` | `check` | Subcommand to invoke (`check`, `validate`, `inspect`, `viz`, …). Future verbs work via the same action. |
 | `format` | `table` | Output format (`table` or `json`). |
 | `python-version` | `3.10` | Python version used to install and run `chainweaver`. Must be one of ChainWeaver's supported versions (3.10–3.13). |
-| `chainweaver-version` | `0.4.0` | Version of `chainweaver` to install from PyPI. Pinned by default; pass an empty string for latest, or a path / VCS spec for unreleased code. |
+| `chainweaver-version` | `0.4.0` | Exact version of `chainweaver` to install from PyPI (passed through to `pip install "chainweaver==<version>"`). Pinned by default; pass an empty string for the latest published version. |
 | `extra-args` | `""` | Additional arguments appended verbatim to the invocation (e.g. `--quiet`). |
 
 ### Outputs

@@ -52,13 +52,18 @@ class TestSnapshotMatchesGolden:
         fresh_snapshot: dict[str, Any],
         golden_snapshot: dict[str, Any],
     ) -> None:
-        # Compare canonical JSON so an ordering drift in `__all__` or in
-        # a class's bases also fails the assertion.
+        # Compare canonical JSON so added/removed entries in `__all__`,
+        # signature drift, and default-value drift all fail the
+        # assertion. Pure reordering of `__all__` is intentionally
+        # invisible: ``build_snapshot()`` sorts it before serialization.
         fresh_text = _canonical_json(fresh_snapshot)
         golden_text = _canonical_json(golden_snapshot)
+        try:
+            fixture_display: Path = fixture_path().relative_to(Path.cwd())
+        except ValueError:
+            fixture_display = fixture_path()
         assert fresh_text == golden_text, (
-            "Public API surface has drifted from "
-            f"{fixture_path().relative_to(Path.cwd())}. "
+            f"Public API surface has drifted from {fixture_display}. "
             "If the change is intentional, run "
             "`python tests/scripts/regen_public_api.py` and commit the "
             "regenerated fixture in the same PR."
@@ -127,10 +132,11 @@ class TestSnapshotDetectsRegressions:
     ) -> None:
         mutated = copy.deepcopy(golden_snapshot)
         target = mutated["symbols"]["flow_to_json"]
-        # The keyword-only ``indent`` param defaults to 2.
+        # Mutate whatever ``indent`` defaults to today instead of asserting
+        # a specific literal value — the test stays meaningful if the
+        # default is later changed intentionally.
         indent_param = next(p for p in target["parameters"] if p["name"] == "indent")
-        assert indent_param["default"] == "2"
-        indent_param["default"] = "4"
+        indent_param["default"] = f"{indent_param['default']}_mutated"
         assert _canonical_json(mutated) != _canonical_json(golden_snapshot)
 
     def test_added_pydantic_field_fails_equality(

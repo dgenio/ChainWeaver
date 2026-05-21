@@ -46,19 +46,22 @@ def _normalize_annotation(annotation: Any) -> str:
     """Normalize a Python annotation to a stable string representation.
 
     Strips ``<class 'X'>`` wrapping (which varies across Python versions
-    and contexts) and removes the package-qualifier prefix so e.g.
-    ``list[chainweaver.flow.FlowStep]`` becomes ``list[FlowStep]``.
+    and contexts) and removes every occurrence of the known prefixes
+    ``chainweaver.``, ``typing.``, and ``builtins.`` from the annotation
+    text. Submodule qualifiers (e.g. ``flow.``) are intentionally
+    preserved, so ``list[chainweaver.flow.FlowStep]`` normalizes to
+    ``list[flow.FlowStep]`` rather than ``list[FlowStep]``.
     """
 
     text = str(annotation)
     # `<class 'foo'>` -> `foo`
     if text.startswith("<class '") and text.endswith("'>"):
         text = text[len("<class '") : -len("'>")]
-    # Strip qualification on known prefixes for stability.
+    # Strip every occurrence of each known prefix so both
+    # ``chainweaver.flow.FlowStep`` and
+    # ``dict[chainweaver.flow.K, chainweaver.flow.V]`` collapse
+    # consistently. Loop until the prefix no longer appears.
     for prefix in (f"{_PACKAGE_NAME}.", "typing.", "builtins."):
-        # Only strip the leading-token form to avoid mangling
-        # ``dict[chainweaver.flow.X, chainweaver.flow.Y]`` partially —
-        # apply repeatedly until stable.
         while prefix in text:
             text = text.replace(prefix, "")
     return text
@@ -110,9 +113,12 @@ def _summarize_class(runtime_obj: type, griffe_obj: Any) -> dict[str, Any]:
         fields: dict[str, dict[str, Any]] = {}
         for name in sorted(runtime_obj.model_fields):
             field = runtime_obj.model_fields[name]
+            # ``not is_required()`` is true for both ``Field(default=...)``
+            # and ``Field(default_factory=...)``, so the snapshot catches
+            # adding or removing a default in either form.
             fields[name] = {
                 "annotation": _normalize_annotation(field.annotation),
-                "has_default": _normalize_default(field.default) is not None,
+                "has_default": not field.is_required(),
             }
         summary["model_fields"] = fields
     return summary

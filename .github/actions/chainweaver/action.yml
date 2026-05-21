@@ -25,9 +25,10 @@ inputs:
     default: "3.10"
   chainweaver-version:
     description: |
-      Version of the ``chainweaver`` package to install from PyPI. Pinned by
-      default to a known-good release; pass an empty string to install the
-      latest published version, or a path / VCS spec to install from there.
+      Exact version of the ``chainweaver`` package to install from PyPI
+      (passed through to ``pip install "chainweaver==<version>"``).
+      Pinned by default to a known-good release; pass an empty string
+      to install the latest published version.
     required: false
     default: "0.4.0"
   extra-args:

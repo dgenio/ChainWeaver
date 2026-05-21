@@ -45,7 +45,7 @@ graphs can run without LLM calls between steps if every step is a pure
 function — but the framework is built around LLM integration and
 doesn't enforce LLM-freedom.
 
-**Pick LangChain when:** your flow's primary purpose is to chain LLM
+**Pick LangChain when:** your flow's primary purpose is to sequence LLM
 calls, you want the broad provider/tool integration surface, and you
 accept the dependency footprint.
 
@@ -83,7 +83,7 @@ or Prefect Cloud).
 caching, distributed workers, and observability — and you accept the
 operational footprint of running a server.
 
-**Pick ChainWeaver when:** you specifically want LLM-tool-chain
+**Pick ChainWeaver when:** you specifically want LLM-tool flow
 orchestration without a separate orchestration runtime — flows are
 in-process Python data structures, no server, no scheduler.
 
@@ -100,7 +100,7 @@ expects a daemon + webserver for production.
 ML artifacts) and you want lineage + scheduling + a UI.
 
 **Pick ChainWeaver when:** your work is tool-call-shaped (function I/O
-chains, not asset materializations) and you don't want a separate
+sequences, not asset materializations) and you don't want a separate
 orchestration runtime.
 
 Docs: <https://docs.dagster.io/>

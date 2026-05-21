@@ -227,7 +227,7 @@ def _print_table(report: dict[str, Any]) -> None:
     print("=" * 92)
     for case in report["cases"]:
         print(
-            f"\nChain length: {case['n_steps']} steps "
+            f"\nFlow length: {case['n_steps']} steps "
             f"| LLM delay: {case['llm_delay_ms']:.0f}ms "
             f"| Tool delay: {case['tool_delay_ms']:.0f}ms"
         )

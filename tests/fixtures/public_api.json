@@ -205,11 +205,11 @@
         },
         "depends_on": {
           "annotation": "list[str]",
-          "has_default": false
+          "has_default": true
         },
         "input_mapping": {
           "annotation": "dict[str, Any]",
-          "has_default": false
+          "has_default": true
         },
         "on_error": {
           "annotation": "str",
@@ -249,7 +249,7 @@
         },
         "final_context_shape": {
           "annotation": "dict[str, str]",
-          "has_default": false
+          "has_default": true
         },
         "flow_name": {
           "annotation": "str",
@@ -261,7 +261,7 @@
         },
         "steps": {
           "annotation": "list[executor.StepPlan]",
-          "has_default": false
+          "has_default": true
         }
       }
     },
@@ -281,7 +281,7 @@
         },
         "execution_log": {
           "annotation": "list[executor.StepRecord]",
-          "has_default": false
+          "has_default": true
         },
         "final_output": {
           "annotation": "dict[str, Any] | None",
@@ -293,7 +293,7 @@
         },
         "initial_input": {
           "annotation": "dict[str, Any]",
-          "has_default": false
+          "has_default": true
         },
         "started_at": {
           "annotation": "datetime.datetime",
@@ -428,7 +428,7 @@
       "model_fields": {
         "input_mapping": {
           "annotation": "dict[str, Any]",
-          "has_default": false
+          "has_default": true
         },
         "on_error": {
           "annotation": "str",
@@ -508,7 +508,7 @@
         },
         "steps": {
           "annotation": "list[observation.ObservedStep]",
-          "has_default": false
+          "has_default": true
         },
         "trace_id": {
           "annotation": "str",
@@ -565,7 +565,7 @@
         },
         "diffs": {
           "annotation": "list[executor.StepDiff]",
-          "has_default": false
+          "has_default": true
         },
         "mode": {
           "annotation": "<enum 'ReplayMode'>",
@@ -651,7 +651,7 @@
       "model_fields": {
         "input_schema": {
           "annotation": "dict[str, str]",
-          "has_default": false
+          "has_default": true
         },
         "input_sources": {
           "annotation": "dict[str, str]",
@@ -659,7 +659,7 @@
         },
         "output_schema": {
           "annotation": "dict[str, str]",
-          "has_default": false
+          "has_default": true
         },
         "step_index": {
           "annotation": "int",
@@ -671,11 +671,11 @@
         },
         "unresolved_keys": {
           "annotation": "list[str]",
-          "has_default": false
+          "has_default": true
         },
         "warnings": {
           "annotation": "list[str]",
-          "has_default": false
+          "has_default": true
         }
       }
     },
@@ -715,7 +715,7 @@
         },
         "retry_errors": {
           "annotation": "list[str]",
-          "has_default": false
+          "has_default": true
         },
         "skipped": {
           "annotation": "bool",

@@ -36,7 +36,7 @@ CI runners without inflating wall-clock time.
 
 | Metric | Meaning |
 |--------|---------|
-| `total_duration_ms` | Wall-clock time for the full chain. |
+| `total_duration_ms` | Wall-clock time for the full flow. |
 | `tool_execution_ms` | Cumulative time spent inside tool functions. |
 | `overhead_ms` | `total_duration_ms - tool_execution_ms` (orchestration cost). |
 | `llm_calls_count` | Number of simulated LLM calls (naive only). |
@@ -97,7 +97,7 @@ Two metrics per case:
 | Metric | Why it matters |
 |---|---|
 | `compiled_total_ms_<suffix>` | Headline regression metric. Includes simulated tool delays. |
-| `compiled_overhead_ms_<suffix>` | Pure orchestration cost (`total - tool_time`). Sub-millisecond at every chain length; this is the metric that actually catches a new validation pass or `model_copy`. |
+| `compiled_overhead_ms_<suffix>` | Pure orchestration cost (`total - tool_time`). Sub-millisecond at every flow length; this is the metric that actually catches a new validation pass or `model_copy`. |
 
 The suffix encodes the case parameters (`n{steps}_llm{ms}_tool{ms}`) so
 metric names are stable and unique across the default sweep.
