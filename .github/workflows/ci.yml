@@ -63,5 +63,10 @@ jobs:
       # Dedicated gate so the conformance signal stays distinguishable
       # in the CI matrix even when other lanes fail.  Mirrors the
       # canonical command documented in docs/SPEC_COMPAT.md.
+      #
+      # ``--no-cov`` disables pyproject's package-wide coverage gate
+      # for this subset run — coverage is enforced by the ``test`` job
+      # above (which runs the full suite); on the conformance lane we
+      # only care whether the 9 conformance tests pass.
       - name: Run weaver-spec conformance suite
-        run: python -m pytest tests/test_weaver_spec_conformance.py -v -m conformance
+        run: python -m pytest tests/test_weaver_spec_conformance.py -v -m conformance --no-cov

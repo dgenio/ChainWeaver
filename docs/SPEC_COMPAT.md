@@ -54,4 +54,10 @@ one-line adapter (the field names and JSON shape are identical).
 7. Mention the bump in `CHANGELOG.md` under the same release.
 
 The `conformance` pytest marker is registered in `pyproject.toml`;
-``pytest -m conformance`` is the canonical command CI runs.
+the canonical CI command is::
+
+    python -m pytest tests/test_weaver_spec_conformance.py -m conformance --no-cov
+
+``--no-cov`` opts out of the package-wide coverage gate for this
+9-test subset — coverage is enforced by the main ``test`` job that
+runs the full suite.
