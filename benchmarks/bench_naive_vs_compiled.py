@@ -100,7 +100,8 @@ def benchmark_naive_chaining(
     sleep is inserted between consecutive tools, for a total of
     ``n_steps - 1`` LLM calls.
 
-    Returns a metrics dict (see :func:`_metric_keys`).
+    Returns a metrics dict with the per-row JSON shape documented in
+    ``benchmarks/README.md``.
     """
     tools = [_make_tool(i, tool_delay_s) for i in range(n_steps)]
     value = 0
@@ -175,36 +176,9 @@ def benchmark_compiled_flow(
     }
 
 
-def _metric_keys() -> list[str]:
-    return [
-        "approach",
-        "n_steps",
-        "llm_delay_ms",
-        "tool_delay_ms",
-        "total_duration_ms",
-        "tool_execution_ms",
-        "overhead_ms",
-        "llm_calls_count",
-        "final_value",
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
-
-
-def _format_row(row: dict[str, Any]) -> str:
-    return (
-        f"  {row['approach']:<8}  "
-        f"steps={row['n_steps']:<3}  "
-        f"llm={row['llm_delay_ms']:>5.0f}ms  "
-        f"tool={row['tool_delay_ms']:>5.0f}ms  "
-        f"total={row['total_duration_ms']:>8.2f}ms  "
-        f"tool_time={row['tool_execution_ms']:>8.2f}ms  "
-        f"overhead={row['overhead_ms']:>8.2f}ms  "
-        f"llm_calls={row['llm_calls_count']}"
-    )
 
 
 def _print_summary_row(label: str, summary: dict[str, Any]) -> str:
