@@ -1288,7 +1288,7 @@ def suggest_command(
 
     - ``CW001`` — wasteful-passthrough (empty input_mapping).
     - ``CW002`` — parallelizable-pair (adjacent steps reading disjoint
-      context keys).
+      context keys).  Requires ``--tools``.
     - ``CW003`` — dead-step (step outputs are not read downstream).
       Requires ``--tools``.
     - ``CW004`` — cacheable-step (identical outputs across observed

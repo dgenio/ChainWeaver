@@ -527,8 +527,8 @@ def suggest_optimizations(
             inputs return an empty list (no suggestions are emitted —
             most families don't apply to topologically-ordered graphs).
         tools: Optional iterable of :class:`Tool` objects keyed by name.
-            Required for CW003 (dead-step) which needs per-tool output
-            schemas; the other families are tool-free.
+            Required for CW002 (parallelizable-pair) and CW003
+            (dead-step) which need per-tool I/O schemas.
         traces: Optional list of :class:`ExecutionResult` objects from
             prior runs.  Required for CW004 (cacheable-step).
 
