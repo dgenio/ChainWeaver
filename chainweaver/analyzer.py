@@ -322,9 +322,10 @@ def _suggest_wasteful_passthroughs(flow: Flow) -> list[Suggestion]:
     A step that uses ``input_mapping={}`` receives the entire
     accumulated context.  When the tool's ``input_schema`` declares a
     small subset of fields this works (Pydantic ignores extras) but
-    obscures the data flow.  We flag empty mappings on steps that have
-    at least one declared input field so the author can opt into an
-    explicit wiring.
+    obscures the data flow.  We flag every step with an empty
+    ``input_mapping`` so the author can opt into explicit wiring for
+    readability — regardless of whether the tool declares input fields
+    (tool schemas are not available in this function).
     """
     out: list[Suggestion] = []
     for idx, step in enumerate(flow.steps):
@@ -359,10 +360,16 @@ def _suggest_parallelizable_pairs(
 ) -> list[Suggestion]:
     """CW002 — adjacent independent steps could run in a DAG level.
 
-    Two consecutive steps are flagged when step ``N+1``'s declared
-    input fields don't overlap with step ``N``'s declared output
-    fields: the data dependency from N to N+1 is empty, so moving them
-    into the same DAG level is safe.
+    Two consecutive steps are flagged when step ``N+1``'s actual reads
+    don't overlap with step ``N``'s declared output fields: the data
+    dependency from N to N+1 is empty, so moving them into the same
+    DAG level is safe.
+
+    The consumer's actual reads are determined by its ``input_mapping``:
+    - Empty mapping (full-context passthrough): the step implicitly
+      reads all fields declared in its ``input_schema``.
+    - Non-empty mapping: only the string values in the mapping are
+      context reads.
 
     Skipped when *tools* is ``None`` — without per-tool schemas there
     is no reliable way to compute the actual data dependency.
@@ -378,10 +385,13 @@ def _suggest_parallelizable_pairs(
         if tool_a is None or tool_b is None:
             continue
         a_outputs = set(tool_a.output_schema.model_fields)
-        b_inputs = set(tool_b.input_schema.model_fields)
-        if not a_outputs or not b_inputs:
+        # Determine what step b actually reads from context.
+        # Empty mapping = full-context passthrough → reads declared
+        # input_schema fields; non-empty → reads mapped sources.
+        b_reads = set(tool_b.input_schema.model_fields) if not b.input_mapping else _step_reads(b)
+        if not a_outputs or not b_reads:
             continue
-        if a_outputs.isdisjoint(b_inputs):
+        if a_outputs.isdisjoint(b_reads):
             out.append(
                 Suggestion(
                     code="CW002",
@@ -404,6 +414,11 @@ def _suggest_dead_steps(flow: Flow, tools: dict[str, Tool] | None) -> list[Sugge
     Requires the per-tool schemas to compute output keys.  Skipped when
     *tools* is ``None``.  The last step is exempt — its outputs land in
     ``final_output`` rather than feeding another step.
+
+    For downstream steps with empty ``input_mapping`` (full-context
+    passthrough), we treat their declared ``input_schema`` fields as
+    implicit reads — since the executor passes the full context and
+    Pydantic validates against the schema.
     """
     if tools is None:
         return []
@@ -412,8 +427,16 @@ def _suggest_dead_steps(flow: Flow, tools: dict[str, Tool] | None) -> list[Sugge
     downstream_reads: list[set[str]] = []
     accum: set[str] = set()
     for idx in range(len(flow.steps) - 1, -1, -1):
+        step = flow.steps[idx]
         downstream_reads.append(accum.copy())
-        accum |= _step_reads(flow.steps[idx])
+        if not step.input_mapping:
+            # Empty mapping = full-context passthrough; the step
+            # implicitly reads its declared input_schema fields.
+            tool = tools.get(step.tool_name)
+            if tool is not None:
+                accum |= set(tool.input_schema.model_fields)
+        else:
+            accum |= _step_reads(step)
     downstream_reads.reverse()
     for idx, step in enumerate(flow.steps[:-1]):
         tool = tools.get(step.tool_name)

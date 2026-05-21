@@ -146,6 +146,39 @@ class TestSuggestStatic:
         cw003 = next(s for s in with_tools if s.code == "CW003")
         assert cw003.step_index == 0
 
+    def test_cw002_not_flagged_when_consumer_uses_empty_mapping(self) -> None:
+        """Steps with overlapping schema fields via empty mapping are not parallel."""
+        # double outputs {value}; format_result input_schema declares {value}.
+        # With empty mapping on step 1, it reads 'value' from context (passthrough)
+        # so the pair is NOT independent.
+        flow = Flow(
+            name="dependent_via_passthrough",
+            version="0.1.0",
+            description="Consumer reads via empty mapping.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="format_result"),  # empty input_mapping
+            ],
+        )
+        with_tools = suggest_optimizations(flow, tools=[_double_tool(), _format_tool()])
+        assert all(s.code != "CW002" for s in with_tools)
+
+    def test_cw003_not_flagged_when_downstream_uses_empty_mapping(self) -> None:
+        """Step output consumed via empty-mapping passthrough is not dead."""
+        # double outputs {value}; downstream format_result has empty mapping
+        # and input_schema declares {value} → step 0 output is implicitly read.
+        flow = Flow(
+            name="alive_via_passthrough",
+            version="0.1.0",
+            description="Downstream reads via passthrough.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="format_result"),  # empty input_mapping
+            ],
+        )
+        with_tools = suggest_optimizations(flow, tools=[_double_tool(), _format_tool()])
+        assert all(s.code != "CW003" for s in with_tools)
+
     def test_dagflow_returns_no_suggestions(self) -> None:
         from chainweaver.flow import DAGFlow, DAGFlowStep
 

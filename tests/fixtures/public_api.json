@@ -61,6 +61,7 @@
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
@@ -83,6 +84,7 @@
     "flow_to_yaml",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology"
   ],
@@ -667,6 +669,19 @@
       "qualname": "StepStartContext",
       "signature": "(*, trace_id: str, flow_name: str, step_index: int, tool_name: str, inputs: dict[str, Any], started_at: datetime.datetime) -> None"
     },
+    "Suggestion": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "code": "str",
+        "message": "str",
+        "step_index": "int | NoneType",
+        "title": "str",
+        "tool_name": "str | NoneType"
+      },
+      "module": "chainweaver.analyzer",
+      "qualname": "Suggestion",
+      "signature": "(*, code: str, title: str, step_index: int | NoneType = None, tool_name: str | NoneType = None, message: str) -> None"
+    },
     "Tool": {
       "kind": "class",
       "module": "chainweaver.tools",
@@ -796,6 +811,12 @@
       "module": "chainweaver.compat",
       "qualname": "schema_fingerprint",
       "signature": "(model: type[BaseModel]) -> str"
+    },
+    "suggest_optimizations": {
+      "kind": "function",
+      "module": "chainweaver.analyzer",
+      "qualname": "suggest_optimizations",
+      "signature": "(flow: Flow | DAGFlow, *, tools: Iterable[Tool] | None = None, traces: list[ExecutionResult] | None = None) -> list[Suggestion]"
     },
     "tool": {
       "kind": "function",
