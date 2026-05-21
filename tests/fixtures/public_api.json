@@ -46,6 +46,9 @@
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
+    "MCPError",
+    "MCPSchemaConversionError",
+    "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
     "RedactionPolicy",
@@ -90,7 +93,7 @@
   ],
   "python_version": [
     3,
-    14
+    11
   ],
   "symbols": {
     "AttestationInputError": {
@@ -496,6 +499,24 @@
       "qualname": "InvalidFlowVersionError",
       "signature": "(flow_name: str, version: str, detail: str) -> None"
     },
+    "MCPError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPError",
+      "signature": null
+    },
+    "MCPSchemaConversionError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPSchemaConversionError",
+      "signature": "(tool_name: str, detail: str) -> None"
+    },
+    "MCPToolInvocationError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPToolInvocationError",
+      "signature": "(tool_name: str, detail: str) -> None"
+    },
     "ObservedStep": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -686,7 +707,7 @@
       "kind": "class",
       "module": "chainweaver.tools",
       "qualname": "Tool",
-      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True) -> None"
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True) -> None"
     },
     "ToolChain": {
       "kind": "GenericAlias",

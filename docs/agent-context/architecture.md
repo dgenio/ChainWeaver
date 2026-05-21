@@ -30,7 +30,8 @@ and tools, the same flow produces the same output every time.
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
 | `analyzer.py` | `ChainAnalyzer`: offline schema-compatibility analysis — compatibility matrix, chain enumeration, suggested flows (#77) | Pure static pass: no LLM, no network, no randomness; cycle-free DFS bounded by `max_depth` |
-| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection | **No LLM, no network I/O, no randomness** |
+| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection. `execute_flow_async` provides the async lane (#80). | **No LLM, no network I/O, no randomness** |
+| `mcp/` | MCP integration package (#70, #72, #150): `MCPToolAdapter` (inbound), `FlowServer` (outbound), JSON Schema ↔ Pydantic bridge. Async-only — relies on `FlowExecutor.execute_flow_async`. | All third-party `mcp` imports guarded; isolated from `executor.py` per the no-network-I/O invariant. |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
@@ -100,7 +101,7 @@ files that conflict with these names:
 | `observer.py` | #78 | Runtime flow observer |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
-| `mcp/` | #70, #72 | MCP adapter + flow server |
+| ~~`mcp/`~~ | #70, #72, #150 ✅ | MCP adapter + flow server (delivered; requires `chainweaver[mcp]`) |
 | `integrations/` | #82 | LangChain/LlamaIndex bridge adapters |
 | `export/` | #25 | Flow export formats |
 | `governance.py` | #13 | Governance policies |

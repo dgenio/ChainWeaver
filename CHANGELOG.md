@@ -8,6 +8,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP integration package** (#70, #72, #150): new `chainweaver.mcp`
+  subpackage built on the official `mcp` Python SDK.
+  - `MCPToolAdapter(session).discover_tools(server_prefix="…")` wraps
+    each tool advertised by an MCP `ClientSession` as a ChainWeaver
+    `Tool`.  Server-prefixed naming policy (#150) keeps multi-server
+    catalogues collision-free.  Wrapped tools default to
+    `cacheable=False` since remote calls can touch external state.
+  - `FlowServer(executor, *, name, flow_names=None, server_prefix="")`
+    mounts registered flows on a FastMCP server.  Each flow is
+    advertised as one MCP tool whose `inputSchema` is derived from the
+    flow's input schema (or first-step tool's input).  Dispatcher
+    signatures are synthesised from `input_schema.model_fields` so MCP
+    clients call `tool(field=value)` directly rather than wrapping
+    everything under a `payload` parameter.  `serve()` (blocking) and
+    `serve_async(transport=...)` (event-loop friendly) both expose
+    stdio / SSE / Streamable-HTTP transports via FastMCP.
+  - `jsonschema_to_pydantic(schema, name=…)` + companion
+    `pydantic_to_jsonschema` bridge the wire format both directions.
+  - New optional extra: `pip install 'chainweaver[mcp]'`.
+- **Async executor lane** (#80): `FlowExecutor.execute_flow_async`
+  coroutine that mirrors `execute_flow` natively in the calling event
+  loop.  Each step is dispatched through `Tool.run_async`; async-fn
+  tools (e.g. the MCP-wrapped ones) are awaited natively while sync
+  tools are offloaded via `asyncio.to_thread`.  Retries use
+  `asyncio.sleep` for backoff; middleware and `on_error` policies fire
+  on the same surface as the sync path.  Linear and DAG flows both
+  supported.  Step cache + crash-resume checkpoint will follow.
+- **`Tool.run_async`** + **`Tool.is_async`** (#80): `Tool` now accepts
+  a sync or async `fn`; the cached `is_async` flag is computed once
+  during construction and exercised by both runners.  `Tool.run`
+  (sync) drives async tools via `asyncio.run` when no loop is running,
+  and raises `ToolDefinitionError` when invoked from inside a running
+  loop so callers don't silently break event-loop ownership.
+- **New exception family**: `MCPError`, `MCPSchemaConversionError`,
+  `MCPToolInvocationError`.  All inherit `ChainWeaverError` and are
+  exported in `chainweaver.__all__`.
+- **Examples**: `examples/mcp_adapter.py` (inbound) and
+  `examples/mcp_flow_server.py` (outbound) — both runnable against the
+  in-memory FastMCP transport.
+
+### Changed
+
+- **`Tool.__init__` `fn` parameter type** widened to
+  `Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]]` (#80)
+  — previously the sync return shape only.
+- **`docs/agent-context/architecture.md`** module-boundaries table
+  gained the `mcp/` row; planned-modules table flips `mcp/` to
+  delivered.
+- **`AGENTS.md`** repo map and Key entry points expanded with
+  `execute_flow_async`, `MCPToolAdapter`, and `FlowServer`.
+
 ## [0.7.0] - 2026-05-20
 
 ### Added
