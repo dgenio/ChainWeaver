@@ -33,6 +33,9 @@ dependencies = [
 [project.scripts]
 chainweaver = "chainweaver.cli:main"
 
+[project.entry-points.pytest11]
+chainweaver = "pytest_chainweaver"
+
 [project.optional-dependencies]
 yaml = [
     "pyyaml>=6.0",
@@ -96,3 +99,13 @@ disallow_untyped_defs = false
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["chainweaver*"]
+
+# The pytest plugin (``pytest_chainweaver``) lives at the repo root so
+# that pytest's ``pytest11`` entry-point loader does not transitively
+# import ``chainweaver`` before ``pytest-cov`` can start coverage
+# tracking.  Without this, every import-time statement in the
+# ChainWeaver package would be counted as "missed" and the project-
+# wide coverage percentage would collapse from ~94 % to ~64 %.  See
+# the module docstring of ``pytest_chainweaver.py`` for details.
+[tool.setuptools]
+py-modules = ["pytest_chainweaver"]

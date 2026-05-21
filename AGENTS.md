@@ -52,6 +52,12 @@ chainweaver/
 ├── integrations/      Optional third-party adapters (each guards its extra import)
 │   ├── __init__.py    Package marker; documents available integrations
 │   └── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+├── testing/           Public test harness for flows (#132, #153)
+│   ├── __init__.py    Re-exports FlowTestRunner / fake_tool / capture_steps / assert_result_matches / record_then_replay / FixtureStaleError / RecordReplayMode / DEFAULT_IGNORE_FIELDS
+│   ├── fakes.py       fake_tool: permissive-schema Tool factory for tests
+│   ├── runner.py      FlowTestRunner facade + capture_steps context manager
+│   ├── assertions.py  assert_result_matches with volatile-field normalisation
+│   └── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation
@@ -66,6 +72,7 @@ tests/
 ├── test_*.py          Test files
 examples/
 └── simple_linear_flow.py   Runnable standalone usage example
+pytest_chainweaver.py      Top-level pytest plugin module (#132); registered via [project.entry-points.pytest11]. Deliberately outside the chainweaver/ package so pytest's entry-point loader does not transitively import chainweaver before pytest-cov starts coverage measurement.
 pyproject.toml             Ruff, mypy, pytest config (source of truth for tooling)
 .github/workflows/         CI (ci.yml) and publish (publish.yml) pipelines
 ```
