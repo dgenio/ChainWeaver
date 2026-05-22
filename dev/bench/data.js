@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779443448187,
+  "lastUpdate": 1779444210206,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -144,6 +144,78 @@ window.BENCHMARK_DATA = {
             "value": 0.2916330000175549,
             "unit": "ms",
             "extra": "min=0.27ms max=0.31ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "distinct": true,
+          "id": "ceaf0250cf3cf7cfa2019f7dacfacc7664fb40d1",
+          "message": "chore: release v0.8.0",
+          "timestamp": "2026-05-22T11:01:57+01:00",
+          "tree_id": "e8d74c83b979e1c69d7b683abb8209f9901d92aa",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/ceaf0250cf3cf7cfa2019f7dacfacc7664fb40d1"
+        },
+        "date": 1779444209842,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.1867049999759729,
+            "unit": "ms",
+            "extra": "min=0.17ms max=0.23ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.13073100001292914,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.24472000001196648,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.28ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.15700999998102816,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.99501600001781,
+            "unit": "ms",
+            "extra": "min=101.92ms max=102.36ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.3795590000379434,
+            "unit": "ms",
+            "extra": "min=0.37ms max=0.46ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.62768199999164,
+            "unit": "ms",
+            "extra": "min=251.62ms max=251.66ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.36685000003444657,
+            "unit": "ms",
+            "extra": "min=0.36ms max=0.39ms repeats=5"
           }
         ]
       }
