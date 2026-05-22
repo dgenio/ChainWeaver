@@ -39,12 +39,14 @@
 ## Public API
 
 - [ ] New public symbols added to `chainweaver/__init__.py` `__all__`.
+- [ ] Intentional public API changes regenerate `tests/fixtures/public_api.json` with `python tests/scripts/regen_public_api.py`.
 - [ ] New exceptions: `__init__.py` + `__all__` + README error table — all updated.
 - [ ] `StepRecord` / `ExecutionResult` remain as dataclasses (not converted to Pydantic).
-- [ ] If `__all__`, a public class's attributes/methods, a public function's
-      signature, or a Pydantic model's fields changed, run
-      `python tests/scripts/regen_public_api.py` and commit
-      `tests/fixtures/public_api.json` in the same PR.
+- [ ] If the public API surface changed (symbols added/removed, signatures
+      changed, Pydantic fields added), the snapshot fixture is regenerated:
+      `python tests/scripts/regen_public_api.py` — and the resulting
+      `tests/fixtures/public_api.json` is committed in the same PR.
+      See [`tests/test_public_api_snapshot.py`](../../tests/test_public_api_snapshot.py).
 
 ---
 

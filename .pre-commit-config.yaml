@@ -1,72 +1,96 @@
-# Pre-commit hooks for ChainWeaver.
+# Pre-commit hooks for ChainWeaver (issue #137).
 #
-# These hooks mirror three of the four AGENTS.md §7 validation commands
-# (ruff check, ruff format --check, mypy). pytest is excluded from
-# pre-commit to keep commit speed reasonable — run it manually or rely
-# on CI. Hooks use `language: system` so they run from the project venv
-# with the same tool versions as `pip install -e ".[dev]"`.
+# Install once per clone:
+#     pip install -e ".[dev]" pre-commit
+#     pre-commit install
 #
-# See CONTRIBUTING.md § "Pre-commit hooks" for install instructions and
-# the policy on hook failures.
+# Run manually against the whole tree:
+#     pre-commit run --all-files
+#
+# Conventions:
+# - The four canonical Python checks (ruff check / ruff format --check / mypy)
+#   are `local` hooks so they invoke exactly the commands documented in
+#   AGENTS.md §7 — including the scope `chainweaver/ tests/ examples/`. This
+#   keeps the hook output identical to CI; see lessons-learned.md rule #3
+#   ("commands that don't match CI exactly").
+# - External hooks are pinned to specific tags. Update them deliberately.
+
+default_language_version:
+  python: python3.10
+
+# Don't waste time on auto-fixes in CI/headless contexts.
+default_stages: [pre-commit, manual]
 
 repos:
-  # ---------------------------------------------------------------
-  # Stdlib hygiene
-  # ---------------------------------------------------------------
+  # ---------------------------------------------------------------------
+  # Canonical four checks (mirror AGENTS.md §7 verbatim).
+  # ---------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check chainweaver/ tests/ examples/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-format-check
+        name: ruff format --check
+        entry: ruff format --check chainweaver/ tests/ examples/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy
+        entry: python -m mypy chainweaver/ tests/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # ---------------------------------------------------------------------
+  # Generic hygiene.
+  # ---------------------------------------------------------------------
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: '\.svg$'
       - id: end-of-file-fixer
+        exclude: '\.secrets\.baseline$'
       - id: check-yaml
+        # Allow multi-document YAML for GitHub Actions composite actions
+        # that occasionally use --- separators.
+        args: [--allow-multiple-documents]
       - id: check-toml
-      - id: check-added-large-files
-        args: ["--maxkb=500"]
       - id: check-merge-conflict
-      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: mixed-line-ending
+        args: [--fix=lf]
 
-  # ---------------------------------------------------------------
-  # Ruff: lint + format-check (system hooks — uses project venv)
-  # ---------------------------------------------------------------
-  - repo: local
+  # ---------------------------------------------------------------------
+  # Secret scanning.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
     hooks:
-      - id: ruff-check
-        name: ruff check chainweaver/ tests/ examples/
-        entry: ruff check chainweaver/ tests/ examples/
-        language: system
-        pass_filenames: false
-        always_run: true
-      - id: ruff-format-check
-        name: ruff format --check chainweaver/ tests/ examples/
-        entry: ruff format --check chainweaver/ tests/ examples/
-        language: system
-        pass_filenames: false
-        always_run: true
+      - id: detect-secrets
+        args:
+          - --baseline
+          - .secrets.baseline
+        # Don't rescan the baseline itself or test fixtures whose
+        # contents are intentionally secret-shaped.
+        exclude: |
+          (?x)^(
+            \.secrets\.baseline|
+            tests/fixtures/.*
+          )$
 
-  # ---------------------------------------------------------------
-  # Mypy strict type-check (system hook — uses project venv)
-  # ---------------------------------------------------------------
-  - repo: local
-    hooks:
-      - id: mypy
-        name: python -m mypy chainweaver/ tests/
-        entry: python -m mypy chainweaver/ tests/
-        language: system
-        pass_filenames: false
-        always_run: true
-
-  # ---------------------------------------------------------------
-  # Secret scanning — gitleaks (richer than detect-private-key alone)
-  # ---------------------------------------------------------------
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
-    hooks:
-      - id: gitleaks
-
-  # ---------------------------------------------------------------
-  # actionlint — keep .github/workflows/*.yml syntactically valid
-  # ---------------------------------------------------------------
+  # ---------------------------------------------------------------------
+  # GitHub Actions workflow + composite-action linting.
+  # ---------------------------------------------------------------------
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.4
+    rev: v1.7.7
     hooks:
       - id: actionlint

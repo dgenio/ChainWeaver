@@ -1,0 +1,145 @@
+{
+  "flow_name": "etl-pipeline",
+  "success": true,
+  "final_output": {
+    "records": [
+      {
+        "id": 1
+      },
+      {
+        "id": 2
+      },
+      {
+        "id": 3
+      }
+    ],
+    "transformed": [
+      {
+        "id": 1,
+        "processed": true
+      },
+      {
+        "id": 2,
+        "processed": true
+      },
+      {
+        "id": 3,
+        "processed": true
+      }
+    ],
+    "stored_count": 3
+  },
+  "execution_log": [
+    {
+      "step_index": 0,
+      "tool_name": "fetch_data",
+      "inputs": {
+        "source": "api"
+      },
+      "outputs": {
+        "records": [
+          {
+            "id": 1
+          },
+          {
+            "id": 2
+          },
+          {
+            "id": 3
+          }
+        ]
+      },
+      "error_type": null,
+      "error_message": null,
+      "success": true,
+      "started_at": "2026-05-18T10:00:00Z",
+      "ended_at": "2026-05-18T10:00:00Z",
+      "duration_ms": 45.2,
+      "retry_count": 0,
+      "retry_errors": [],
+      "skipped": false
+    },
+    {
+      "step_index": 1,
+      "tool_name": "transform_records",
+      "inputs": {
+        "records": [
+          {
+            "id": 1
+          },
+          {
+            "id": 2
+          },
+          {
+            "id": 3
+          }
+        ]
+      },
+      "outputs": {
+        "transformed": [
+          {
+            "id": 1,
+            "processed": true
+          },
+          {
+            "id": 2,
+            "processed": true
+          },
+          {
+            "id": 3,
+            "processed": true
+          }
+        ]
+      },
+      "error_type": null,
+      "error_message": null,
+      "success": true,
+      "started_at": "2026-05-18T10:00:00Z",
+      "ended_at": "2026-05-18T10:00:00Z",
+      "duration_ms": 12.8,
+      "retry_count": 0,
+      "retry_errors": [],
+      "skipped": false
+    },
+    {
+      "step_index": 2,
+      "tool_name": "store_results",
+      "inputs": {
+        "transformed": [
+          {
+            "id": 1,
+            "processed": true
+          },
+          {
+            "id": 2,
+            "processed": true
+          },
+          {
+            "id": 3,
+            "processed": true
+          }
+        ]
+      },
+      "outputs": {
+        "stored_count": 3
+      },
+      "error_type": null,
+      "error_message": null,
+      "success": true,
+      "started_at": "2026-05-18T10:00:00Z",
+      "ended_at": "2026-05-18T10:00:00Z",
+      "duration_ms": 31.5,
+      "retry_count": 0,
+      "retry_errors": [],
+      "skipped": false
+    }
+  ],
+  "trace_id": "a1b2c3d4e5f60718192021222324252",
+  "started_at": "2026-05-18T10:00:00Z",
+  "ended_at": "2026-05-18T10:00:00Z",
+  "total_duration_ms": 91.0,
+  "cost_report": null,
+  "initial_input": {
+    "source": "api"
+  }
+}

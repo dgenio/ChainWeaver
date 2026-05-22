@@ -8,33 +8,35 @@ naive-chaining approach we expect ChainWeaver to displace.
 ## Running
 
 ```bash
-# Default sweep (4 cases, ~5 seconds wall-clock)
+# Default sweep (4 cases × 5 repeats, ~25 seconds wall-clock)
 python benchmarks/bench_naive_vs_compiled.py
 
 # Single ad-hoc case
 python benchmarks/bench_naive_vs_compiled.py --steps 10 --llm-ms 500
 
-# Median-of-N reporting (smooths runner jitter)
-python benchmarks/bench_naive_vs_compiled.py --repeats 5
-
-# Emit a machine-readable JSON report alongside the human table
+# Emit the CI-shape JSON report alongside the human table
 python benchmarks/bench_naive_vs_compiled.py --output results/bench.json
 
-# Emit a flat array in the benchmark-action/github-action-benchmark
-# customSmallerIsBetter format (used by the CI bench guard)
+# Also emit the rich, full-shape JSON for debugging
 python benchmarks/bench_naive_vs_compiled.py \
-    --benchmark-action-output results/bench-flat.json
+    --output results/bench.json \
+    --full-output results/bench-full.json
 ```
 
 `time.sleep` is used to simulate the LLM round-trip — no real LLM is
 invoked, so the benchmark is reproducible and dependency-free.  All
 durations are measured with `time.perf_counter`.
 
+Each case runs `--repeats` times (default `5`); the script reports the
+median, min, and max for every measured metric so reviewers can eyeball
+the variance. Median-of-5 is enough to swallow per-run jitter on shared
+CI runners without inflating wall-clock time.
+
 ## Metrics captured
 
 | Metric | Meaning |
 |--------|---------|
-| `total_duration_ms` | Wall-clock time for the full chain. |
+| `total_duration_ms` | Wall-clock time for the full flow. |
 | `tool_execution_ms` | Cumulative time spent inside tool functions. |
 | `overhead_ms` | `total_duration_ms - tool_execution_ms` (orchestration cost). |
 | `llm_calls_count` | Number of simulated LLM calls (naive only). |
@@ -64,96 +66,80 @@ durations are measured with `time.perf_counter`.
   separately in issue #80).
 - Cross-language comparisons.
 
-## JSON report shape
+## JSON report shapes
 
-When `--output` is supplied the script writes a JSON document of the
-shape:
+### `--output` (CI shape)
+
+When `--output` is supplied the script writes the
+[`benchmark-action/github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark)
+`customSmallerIsBetter` shape — a flat list of `{name, unit, value, extra}`
+entries:
 
 ```json
-{
-  "cases": [
-    {
-      "n_steps": 5,
-      "llm_delay_ms": 200.0,
-      "tool_delay_ms": 0.0,
-      "rows": [
-        { "approach": "naive",    "total_duration_ms": 803.4, "...": "..." },
-        { "approach": "compiled", "total_duration_ms": 1.1,   "...": "..." }
-      ],
-      "speedup_factor": 730.4,
-      "llm_calls_avoided": 4
-    }
-  ]
-}
+[
+  {
+    "name": "compiled_total_ms_n5_llm200_tool0",
+    "unit": "ms",
+    "value": 0.211,
+    "extra": "min=0.19ms max=0.22ms repeats=5"
+  },
+  {
+    "name": "compiled_overhead_ms_n5_llm200_tool0",
+    "unit": "ms",
+    "value": 0.145,
+    "extra": "min=0.13ms max=0.15ms repeats=5"
+  }
+]
 ```
 
-This format is stable enough to feed into a CI tracker if/when the
-historical-tracking issue (out of scope for #29) lands.
+Two metrics per case:
 
-## CI performance-budget guard (issue #144)
+| Metric | Why it matters |
+|---|---|
+| `compiled_total_ms_<suffix>` | Headline regression metric. Includes simulated tool delays. |
+| `compiled_overhead_ms_<suffix>` | Pure orchestration cost (`total - tool_time`). Sub-millisecond at every flow length; this is the metric that actually catches a new validation pass or `model_copy`. |
 
-`.github/workflows/bench.yml` runs the benchmark on every PR and on
-push to `main`, then hands the result to
-[`benchmark-action/github-action-benchmark`][bench-action]. History is
-stored on the repo's own `gh-pages` branch (no SaaS dependency); the
-action posts a PR comment when `total_duration_ms` regresses beyond the
-**125 % alert threshold** (i.e. a +25 % slowdown).
+The suffix encodes the case parameters (`n{steps}_llm{ms}_tool{ms}`) so
+metric names are stable and unique across the default sweep.
 
-### Failure semantics
+### `--full-output` (rich shape)
 
-A failing bench job means **the median `total_duration_ms` for one or
-more named metrics is at least 25 % worse than the `gh-pages` baseline**.
-The PR comment lists every metric that tripped the threshold, with the
-old and new values side-by-side.
+`--full-output` writes the same data shown in the stdout table — useful
+for debugging or for generating a local diff against `baseline.json`.
 
-If the regression is genuine, fix it in the same PR — do not relax the
-threshold. If the regression is intentional (e.g. you traded latency
-for correctness), document the trade-off in the PR description and
-[refresh the baseline](#refreshing-the-baseline) on `main`.
+## CI bench guard (`.github/workflows/bench.yml`)
 
-### Variance and OS pinning
+The bench workflow runs the default sweep on every PR and push to
+`main`, uploads the result via `benchmark-action/github-action-benchmark`,
+and stores the history on the repo's `gh-pages` branch.
 
-- Runner OS is pinned to `ubuntu-22.04` to avoid glibc-driven variance
-  ([CodSpeed note][glibc-note]).
-- macOS and Windows runners are deliberately **not** included — their
-  wall-clock variance is too high for a hard gate.
-- `--repeats 5` with median reporting smooths transient runner jitter.
+| Setting | Value |
+|---|---|
+| Runner | `ubuntu-22.04` (pinned to avoid glibc-driven variance) |
+| Python | 3.10 |
+| Repeats | 5 (median reporting) |
+| Tool | `customSmallerIsBetter` |
+| Alert threshold | `125 %` — fail the PR if any compiled metric regresses > 25 % |
+| Comment | Posted on PR when the threshold trips |
 
-### One-off `gh-pages` initialization
+### `gh-pages` branch
 
-Before the first run, a maintainer must seed the `gh-pages` branch with
-an initial benchmark dataset (the action will not create the branch on
-its own). This is a one-time bootstrap step:
+The workflow self-bootstraps the `gh-pages` branch on its first run
+(see the "Ensure gh-pages branch exists" step in
+`.github/workflows/bench.yml`), so no manual init is required. To
+publish the historical chart, enable GitHub Pages from the `gh-pages`
+branch (Settings → Pages) after the workflow's first push to it.
+
+### Refreshing `benchmarks/baseline.json`
+
+`benchmarks/baseline.json` is the human-eyeball reference for local
+runs. It is **not** consumed by the CI workflow (which uses the
+gh-pages history instead). Regenerate it whenever an intentional
+performance change lands and commit the new file in the same PR:
 
 ```bash
-git checkout --orphan gh-pages
-git rm -rf .
-echo "ChainWeaver benchmark history" > index.md
-git add index.md
-git commit -m "chore: initialize gh-pages for benchmark history"
-git push -u origin gh-pages
-git checkout main
+python benchmarks/bench_naive_vs_compiled.py --repeats 5 --output benchmarks/baseline.json
 ```
 
-After this, every subsequent `main` push appends to the history
-automatically.
-
-### Refreshing the baseline
-
-`benchmarks/baseline.json` is the **local sanity reference** — a sample
-run of the default sweep, regenerated only when an intentional perf
-change lands:
-
-```bash
-python benchmarks/bench_naive_vs_compiled.py --repeats 5 \
-    --output benchmarks/baseline.json
-git add benchmarks/baseline.json
-git commit -m "perf: refresh benchmark baseline after <change>"
-```
-
-The CI gate's source of truth lives on `gh-pages`, **not** in
-`baseline.json` — refresh the latter only to keep the local reference
-consistent with current `main`.
-
-[bench-action]: https://github.com/benchmark-action/github-action-benchmark
-[glibc-note]: https://codspeed.io/blog/unrelated-benchmark-regression
+Absolute numbers vary across machines; the baseline is a relative
+reference, not a CI gate.

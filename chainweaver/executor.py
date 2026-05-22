@@ -13,9 +13,12 @@ strings so the result is JSON-serializable end-to-end.
 
 from __future__ import annotations
 
+import contextlib
+import queue
+import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -24,8 +27,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
+from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
+from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
+from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
+    CheckpointDriftError,
+    CheckpointerNotConfiguredError,
+    CheckpointNotFoundError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
@@ -50,11 +59,20 @@ from chainweaver.log_utils import (
     log_step_error,
     log_step_start,
 )
+from chainweaver.middleware import (
+    BaseMiddleware,
+    FlowEndContext,
+    FlowExecutorMiddleware,
+    FlowStartContext,
+    StepEndContext,
+    StepStartContext,
+)
 from chainweaver.observation import TraceRecorder
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
 _logger = get_logger("chainweaver.executor")
+_middleware_logger = get_logger("chainweaver.middleware")
 
 
 def _now_utc() -> datetime:
@@ -70,6 +88,74 @@ def _new_trace_id() -> str:
 def _exc_to_strings(exc: Exception) -> tuple[str, str]:
     """Render an exception as ``(error_type, error_message)`` strings."""
     return type(exc).__name__, str(exc)
+
+
+class _StreamSentinel:
+    """Internal marker placed on the event queue to signal completion."""
+
+
+_STREAM_SENTINEL: _StreamSentinel = _StreamSentinel()
+
+
+class _StreamCollectorMiddleware(BaseMiddleware):
+    """Per-call middleware that pushes lifecycle events onto a queue.
+
+    Used by :meth:`FlowExecutor.stream_flow` to bridge the lifecycle
+    hook surface to a generator yielding :class:`FlowEvent` payloads.
+    """
+
+    def __init__(self, events: queue.Queue[FlowEvent | _StreamSentinel]) -> None:
+        self._events = events
+
+    def on_flow_start(self, ctx: FlowStartContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="flow_start",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                flow_version=ctx.flow_version,
+                initial_input=dict(ctx.initial_input),
+                total_steps=ctx.total_steps,
+            )
+        )
+
+    def on_step_start(self, ctx: StepStartContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="step_start",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_index,
+                tool_name=ctx.tool_name,
+                inputs=dict(ctx.inputs),
+            )
+        )
+
+    def on_step_end(self, ctx: StepEndContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="step_end",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_record.step_index,
+                tool_name=ctx.step_record.tool_name,
+                step_record=ctx.step_record,
+            )
+        )
+
+    def on_flow_end(self, ctx: FlowEndContext) -> None:
+        self._events.put(
+            FlowEvent(
+                kind="flow_end",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                result=ctx.result,
+            )
+        )
 
 
 def _schema_field_shape(schema: type[BaseModel]) -> dict[str, str]:
@@ -257,6 +343,11 @@ class StepRecord(BaseModel):
         skipped: ``True`` when the step exhausted its retries and the
             configured ``on_error="skip"`` action let the flow continue
             without merging any output.
+        cached: ``True`` when the step's outputs were served from the
+            executor's ``step_cache`` (issue #127) and the tool's
+            callable was not invoked.  ``duration_ms`` for cached steps
+            reflects only the cache lookup time.  ``False`` for normal
+            executions (the default).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -274,6 +365,7 @@ class StepRecord(BaseModel):
     retry_count: int = 0
     retry_errors: list[str] = Field(default_factory=list)
     skipped: bool = False
+    cached: bool = False
 
 
 class ExecutionResult(BaseModel):
@@ -301,7 +393,17 @@ class ExecutionResult(BaseModel):
         started_at: UTC timestamp when the execution began.
         ended_at: UTC timestamp when the execution finished.
         total_duration_ms: Wall-clock duration of the full execution in
-            milliseconds, measured with :func:`time.perf_counter`.
+            milliseconds, measured with :func:`time.perf_counter`.  For
+            executions produced by :meth:`FlowExecutor.resume_flow`
+            (issue #128), this covers **only** the resume process's
+            wall-clock — not the elapsed time between
+            ``started_at`` (captured in the original, crashed run) and
+            ``ended_at``.  In other words, ``total_duration_ms`` is the
+            time the executor *spent running tools* and is not
+            equivalent to ``(ended_at - started_at)`` after a resume.
+            Recovered step records still carry their original
+            ``started_at``/``ended_at`` timestamps; freshly executed
+            records carry resume-process timestamps.
         cost_report: Optional :class:`~chainweaver.cost.CostReport` estimating
             the LLM-call cost and latency avoided by running this compiled
             flow.  ``None`` unless the executor was constructed with a
@@ -350,6 +452,21 @@ class FlowExecutor:
 
     There are **no LLM calls** at any point in this process.
 
+    **Concurrency**: a single :class:`FlowExecutor` instance is **not**
+    safe for concurrent :meth:`execute_flow`, :meth:`stream_flow`,
+    :meth:`resume_flow`, or :meth:`replay_flow` calls.  The
+    middleware list, the step cache, the checkpointer, the
+    ``_in_replay`` flag, the ``_resume_snapshot`` slot, and the
+    internal stream-collector all live on instance state.  Two
+    concurrent ``stream_flow`` calls on the same executor would each
+    push a collector that the other run also dispatches to — yielding
+    cross-talk where each generator receives the other flow's
+    events.  If you need to drive multiple flows in parallel,
+    instantiate one :class:`FlowExecutor` per worker (sharing the
+    underlying :class:`FlowRegistry`, :class:`StepCache`, and
+    :class:`Checkpointer` instances if appropriate — each backend's
+    docstring describes its own concurrency contract).
+
     Args:
         registry: The :class:`~chainweaver.registry.FlowRegistry` that holds
             the flows to execute.
@@ -388,12 +505,101 @@ class FlowExecutor:
         cost_profile: CostProfile | None = None,
         redaction_policy: RedactionPolicy | None = None,
         trace_recorder: TraceRecorder | None = None,
+        middleware: list[FlowExecutorMiddleware] | None = None,
+        step_cache: StepCache | None = None,
+        checkpointer: Checkpointer | None = None,
+        delete_on_success: bool = True,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
         self._cost_profile = cost_profile
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
+        self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
+        # Step-result cache (issue #127).  ``None`` (the default)
+        # disables caching entirely — every tool runs every call.
+        # When set, eligible step outputs are read from / written to
+        # this cache before the tool callable runs.
+        self._step_cache = step_cache
+        # ``True`` while inside replay_flow / _replay_linear_from so
+        # the cache is bypassed — replay must always re-execute (per
+        # the existing replay semantics).
+        self._in_replay = False
+        # Crash-resume checkpointer (issue #128).  When set, an
+        # ExecutionSnapshot is written after every successful linear
+        # step or DAG level.  On terminal completion the snapshot is
+        # deleted iff ``delete_on_success`` is ``True``.
+        self._checkpointer = checkpointer
+        self._delete_on_success = delete_on_success
+        # Resumption state — populated by ``resume_flow`` before
+        # invoking the relevant ``_execute_*`` path so the loops know
+        # where to start and which records to prepend.
+        self._resume_snapshot: ExecutionSnapshot | None = None
+
+    def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
+        """Register an additional :class:`FlowExecutorMiddleware`.
+
+        Middlewares fire in registration order; calling :meth:`add_middleware`
+        appends to the end of the registration chain.
+
+        Args:
+            middleware: An object implementing any subset of the
+                :class:`~chainweaver.middleware.FlowExecutorMiddleware`
+                hooks.  Hooks with default no-op behavior may be omitted.
+        """
+        self._middleware.append(middleware)
+
+    # ------------------------------------------------------------------
+    # Middleware dispatch
+    #
+    # Hook exceptions are caught and logged at WARNING; observability
+    # bugs must never abort a flow execution (issue #131).  Hooks fire
+    # in registration order.
+    # ------------------------------------------------------------------
+
+    def _fire_hook(
+        self,
+        hook: str,
+        ctx: FlowStartContext | StepStartContext | StepEndContext | FlowEndContext,
+    ) -> None:
+        """Dispatch *hook* to every registered middleware, catching exceptions.
+
+        Middlewares that do not define *hook* are silently skipped so that
+        users can implement only the hooks they care about (the ones they
+        do define still satisfy the :class:`FlowExecutorMiddleware`
+        Protocol structurally — partial implementers typically inherit
+        from :class:`~chainweaver.middleware.BaseMiddleware` to satisfy
+        strict static type checkers).
+
+        Hooks that raise are logged at ``WARNING`` and the iteration
+        continues — middleware bugs never abort a flow.
+        """
+        for idx, mw in enumerate(self._middleware):
+            handler = getattr(mw, hook, None)
+            if handler is None:
+                continue
+            try:
+                handler(ctx)
+            except Exception as exc:
+                _middleware_logger.warning(
+                    "Middleware %d (%s) raised in %s: %s",
+                    idx,
+                    type(mw).__name__,
+                    hook,
+                    exc,
+                )
+
+    def _fire_flow_start(self, ctx: FlowStartContext) -> None:
+        self._fire_hook("on_flow_start", ctx)
+
+    def _fire_step_start(self, ctx: StepStartContext) -> None:
+        self._fire_hook("on_step_start", ctx)
+
+    def _fire_step_end(self, ctx: StepEndContext) -> None:
+        self._fire_hook("on_step_end", ctx)
+
+    def _fire_flow_end(self, ctx: FlowEndContext) -> None:
+        self._fire_hook("on_flow_end", ctx)
 
     def register_tool(self, tool: Tool) -> None:
         """Register a :class:`~chainweaver.tools.Tool` with the executor.
@@ -523,12 +729,20 @@ class FlowExecutor:
         """
         flow = self._registry.get_flow(result.flow_name)
 
-        if resume_from_step <= 0:
-            new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
-        else:
-            if isinstance(flow, DAGFlow):
-                raise ValueError("resume_from_step is not supported for DAGFlow yet.")
-            new_result = self._replay_linear_from(flow, result, resume_from_step)
+        # Bypass the step cache for the duration of replay — replay
+        # must always re-execute tools (per the existing replay
+        # semantics and issue #127's acceptance criteria).
+        previous_in_replay = self._in_replay
+        self._in_replay = True
+        try:
+            if resume_from_step <= 0:
+                new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
+            else:
+                if isinstance(flow, DAGFlow):
+                    raise ValueError("resume_from_step is not supported for DAGFlow yet.")
+                new_result = self._replay_linear_from(flow, result, resume_from_step)
+        finally:
+            self._in_replay = previous_in_replay
 
         diffs: list[StepDiff] = []
         if mode is ReplayMode.VERIFY:
@@ -568,9 +782,20 @@ class FlowExecutor:
         flow_t0 = time.perf_counter()
         log: list[StepRecord] = []
 
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow.name,
+                flow_version=flow.version,
+                initial_input=dict(result.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
         for idx in range(resume_from_step, len(flow.steps)):
             step = flow.steps[idx]
-            step_record = self._execute_step(idx, step, context)
+            step_record = self._execute_step(idx, step, context, flow.name, trace_id)
             log.append(step_record)
 
             if not step_record.success:
@@ -779,6 +1004,16 @@ class FlowExecutor:
             trace_id,
             len(flow.steps),
         )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
 
         # -- Flow-level input validation ------------------------------------
         if flow.input_schema is not None:
@@ -811,7 +1046,7 @@ class FlowExecutor:
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
-            record = self._execute_step(idx, step, context)
+            record = self._execute_step(idx, step, context, flow_name, trace_id)
             log.append(record)
 
             if not record.success:
@@ -844,6 +1079,18 @@ class FlowExecutor:
                         key,
                     )
             context.update(record.outputs)
+
+            # Crash-resume checkpoint (issue #128) — write after every
+            # successful step so a fresh process can resume from here.
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:
@@ -883,6 +1130,115 @@ class FlowExecutor:
             perf_start=flow_t0,
             initial_input=initial_input,
         )
+
+    def stream_flow(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        force: bool = False,
+    ) -> Iterator[FlowEvent]:
+        """Execute a flow and yield :class:`FlowEvent` lifecycle events (#134).
+
+        Events arrive in strict order::
+
+            flow_start
+            (step_start, step_end)*       # one pair per executed step
+            flow_end                       # always — inspect result.success
+
+        Steps that fail before input resolution (tool-not-found,
+        input-mapping) emit ``step_end`` without a preceding
+        ``step_start`` — same contract as the underlying middleware
+        hooks.
+
+        The flow runs on a background worker thread; events are delivered
+        through a synchronized queue.
+
+        **Cancellation is not supported** for the sync variant.  If the
+        consumer breaks out of the iteration (or otherwise lets the
+        generator be garbage-collected), the generator's ``finally``
+        block blocks on ``thread.join()`` until the background flow
+        finishes — for a 10-step flow with a long step 3 that means
+        the caller's "stop iterating" intent is silently translated
+        into "block here until everything completes".  A ``WARNING``
+        is logged via the ``chainweaver.executor`` logger when this
+        happens so the behavior shows up in production traces.  For
+        proper cancellation use the async variant once issue #80
+        lands.
+
+        Hook exceptions and middleware exceptions still follow the
+        catch-and-log contract from :class:`FlowExecutorMiddleware`: a
+        consumer that mishandles an event cannot abort the flow.
+
+        Args:
+            flow_name: Name of the flow to execute.
+            initial_input: Initial key/value context passed to the first
+                step.
+            force: When ``True``, bypass the status guard and execute
+                even if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+
+        Yields:
+            :class:`~chainweaver.events.FlowEvent` instances in the order
+            described above.
+
+        Raises:
+            FlowNotFoundError: When *flow_name* is not registered.  This
+                is raised eagerly by the worker thread and re-raised
+                from the generator before any event is yielded.
+            FlowStatusError: When the flow's status is not ``ACTIVE`` and
+                *force* is ``False``.  Same re-raise behavior.
+        """
+        events: queue.Queue[FlowEvent | _StreamSentinel] = queue.Queue()
+        collector = _StreamCollectorMiddleware(events)
+        exc_holder: list[BaseException] = []
+
+        # Per-call mutation of the middleware list is the simplest
+        # correct implementation — see the issue's "boring correct"
+        # note.  FlowExecutor is not documented as thread-safe; users
+        # who need concurrent stream_flow calls should use distinct
+        # FlowExecutor instances.
+        self._middleware.append(collector)
+
+        def _worker() -> None:
+            try:
+                self.execute_flow(flow_name, initial_input, force=force)
+            except BaseException as exc:
+                exc_holder.append(exc)
+            finally:
+                events.put(_STREAM_SENTINEL)
+
+        thread = threading.Thread(
+            target=_worker,
+            name=f"chainweaver-stream-{flow_name}",
+            daemon=True,
+        )
+        thread.start()
+        consumer_abandoned = False
+        try:
+            while True:
+                item = events.get()
+                if isinstance(item, _StreamSentinel):
+                    if exc_holder:
+                        raise exc_holder[0]
+                    return
+                yield item
+        except GeneratorExit:
+            consumer_abandoned = True
+            raise
+        finally:
+            if consumer_abandoned and thread.is_alive():
+                _logger.warning(
+                    "stream_flow consumer abandoned the generator for flow '%s'; "
+                    "background worker continues to completion (cancellation is "
+                    "not supported in the sync variant — see #80).",
+                    flow_name,
+                )
+            thread.join()
+            # Defensive cleanup — collector should always still be in
+            # the list, but suppress ValueError just in case a user
+            # called add_middleware/remove between start and finish.
+            with contextlib.suppress(ValueError):
+                self._middleware.remove(collector)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -938,7 +1294,274 @@ class FlowExecutor:
         )
         if self._trace_recorder is not None:
             self._record_observed_trace(result)
+        # On terminal success delete the snapshot — the resume window
+        # is closed.  Failed runs preserve the snapshot so the operator
+        # can choose to retry the failed step manually (issue #128).
+        if self._checkpointer is not None and self._delete_on_success and result.success:
+            self._checkpointer.delete(result.trace_id)
+        self._fire_flow_end(
+            FlowEndContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                result=result,
+            )
+        )
         return result
+
+    def _save_linear_snapshot(
+        self,
+        *,
+        trace_id: str,
+        flow: Any,
+        initial_input: dict[str, Any],
+        started_at: datetime,
+        context: dict[str, Any],
+        log: list[StepRecord],
+        completed_steps: int,
+    ) -> None:
+        """Write a snapshot for a linear flow execution (issue #128).
+
+        No-op when no checkpointer is configured.  Captures every
+        relevant tool's current ``schema_hash`` so resume can detect
+        drift since the snapshot was written.
+        """
+        if self._checkpointer is None:
+            return
+        tool_hashes: dict[str, str] = {}
+        for step in flow.steps:
+            tool = self._tools.get(step.tool_name)
+            if tool is not None:
+                tool_hashes[step.tool_name] = tool.schema_hash
+        snapshot = ExecutionSnapshot(
+            trace_id=trace_id,
+            flow_name=flow.name,
+            flow_version=flow.version,
+            initial_input=dict(initial_input),
+            started_at=started_at,
+            context=dict(context),
+            execution_log=list(log),
+            completed_steps=completed_steps,
+            tool_schema_hashes=tool_hashes,
+        )
+        self._checkpointer.save(snapshot)
+
+    def _save_dag_snapshot(
+        self,
+        *,
+        trace_id: str,
+        flow: DAGFlow,
+        initial_input: dict[str, Any],
+        started_at: datetime,
+        context: dict[str, Any],
+        log: list[StepRecord],
+        completed_levels: int,
+    ) -> None:
+        """Write a snapshot at a DAG level boundary (issue #128).
+
+        DAG resume uses level granularity — within a level all steps
+        run sequentially, but on resume the level is replayed from
+        scratch.  No-op when no checkpointer is configured.
+        """
+        if self._checkpointer is None:
+            return
+        tool_hashes: dict[str, str] = {}
+        for step in flow.steps:
+            tool = self._tools.get(step.tool_name)
+            if tool is not None:
+                tool_hashes[step.tool_name] = tool.schema_hash
+        snapshot = ExecutionSnapshot(
+            trace_id=trace_id,
+            flow_name=flow.name,
+            flow_version=flow.version,
+            initial_input=dict(initial_input),
+            started_at=started_at,
+            context=dict(context),
+            execution_log=list(log),
+            completed_dag_levels=completed_levels,
+            tool_schema_hashes=tool_hashes,
+        )
+        self._checkpointer.save(snapshot)
+
+    def resume_flow(self, trace_id: str) -> ExecutionResult:
+        """Resume an in-flight execution from a stored snapshot (issue #128).
+
+        Loads the snapshot via the configured ``checkpointer``, validates
+        the snapshot's flow version and tool ``schema_hash`` values
+        against the current registry, then continues execution from the
+        step (linear) or DAG level (DAG) where the previous run left
+        off.  The returned :class:`ExecutionResult` carries the
+        original ``trace_id`` and ``started_at`` from the snapshot, and
+        ``execution_log`` includes both the recovered records and the
+        freshly executed ones.
+
+        On terminal success the snapshot is deleted iff
+        ``delete_on_success=True`` (the default).
+
+        Args:
+            trace_id: Trace id of the snapshot to resume.
+
+        Returns:
+            An :class:`ExecutionResult` for the (now-completed) flow.
+
+        Raises:
+            CheckpointerNotConfiguredError: When no checkpointer was
+                passed to ``FlowExecutor(...)``.
+            CheckpointNotFoundError: When no snapshot exists for
+                *trace_id*.
+            FlowNotFoundError: When the snapshot's flow is no longer
+                registered.
+            CheckpointDriftError: When the flow's version or any tool's
+                ``schema_hash`` has changed since the snapshot was
+                written.
+        """
+        if self._checkpointer is None:
+            raise CheckpointerNotConfiguredError()
+        snapshot = self._checkpointer.load(trace_id)
+        if snapshot is None:
+            raise CheckpointNotFoundError(trace_id)
+
+        flow = self._registry.get_flow(snapshot.flow_name)
+        if flow.version != snapshot.flow_version:
+            raise CheckpointDriftError(
+                trace_id,
+                snapshot.flow_name,
+                f"flow version changed: snapshot='{snapshot.flow_version}' "
+                f"current='{flow.version}'",
+            )
+        for tool_name, snap_hash in snapshot.tool_schema_hashes.items():
+            current = self._tools.get(tool_name)
+            if current is None:
+                raise CheckpointDriftError(
+                    trace_id,
+                    snapshot.flow_name,
+                    f"tool '{tool_name}' is no longer registered",
+                )
+            if current.schema_hash != snap_hash:
+                raise CheckpointDriftError(
+                    trace_id,
+                    snapshot.flow_name,
+                    f"tool '{tool_name}' schema_hash changed: "
+                    f"snapshot='{snap_hash}' current='{current.schema_hash}'",
+                )
+
+        if isinstance(flow, DAGFlow):
+            return self._resume_dag_flow(flow, snapshot)
+        return self._resume_linear_flow(flow, snapshot)
+
+    def _resume_linear_flow(
+        self,
+        flow: Any,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Continue a linear execution from *snapshot.completed_steps*."""
+        trace_id = snapshot.trace_id
+        flow_name = snapshot.flow_name
+        flow_started_at = snapshot.started_at
+        # perf_start anchors total_duration_ms; resume time is the wall
+        # clock from the resume point on, not the original elapsed
+        # duration.  Document this in the result interpretation if
+        # users want cross-resume totals they can sum execution_log
+        # durations.
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "Flow '%s' resuming | trace_id=%s | from_step=%d",
+            flow_name,
+            trace_id,
+            snapshot.completed_steps,
+        )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(snapshot.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        context: dict[str, Any] = dict(snapshot.context)
+        log: list[StepRecord] = list(snapshot.execution_log)
+
+        for idx in range(snapshot.completed_steps, len(flow.steps)):
+            step = flow.steps[idx]
+            record = self._execute_step(idx, step, context, flow_name, trace_id)
+            log.append(record)
+
+            if not record.success:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                )
+
+            assert record.outputs is not None  # success guarantees outputs
+            context.update(record.outputs)
+
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=snapshot.initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
+
+        # Flow-level output validation (mirrors execute_flow).
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow_name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=dict(snapshot.initial_input),
+        )
+
+    def _resume_dag_flow(
+        self,
+        flow: DAGFlow,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Continue a DAG execution from *snapshot.completed_dag_levels*."""
+        # Use the resume slot the existing _execute_dag_flow consults
+        # to seed context, log, and starting level.  Cleanup happens
+        # via the try/finally in resume_flow's caller — but resume_flow
+        # doesn't wrap in try/finally; we wrap here instead to keep
+        # the contract local.
+        self._resume_snapshot = snapshot
+        try:
+            return self._execute_dag_flow(flow, dict(snapshot.initial_input))
+        finally:
+            self._resume_snapshot = None
 
     def _record_observed_trace(self, result: ExecutionResult) -> None:
         """Mirror an :class:`ExecutionResult` into the configured TraceRecorder."""
@@ -1032,6 +1655,8 @@ class FlowExecutor:
         step_index: int,
         step: FlowStep,
         context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -1040,10 +1665,22 @@ class FlowExecutor:
         (``"fail"`` / ``"skip"`` / ``"fallback:<tool_name>"``) when all
         attempts are exhausted.
 
+        Fires :class:`~chainweaver.middleware.StepStartContext` once the
+        step's inputs have been resolved, and always fires
+        :class:`~chainweaver.middleware.StepEndContext` for the resulting
+        :class:`StepRecord` (success *and* failure paths).  Steps that
+        fail before input resolution — tool-not-found, input-mapping —
+        do not produce a ``on_step_start`` call but still produce
+        ``on_step_end``.
+
         Args:
             step_index: Zero-based position of the step.
             step: The step to execute.
             context: The current accumulated context.
+            flow_name: Name of the enclosing flow, threaded through for
+                middleware contexts.
+            trace_id: Trace id of the enclosing execution, threaded
+                through for middleware contexts.
 
         Returns:
             A :class:`StepRecord` describing the outcome with full timing.
@@ -1065,6 +1702,7 @@ class FlowExecutor:
             success: bool,
             skipped: bool,
             retry_errors: list[str],
+            cached: bool = False,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -1086,23 +1724,59 @@ class FlowExecutor:
                 retry_count=retry_count,
                 retry_errors=list(retry_errors),
                 skipped=skipped,
+                cached=cached,
             )
+
+        def _finish(record: StepRecord) -> StepRecord:
+            self._fire_step_end(
+                StepEndContext(
+                    trace_id=trace_id,
+                    flow_name=flow_name,
+                    step_record=record,
+                )
+            )
+            return record
 
         try:
             tool = self.get_tool(step.tool_name)
         except ToolNotFoundError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _record(
-                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
             )
 
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
             log_step_error(_logger, step_index, step.tool_name, exc)
-            return _record(
-                inputs={}, outputs=None, error=exc, success=False, skipped=False, retry_errors=[]
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
             )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs=dict(inputs),
+                started_at=started_at,
+            )
+        )
 
         log_step_start(
             _logger,
@@ -1111,6 +1785,46 @@ class FlowExecutor:
             inputs,
             redaction=self._redaction_policy,
         )
+
+        # Cache lookup (issue #127).  Skip caching during replay_flow
+        # (replay always re-executes) and for tools that opt out via
+        # ``cacheable=False``.  Input validation runs inside the cache
+        # path so we can hash the *validated* form — equivalent inputs
+        # that differ only in field ordering or coercion collapse onto
+        # the same key.  If validation fails, fall through to the
+        # normal execution path, which surfaces the same error.
+        cache_key: StepCacheKey | None = None
+        if self._step_cache is not None and tool.cacheable and not self._in_replay:
+            try:
+                validated = tool.input_schema.model_validate(inputs)
+            except ValidationError:
+                validated = None  # let the normal path raise
+            if validated is not None:
+                cache_key = StepCacheKey(
+                    tool_name=tool.name,
+                    schema_hash=tool.schema_hash,
+                    input_value_hash=compute_input_value_hash(validated),
+                )
+                cached_output = self._step_cache.get(cache_key)
+                if cached_output is not None:
+                    log_step_end(
+                        _logger,
+                        step_index,
+                        step.tool_name,
+                        cached_output,
+                        redaction=self._redaction_policy,
+                    )
+                    return _finish(
+                        _record(
+                            inputs=inputs,
+                            outputs=cached_output,
+                            error=None,
+                            success=True,
+                            skipped=False,
+                            retry_errors=[],
+                            cached=True,
+                        )
+                    )
 
         retry_errors: list[str] = []
         outputs: dict[str, Any] | None = None
@@ -1124,13 +1838,15 @@ class FlowExecutor:
         if final_raw_exc is not None:
             wrapped = self._wrap_tool_exception(step, step_index, final_raw_exc)
             log_step_error(_logger, step_index, step.tool_name, wrapped)
-            return self._apply_on_error(
-                step=step,
-                step_index=step_index,
-                inputs=inputs,
-                wrapped_error=wrapped,
-                retry_errors=retry_errors,
-                make_record=_record,
+            return _finish(
+                self._apply_on_error(
+                    step=step,
+                    step_index=step_index,
+                    inputs=inputs,
+                    wrapped_error=wrapped,
+                    retry_errors=retry_errors,
+                    make_record=_record,
+                )
             )
 
         assert outputs is not None
@@ -1141,13 +1857,19 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
-        return _record(
-            inputs=inputs,
-            outputs=outputs,
-            error=None,
-            success=True,
-            skipped=False,
-            retry_errors=retry_errors,
+        # Cache write happens *after* the output has been schema-validated
+        # by ``Tool.run`` — never store invalid output.
+        if cache_key is not None and self._step_cache is not None:
+            self._step_cache.set(cache_key, outputs)
+        return _finish(
+            _record(
+                inputs=inputs,
+                outputs=outputs,
+                error=None,
+                success=True,
+                skipped=False,
+                retry_errors=retry_errors,
+            )
         )
 
     def _invoke_tool(
@@ -1366,18 +2088,39 @@ class FlowExecutor:
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
-        trace_id = _new_trace_id()
-        flow_started_at = _now_utc()
+        # Resume support (issue #128): when _resume_snapshot is set,
+        # reuse its trace_id / started_at / context / log and skip the
+        # already-completed DAG levels.
+        resume = self._resume_snapshot
+        if resume is not None:
+            trace_id = resume.trace_id
+            flow_started_at = resume.started_at
+            start_level = resume.completed_dag_levels
+        else:
+            trace_id = _new_trace_id()
+            flow_started_at = _now_utc()
+            start_level = 0
         flow_t0 = time.perf_counter()
         _logger.info(
-            "DAGFlow '%s' started | trace_id=%s | steps=%d",
+            "DAGFlow '%s' %s | trace_id=%s | steps=%d",
             flow.name,
+            "resuming" if resume is not None else "started",
             trace_id,
             len(flow.steps),
         )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow.name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
 
-        # -- Flow-level input validation ------------------------------------
-        if flow.input_schema is not None:
+        # -- Flow-level input validation (skipped on resume — already done) ----
+        if resume is None and flow.input_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
                 payload=initial_input,
@@ -1403,13 +2146,18 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
-        log: list[StepRecord] = []
+        if resume is not None:
+            context = dict(resume.context)
+            log = list(resume.execution_log)
+            flat_index = len(log)
+        else:
+            context = dict(initial_input)
+            log = []
+            flat_index = 0
         levels = self._compute_dag_levels(flow)
-        # Flat index for StepRecord.step_index (mirrors linear flow behaviour).
-        flat_index = 0
 
-        for level_steps in levels:
+        for relative_level_idx, level_steps in enumerate(levels[start_level:]):
+            absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []
 
@@ -1457,7 +2205,7 @@ class FlowExecutor:
                     tool_name=step.tool_name,
                     input_mapping=step.input_mapping,
                 )
-                record = self._execute_step(flat_index, proxy, context)
+                record = self._execute_step(flat_index, proxy, context, flow.name, trace_id)
                 level_records.append(record)
                 flat_index += 1
 
@@ -1533,6 +2281,20 @@ class FlowExecutor:
                         key,
                     )
             context.update(level_outputs)
+
+            # DAG snapshot at level boundary (issue #128).  A resume
+            # restarts from the next un-completed level — within a
+            # level there is no checkpoint, so the level is replayed
+            # from scratch on resume (the simplest correct semantics).
+            self._save_dag_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_levels=absolute_level_idx + 1,
+            )
 
         # -- Flow-level output validation -----------------------------------
         if flow.output_schema is not None:

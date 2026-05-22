@@ -96,6 +96,26 @@ Think of it as the difference between an **interpreter** and a **compiler**:
 | Observability | Prompt logs only | Structured step logs |
 | Reusability | Prompt templates | Registered, versioned flows |
 
+### How is this different from LangChain / LangGraph / Prefect / Dagster / Temporal?
+
+Short answer: those frameworks each make a different design choice that's
+right for their own audience. ChainWeaver makes one specific trade-off —
+**no LLM calls between steps, enforced at the framework level** — and
+aligns the rest of the design (Pydantic-validated I/O, file-serializable
+flows, no server) around it.
+
+| | ChainWeaver | LangChain LCEL | LangGraph | Prefect 3 | Dagster | Temporal |
+|---|---|---|---|---|---|---|
+| LLM-free between steps | ✅ hard invariant | ⚠️ possible, not enforced | ⚠️ possible, not enforced | ✅ N/A | ✅ N/A | ✅ N/A |
+| Pydantic-validated I/O | ✅ required | ⚠️ optional | ✅ | ✅ Pydantic 2 native | ⚠️ Dagster `Config` | ⚠️ optional |
+| Lean dep set | ✅ 4 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
+| File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
+
+See [docs/comparisons.md](docs/comparisons.md) for the full matrix —
+including version pins, citations to each alternative's own docs, and a
+"when to pick which" guide.
+
 ---
 
 ## Installation
@@ -379,6 +399,32 @@ result = executor.execute_flow("my_flow", {"key": "value"})
 Runs a flow step-by-step with full schema validation and structured logging.
 **No LLM calls are made at any point.**
 
+#### `ChainAnalyzer`
+
+```python
+from chainweaver import ChainAnalyzer, ToolChain
+
+analyzer = ChainAnalyzer(tools=[tool_a, tool_b, tool_c])
+
+# All schema-compatible pairs
+matrix: dict[str, list[str]] = analyzer.compatibility_matrix()
+
+# All valid tool sequences up to length 3
+chains: list[ToolChain] = analyzer.find_chains(max_depth=3)
+
+# Filter by start or end tool
+chains = analyzer.find_chains(max_depth=3, start="tool_a", end="tool_c")
+
+# Promote chains to ready-to-register Flow objects
+flows = analyzer.suggest_flows(max_depth=3, min_depth=2)
+```
+
+Discovers schema-compatible tool combinations **offline**, before any flow is
+registered or executed. `compatibility_matrix()` checks that every required
+input field of a consumer tool appears in the output of the producer with a
+matching type. `suggest_flows()` auto-wires `input_mapping` by name-matching
+and returns `Flow` objects ready for `FlowRegistry.register_flow()`.
+
 ### Data flow
 
 ```
@@ -446,6 +492,7 @@ All errors are typed and traceable:
 | `ToolTimeoutError` | A `Tool` with `timeout_seconds` set exceeds the configured wall-clock cap |
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
+| `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -466,6 +513,49 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 | **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | planned |
 | **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, offline LLM compiler | planned |
 | **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
+
+Curious how ChainWeaver compares to LangChain, LangGraph, Prefect,
+Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
+
+---
+
+## Command-line interface
+
+ChainWeaver ships a `chainweaver` console script with eight subcommands:
+
+```bash
+# Run a flow from disk — no Python required.
+chainweaver run flows/etl.flow.yaml \
+    --tools my_pkg.tools \
+    --input '{"date": "2026-05-15"}'
+
+# Validate a flow file (used by CI gates and editor tooling).
+chainweaver validate flows/etl.flow.yaml
+chainweaver check flows/                  # whole-directory variant
+
+# Render a registered flow as ASCII or Graphviz DOT.
+chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
+
+# Inspect a registered flow's structure (table or JSON).
+chainweaver inspect my_flow --format json
+
+# Analyze execution traces for bottlenecks.
+chainweaver profile trace1.json trace2.json
+
+# Compare two execution results step-by-step.
+chainweaver diff a.json b.json
+
+# Observed-determinism attestation: run N inputs × M repeats.
+chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 3
+```
+
+`run` is the fastest path from a fresh install to seeing a flow execute:
+point it at a `.flow.yaml`/`.flow.json` file, pass `--tools <module>` (the
+import path of a Python module that exposes `Tool` instances at top
+level), and supply the initial input as JSON. Every subcommand also
+supports `--format json` for machine consumption, and shares the same
+exit-code contract (`0` success, `1` business-logic error, `2`
+file-not-found / argument error).
 
 ---
 
