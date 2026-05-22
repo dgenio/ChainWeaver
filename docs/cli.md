@@ -235,6 +235,10 @@ chainweaver diff baseline.json current.json --format json
 
 ## Programmatic registration (`inspect`, `viz`)
 
+> **Note:** You must configure a registry before running `inspect` or `viz`.
+> Without this step the CLI exits with
+> `No registry configured. Call chainweaver.cli.set_default_registry(...) before invoking the CLI.`
+
 `inspect` and `viz` read from a process-scoped registry installed via `cli.set_default_registry`:
 
 ```python
