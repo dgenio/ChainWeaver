@@ -12,7 +12,6 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 - [Dev environment setup](#dev-environment-setup)
 - [Pre-commit hooks](#pre-commit-hooks)
 - [Running tests](#running-tests)
-- [Pre-commit hooks](#pre-commit-hooks)
 - [Code style](#code-style)
 - [PR process](#pr-process)
 - [Reporting issues](#reporting-issues)

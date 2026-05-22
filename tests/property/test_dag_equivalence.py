@@ -1,6 +1,6 @@
 """Property-based test: linear Flow ≡ trivially-sequential DAGFlow.
 
-For any valid ``(chain, initial_input)`` pair, the linear ``Flow`` and a
+For any valid ``(flow_steps, initial_input)`` pair, the linear ``Flow`` and a
 ``DAGFlow`` built with one node per step and explicit sequential
 ``depends_on`` edges produce identical ``final_output``.
 
