@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779400310968,
+  "lastUpdate": 1779443448187,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -72,6 +72,78 @@ window.BENCHMARK_DATA = {
             "value": 0.3553409999312862,
             "unit": "ms",
             "extra": "min=0.32ms max=0.40ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "838bc5b4fffc1a68ebf49dcb7dc12bc8ece6b07d",
+          "message": "Merge pull request #165 from dgenio/claude/triage-issues-7JgBE\n\nchore: add pre-commit hooks, property tests, API snapshot guard, and bench CI (#137)",
+          "timestamp": "2026-05-22T10:49:56+01:00",
+          "tree_id": "eab35543053f3950e6ddb5e8e16ef10048055c8a",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/838bc5b4fffc1a68ebf49dcb7dc12bc8ece6b07d"
+        },
+        "date": 1779443447887,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.20514200002708094,
+            "unit": "ms",
+            "extra": "min=0.18ms max=0.23ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.1416540000036548,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.27779800001326294,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.32ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.1638469999534209,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.99445500001048,
+            "unit": "ms",
+            "extra": "min=101.92ms max=102.12ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.37135200000193436,
+            "unit": "ms",
+            "extra": "min=0.37ms max=0.43ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.27372999997988,
+            "unit": "ms",
+            "extra": "min=251.19ms max=251.42ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2916330000175549,
+            "unit": "ms",
+            "extra": "min=0.27ms max=0.31ms repeats=5"
           }
         ]
       }
