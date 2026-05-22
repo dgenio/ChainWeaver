@@ -36,6 +36,7 @@ python -m pytest tests/ -v
 |----------|---------|-------|
 | `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13}` |
 | `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
+| `bench.yml` | Push/PR to `main` | Naive-vs-compiled benchmark on `ubuntu-22.04`; fails PRs whose median `total_duration_ms` regresses beyond 125 % of `gh-pages` baseline |
 
 ---
 
@@ -67,6 +68,13 @@ python -m pytest tests/ -v
 - **Assertion density:** one logical assertion per test when practical.
 - **Mocking:** no mocking of internal ChainWeaver classes unless testing integration boundaries.
 - **Coverage:** test both success and failure/error paths.
+- **Property tests:** Hypothesis-based determinism tests live in
+  `tests/property/` and are tagged `@pytest.mark.property`. They run by
+  default and additionally as a separate `pytest -m property` CI step on
+  the Ubuntu / Python 3.10 lane with `--hypothesis-show-statistics` so
+  the seed is preserved in CI logs for repro. Strategy modules import
+  helpers from `tests/helpers.py` via the bare module name — do not
+  generate arbitrary Pydantic schemas at runtime.
 
 ---
 

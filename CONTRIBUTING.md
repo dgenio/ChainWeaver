@@ -101,6 +101,25 @@ CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.13
 
 ---
 
+## Pre-commit hooks
+
+A `.pre-commit-config.yaml` at the repo root mirrors three of the four validation commands above (ruff check, ruff format --check, mypy) plus secret scanning. pytest is excluded to keep commit speed reasonable — run it manually before pushing or rely on CI. Hooks use `language: system` so they run from the project venv with the same tool versions.
+
+```bash
+# One-time install (after `pip install -e ".[dev]"`)
+pip install pre-commit
+pre-commit install
+
+# Run all hooks against every tracked file (recommended after a rebase)
+pre-commit run --all-files
+```
+
+Once installed, the hooks run automatically on `git commit`. If a hook fails, fix the underlying issue and re-stage — do not bypass the hook with `--no-verify`.
+
+Hook versions are pinned in `.pre-commit-config.yaml`. Bumping a hook is a deliberate change: update the pin in the same PR that benefits from it.
+
+---
+
 ## Code style
 
 - **Type annotations are required** on all function signatures.
