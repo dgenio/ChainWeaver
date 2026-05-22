@@ -1,11 +1,13 @@
 # Pre-commit hooks for ChainWeaver.
 #
-# These hooks mirror AGENTS.md §7 "Validation commands" exactly so the
-# local gate matches CI. Run `pre-commit install` once after cloning,
-# then every `git commit` triggers them.
+# These hooks mirror three of the four AGENTS.md §7 validation commands
+# (ruff check, ruff format --check, mypy). pytest is excluded from
+# pre-commit to keep commit speed reasonable — run it manually or rely
+# on CI. Hooks use `language: system` so they run from the project venv
+# with the same tool versions as `pip install -e ".[dev]"`.
 #
-# All versions are pinned. See CONTRIBUTING.md § "Pre-commit hooks" for
-# install instructions and the policy on hook failures.
+# See CONTRIBUTING.md § "Pre-commit hooks" for install instructions and
+# the policy on hook failures.
 
 repos:
   # ---------------------------------------------------------------
@@ -17,7 +19,6 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        # benchmarks/baseline.json is JSON, not YAML — skip via files filter.
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=500"]
@@ -25,45 +26,34 @@ repos:
       - id: detect-private-key
 
   # ---------------------------------------------------------------
-  # Ruff: lint + format-check — must match AGENTS.md §7 verbatim
+  # Ruff: lint + format-check (system hooks — uses project venv)
   # ---------------------------------------------------------------
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+  - repo: local
     hooks:
-      - id: ruff
-        name: ruff check (chainweaver/ tests/ examples/)
-        args:
-          - check
-          - chainweaver/
-          - tests/
-          - examples/
+      - id: ruff-check
+        name: ruff check chainweaver/ tests/ examples/
+        entry: ruff check chainweaver/ tests/ examples/
+        language: system
         pass_filenames: false
-      - id: ruff-format
-        name: ruff format --check (chainweaver/ tests/ examples/)
-        args:
-          - --check
-          - chainweaver/
-          - tests/
-          - examples/
+        always_run: true
+      - id: ruff-format-check
+        name: ruff format --check chainweaver/ tests/ examples/
+        entry: ruff format --check chainweaver/ tests/ examples/
+        language: system
         pass_filenames: false
+        always_run: true
 
   # ---------------------------------------------------------------
-  # Mypy strict type-check — must match AGENTS.md §7 verbatim
+  # Mypy strict type-check (system hook — uses project venv)
   # ---------------------------------------------------------------
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  - repo: local
     hooks:
       - id: mypy
         name: python -m mypy chainweaver/ tests/
-        args:
-          - chainweaver/
-          - tests/
+        entry: python -m mypy chainweaver/ tests/
+        language: system
         pass_filenames: false
-        additional_dependencies:
-          - pydantic>=2.0
-          - tenacity>=8.0
-          - typer>=0.9
-          - types-pyyaml>=6.0
+        always_run: true
 
   # ---------------------------------------------------------------
   # Secret scanning — gitleaks (richer than detect-private-key alone)

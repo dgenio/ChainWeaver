@@ -98,7 +98,50 @@
       },
       "bases": [],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "issue_type"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "CompilationError": {
       "attributes": {
@@ -125,7 +168,50 @@
       },
       "bases": [],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "str | None",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "field_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "issue_type"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "CompilationResult": {
       "attributes": {
@@ -144,7 +230,38 @@
       },
       "bases": [],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "bool",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "success"
+            },
+            {
+              "annotation": "list[CompilationError]",
+              "default": "list()",
+              "kind": "positional or keyword",
+              "name": "errors"
+            },
+            {
+              "annotation": "list[CompilationWarning]",
+              "default": "list()",
+              "kind": "positional or keyword",
+              "name": "warnings"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "CompilationWarning": {
       "attributes": {
@@ -171,7 +288,50 @@
       },
       "bases": [],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "str | None",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "field_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "issue_type"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "CostProfile": {
       "attributes": {
@@ -234,6 +394,18 @@
       ],
       "kind": "class",
       "methods": {
+        "__str__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "str"
+        },
         "to_dict": {
           "kind": "function",
           "parameters": [
@@ -267,7 +439,38 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "reason"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "DAGFlow": {
       "attributes": {
@@ -499,7 +702,44 @@
       },
       "bases": [],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "expected_hash"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "actual_hash"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "ExecutionPlan": {
       "attributes": {
@@ -532,7 +772,20 @@
         "BaseModel"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__str__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "str"
+        }
+      }
     },
     "ExecutionResult": {
       "attributes": {
@@ -616,6 +869,36 @@
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "Path | str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "base_dir"
+            }
+          ],
+          "returns": "None"
+        },
+        "__len__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "int"
+        },
         "delete_flow": {
           "kind": "function",
           "parameters": [
@@ -921,13 +1204,56 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowBuilder": {
       "attributes": {},
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "description"
+            }
+          ],
+          "returns": "None"
+        },
         "build": {
           "kind": "function",
           "parameters": [
@@ -1067,7 +1393,26 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowExecutionError": {
       "attributes": {
@@ -1088,13 +1433,80 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowExecutor": {
       "attributes": {},
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "FlowRegistry",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "registry"
+            },
+            {
+              "annotation": "CostProfile | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "cost_profile"
+            },
+            {
+              "annotation": "RedactionPolicy | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "redaction_policy"
+            },
+            {
+              "annotation": "TraceRecorder | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "trace_recorder"
+            }
+          ],
+          "returns": "None"
+        },
         "accept_drift": {
           "kind": "function",
           "parameters": [
@@ -1268,7 +1680,32 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "version"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowRegistry": {
       "attributes": {
@@ -1280,6 +1717,48 @@
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "RegistryStore | None",
+              "default": "None",
+              "kind": "positional or keyword",
+              "name": "store"
+            }
+          ],
+          "returns": "None"
+        },
+        "__len__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "int"
+        },
+        "__repr__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "str"
+        },
         "get_active_flows": {
           "kind": "function",
           "parameters": [
@@ -1447,7 +1926,32 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "source"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowStatus": {
       "attributes": {
@@ -1486,7 +1990,32 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "status"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "FlowStep": {
       "attributes": {
@@ -1518,6 +2047,30 @@
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "None"
+        },
+        "__len__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "int"
+        },
         "delete_flow": {
           "kind": "function",
           "parameters": [
@@ -1647,7 +2200,38 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "key"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "InvalidFlowVersionError": {
       "attributes": {
@@ -1668,7 +2252,38 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "flow_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "version"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "ObservedStep": {
       "attributes": {
@@ -2039,7 +2654,44 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "step_index"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            },
+            {
+              "annotation": "str",
+              "default": "'tool'",
+              "kind": "keyword-only",
+              "name": "context"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "StepDiff": {
       "attributes": {
@@ -2230,6 +2882,78 @@
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "keyword-only",
+              "name": "name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "keyword-only",
+              "name": "description"
+            },
+            {
+              "annotation": "type[BaseModel]",
+              "default": null,
+              "kind": "keyword-only",
+              "name": "input_schema"
+            },
+            {
+              "annotation": "type[BaseModel]",
+              "default": null,
+              "kind": "keyword-only",
+              "name": "output_schema"
+            },
+            {
+              "annotation": "Callable[[Any], dict[str, Any]]",
+              "default": null,
+              "kind": "keyword-only",
+              "name": "fn"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "timeout_seconds"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "keyword-only",
+              "name": "max_output_size"
+            },
+            {
+              "annotation": "str",
+              "default": "'0.0.0'",
+              "kind": "keyword-only",
+              "name": "schema_version"
+            }
+          ],
+          "returns": "None"
+        },
+        "__repr__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "str"
+        },
         "from_flow": {
           "kind": "function",
           "parameters": [
@@ -2313,7 +3037,32 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "function_name"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "detail"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "ToolNotFoundError": {
       "attributes": {
@@ -2326,7 +3075,26 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "ToolOutputSizeError": {
       "attributes": {
@@ -2347,7 +3115,38 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "size"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "max_size"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "ToolTimeoutError": {
       "attributes": {
@@ -2364,13 +3163,62 @@
         "ChainWeaverError"
       ],
       "kind": "class",
-      "methods": {}
+      "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "tool_name"
+            },
+            {
+              "annotation": "float",
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "timeout_seconds"
+            }
+          ],
+          "returns": "None"
+        }
+      }
     },
     "TraceRecorder": {
       "attributes": {},
       "bases": [],
       "kind": "class",
       "methods": {
+        "__init__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "None"
+        },
+        "__len__": {
+          "kind": "function",
+          "parameters": [
+            {
+              "annotation": null,
+              "default": null,
+              "kind": "positional or keyword",
+              "name": "self"
+            }
+          ],
+          "returns": "int"
+        },
         "end_trace": {
           "kind": "function",
           "parameters": [

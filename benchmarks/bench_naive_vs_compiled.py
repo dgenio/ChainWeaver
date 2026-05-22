@@ -295,9 +295,8 @@ def to_customsmallerisbetter(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten the report into ``benchmark-action`` customSmallerIsBetter records.
 
     Each case emits two metrics — ``naive`` and ``compiled`` —
-    ``total_duration_ms``, plus the per-case ``compiled overhead_ms`` so
-    the chart shows orchestration cost separately. Wall-clock is the
-    primary regression signal; overhead is the diagnostic.
+    ``total_duration_ms``. Only wall-clock duration is gated; overhead
+    is a diagnostic tracked via the regular JSON report only.
     """
     records: list[dict[str, Any]] = []
     for case in report["cases"]:
@@ -313,14 +312,6 @@ def to_customsmallerisbetter(report: dict[str, Any]) -> list[dict[str, Any]]:
                     "value": row["total_duration_ms"],
                 }
             )
-        compiled_row = next(r for r in case["rows"] if r["approach"] == "compiled")
-        records.append(
-            {
-                "name": f"compiled overhead_ms ({suffix})",
-                "unit": "ms",
-                "value": compiled_row["overhead_ms"],
-            }
-        )
     return records
 
 

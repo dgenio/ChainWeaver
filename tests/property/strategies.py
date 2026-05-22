@@ -47,22 +47,22 @@ FORMAT_RESULT = "format_result"
 def number_input_strategy() -> st.SearchStrategy[dict[str, Any]]:
     """Strategy that yields dicts validating against ``NumberInput``.
 
-    Derived from ``NumberInput.model_json_schema()`` so the strategy
-    follows the schema if the model changes. The Pydantic schema
-    constrains output to ``{"number": int}`` shape at runtime; the
-    annotation is widened for mypy because ``from_schema`` returns a
-    less specific strategy type.
+    Derived from ``NumberInput.model_json_schema()`` with
+    ``additionalProperties`` set to ``false`` so the strategy only
+    generates payloads matching the exact ``{"number": int}`` shape.
     """
+    schema = NumberInput.model_json_schema()
+    schema["additionalProperties"] = False
     return cast(
         "st.SearchStrategy[dict[str, Any]]",
-        from_schema(NumberInput.model_json_schema()),
+        from_schema(schema),
     )
 
 
-def step_chain_strategy() -> st.SearchStrategy[list[str]]:
-    """Strategy that yields valid linear chains over the helper tools.
+def step_flow_strategy() -> st.SearchStrategy[list[str]]:
+    """Strategy that yields valid linear step sequences over the helper tools.
 
-    Every chain starts with ``double`` (the only tool that consumes
+    Every sequence starts with ``double`` (the only tool that consumes
     ``NumberInput``) and is then any number of ``add_ten`` steps,
     optionally terminated by ``format_result``.
     """
@@ -78,20 +78,22 @@ def _input_mapping_for(tool_name: str) -> dict[str, str]:
     return {"value": "value"}
 
 
-def build_linear_flow(name: str, chain: list[str]) -> Flow:
-    """Construct a :class:`Flow` from a chain of helper tool names."""
+def build_linear_flow(name: str, step_names: list[str]) -> Flow:
+    """Construct a :class:`Flow` from a list of helper tool names."""
     return Flow(
         name=name,
         version="0.1.0",
         description="Property-test flow.",
-        steps=[FlowStep(tool_name=tool, input_mapping=_input_mapping_for(tool)) for tool in chain],
+        steps=[
+            FlowStep(tool_name=tool, input_mapping=_input_mapping_for(tool)) for tool in step_names
+        ],
     )
 
 
-def build_equivalent_dag(name: str, chain: list[str]) -> DAGFlow:
-    """Construct a sequential :class:`DAGFlow` matching ``chain``."""
+def build_equivalent_dag(name: str, step_names: list[str]) -> DAGFlow:
+    """Construct a sequential :class:`DAGFlow` matching ``step_names``."""
     steps: list[DAGFlowStep] = []
-    for index, tool in enumerate(chain):
+    for index, tool in enumerate(step_names):
         depends_on = [f"s{index - 1}"] if index > 0 else []
         steps.append(
             DAGFlowStep(

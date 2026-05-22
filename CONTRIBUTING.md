@@ -11,6 +11,7 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 
 - [Dev environment setup](#dev-environment-setup)
 - [Running tests](#running-tests)
+- [Pre-commit hooks](#pre-commit-hooks)
 - [Code style](#code-style)
 - [PR process](#pr-process)
 - [Reporting issues](#reporting-issues)
@@ -62,7 +63,7 @@ CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.13
 
 ## Pre-commit hooks
 
-A `.pre-commit-config.yaml` at the repo root mirrors the four validation commands above plus a no-secrets check. The hook scope is identical to CI — same paths, same flags — so a clean `pre-commit run --all-files` is the strongest local signal that CI will pass.
+A `.pre-commit-config.yaml` at the repo root mirrors three of the four validation commands above (ruff check, ruff format --check, mypy) plus secret scanning. pytest is excluded to keep commit speed reasonable — run it manually before pushing or rely on CI. Hooks use `language: system` so they run from the project venv with the same tool versions.
 
 ```bash
 # One-time install (after `pip install -e ".[dev]"`)

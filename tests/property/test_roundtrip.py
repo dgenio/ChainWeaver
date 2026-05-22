@@ -17,7 +17,7 @@ from strategies import (
     build_linear_flow,
     fresh_executor,
     number_input_strategy,
-    step_chain_strategy,
+    step_flow_strategy,
 )
 
 from chainweaver import flow_from_json, flow_from_yaml, flow_to_json, flow_to_yaml
@@ -32,13 +32,13 @@ PROPERTY_SETTINGS = settings(
 @pytest.mark.property
 class TestRoundtrip:
     @PROPERTY_SETTINGS
-    @given(chain=step_chain_strategy(), payload=number_input_strategy())
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
     def test_yaml_roundtrip_preserves_final_output(
         self,
-        chain: list[str],
+        flow_steps: list[str],
         payload: dict[str, int],
     ) -> None:
-        flow = build_linear_flow("rt_yaml", chain)
+        flow = build_linear_flow("rt_yaml", flow_steps)
         baseline = fresh_executor(flow).execute_flow("rt_yaml", payload)
         rebuilt = flow_from_yaml(flow_to_yaml(flow))
         replayed = fresh_executor(rebuilt).execute_flow("rt_yaml", payload)
@@ -47,13 +47,13 @@ class TestRoundtrip:
         assert baseline.final_output == replayed.final_output
 
     @PROPERTY_SETTINGS
-    @given(chain=step_chain_strategy(), payload=number_input_strategy())
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
     def test_json_roundtrip_preserves_final_output(
         self,
-        chain: list[str],
+        flow_steps: list[str],
         payload: dict[str, int],
     ) -> None:
-        flow = build_linear_flow("rt_json", chain)
+        flow = build_linear_flow("rt_json", flow_steps)
         baseline = fresh_executor(flow).execute_flow("rt_json", payload)
         rebuilt = flow_from_json(flow_to_json(flow))
         replayed = fresh_executor(rebuilt).execute_flow("rt_json", payload)

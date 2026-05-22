@@ -19,7 +19,7 @@ from strategies import (
     build_linear_flow,
     fresh_executor,
     number_input_strategy,
-    step_chain_strategy,
+    step_flow_strategy,
     step_record_signature,
 )
 
@@ -33,13 +33,13 @@ PROPERTY_SETTINGS = settings(
 @pytest.mark.property
 class TestIdempotence:
     @PROPERTY_SETTINGS
-    @given(chain=step_chain_strategy(), payload=number_input_strategy())
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
     def test_final_output_is_idempotent(
         self,
-        chain: list[str],
+        flow_steps: list[str],
         payload: dict[str, int],
     ) -> None:
-        flow = build_linear_flow("idem_final", chain)
+        flow = build_linear_flow("idem_final", flow_steps)
         executor = fresh_executor(flow)
         first = executor.execute_flow("idem_final", payload)
         second = executor.execute_flow("idem_final", payload)
@@ -48,13 +48,13 @@ class TestIdempotence:
         assert first.final_output == second.final_output
 
     @PROPERTY_SETTINGS
-    @given(chain=step_chain_strategy(), payload=number_input_strategy())
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
     def test_step_outputs_are_idempotent(
         self,
-        chain: list[str],
+        flow_steps: list[str],
         payload: dict[str, int],
     ) -> None:
-        flow = build_linear_flow("idem_steps", chain)
+        flow = build_linear_flow("idem_steps", flow_steps)
         executor = fresh_executor(flow)
         first = executor.execute_flow("idem_steps", payload)
         second = executor.execute_flow("idem_steps", payload)

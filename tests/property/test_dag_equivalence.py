@@ -18,7 +18,7 @@ from strategies import (
     build_linear_flow,
     fresh_executor,
     number_input_strategy,
-    step_chain_strategy,
+    step_flow_strategy,
 )
 
 PROPERTY_SETTINGS = settings(
@@ -31,14 +31,14 @@ PROPERTY_SETTINGS = settings(
 @pytest.mark.property
 class TestDagEquivalence:
     @PROPERTY_SETTINGS
-    @given(chain=step_chain_strategy(), payload=number_input_strategy())
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
     def test_linear_and_sequential_dag_match(
         self,
-        chain: list[str],
+        flow_steps: list[str],
         payload: dict[str, int],
     ) -> None:
-        linear = build_linear_flow("dag_lin", chain)
-        dag = build_equivalent_dag("dag_seq", chain)
+        linear = build_linear_flow("dag_lin", flow_steps)
+        dag = build_equivalent_dag("dag_seq", flow_steps)
         linear_result = fresh_executor(linear).execute_flow("dag_lin", payload)
         dag_result = fresh_executor(dag).execute_flow("dag_seq", payload)
         assert linear_result.success is True

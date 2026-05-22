@@ -59,13 +59,15 @@ def _describe_function(func: Any) -> dict[str, Any]:
 def _describe_class(cls: Any) -> dict[str, Any]:
     """Capture the public surface of a class.
 
-    Captures non-underscore-prefixed attributes (with annotations and
-    defaults) and public method signatures.
+    Captures non-private attributes (with annotations and defaults) and
+    public method signatures. Dunder methods (e.g. ``__init__``) are
+    included because they are part of the public API; single-underscore
+    names are excluded as private.
     """
     attributes: dict[str, dict[str, Any]] = {}
     methods: dict[str, dict[str, Any]] = {}
     for member_name in sorted(cls.members):
-        if member_name.startswith("_"):
+        if member_name.startswith("_") and not member_name.startswith("__"):
             continue
         member = cls.members[member_name]
         kind = member.kind.value if member.kind else "unknown"
