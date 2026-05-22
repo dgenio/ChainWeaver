@@ -521,10 +521,12 @@ Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with eight subcommands:
+ChainWeaver ships a `chainweaver` console script with nine subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
+
+Now for the missing `suggest` example in the code block:
 chainweaver run flows/etl.flow.yaml \
     --tools my_pkg.tools \
     --input '{"date": "2026-05-15"}'
