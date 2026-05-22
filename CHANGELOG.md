@@ -8,6 +8,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-22
+
+### Added
+
+- **CLI `suggest`** (#155): `chainweaver suggest <flow.yaml|json>` emits
+  advisory static optimization suggestions for a flow.  Four suggestion
+  families with stable codes:
+  - `CW001` — wasteful-passthrough: a step passes the full context to a
+    tool whose input schema uses only a subset of keys.
+  - `CW002` — parallelizable-pair: two adjacent linear steps read
+    disjoint context keys and could run concurrently.  Requires
+    `--tools`.
+  - `CW003` — dead-step: a step's outputs are not referenced by any
+    downstream step's `input_mapping`.  Requires `--tools`.
+  - `CW004` — cacheable-step: across two or more observed trace files
+    the step produces identical outputs for identical inputs.  Requires
+    `--trace`.
+  Accepts `--tools` (repeatable Python module path), `--trace` (repeatable
+  path to `ExecutionResult` JSON files for CW004), and `--format
+  table|json`.  Exit code is always 0 (the suggester is advisory).
+  `suggest_optimizations(flow, *, tools, traces)` and the `Suggestion`
+  model are exported in `chainweaver.__all__`.
+
+### Fixed
+
+- `suggest_optimizations` no longer emits false-positive CW002 or CW003
+  suggestions when a step has an empty `input_mapping` (which passes the
+  full context — that step cannot be treated as having disjoint or
+  dead outputs without full schema information).
+- CW001 docstring now correctly states that `--tools` is required to
+  detect wasteful-passthrough for steps without explicit `input_mapping`.
+
+### Tests
+
+- **Property-based determinism harness** (#143): new
+  `tests/property/test_idempotence.py` and
+  `tests/property/test_dag_equivalence.py` using Hypothesis strategies
+  (defined in `tests/property/strategies.py`) to assert that linear and
+  DAG flows produce identical results across repeated executions with
+  the same inputs.  Tagged `@pytest.mark.property`; run as part of the
+  standard `pytest` suite.
+- **Public-API snapshot guard** (#140): `tests/test_public_api_snapshot.py`
+  pins the exact set of names exported in `chainweaver.__all__` against
+  a golden fixture (`tests/fixtures/public_api.json`), catching accidental
+  additions or removals before they reach a release.
+
+### CI / Infrastructure
+
+- **Performance-budget guard** (#144): `bench.yml` workflow now uses
+  `github-action-benchmark` to store naive-vs-compiled benchmark results
+  on `gh-pages` and fail PRs whose median `total_duration_ms` regresses
+  beyond 125 % of the baseline.  Baseline bootstraps automatically on the
+  first push to `gh-pages`.
+- **Reusable `chainweaver-action`** (#149): composite GitHub Action that
+  wraps the CLI; lets downstream workflows call
+  `uses: dgenio/ChainWeaver/.github/actions/chainweaver-action@main`
+  without installing ChainWeaver separately.
+- **Pre-commit hooks** (#137): `.pre-commit-config.yaml` mirrors the four
+  AGENTS.md §7 validation commands (`ruff check`, `ruff format --check`,
+  `mypy`, `pytest`).  Install with `pre-commit install`.
+
+### Docs
+
+- Added `docs/comparisons.md` comparing ChainWeaver to LangChain,
+  LangGraph, Prefect, Dagster, and Temporal (#141).
+- Added OSS health files: `CODE_OF_CONDUCT.md`, `SECURITY.md`, and
+  expanded `CONTRIBUTING.md` with pre-commit hook installation
+  instructions (#138).
+
 ## [0.7.0] - 2026-05-20
 
 ### Added
