@@ -521,7 +521,7 @@ Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with eight subcommands:
+ChainWeaver ships a `chainweaver` console script with the following subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
@@ -539,14 +539,21 @@ chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 # Inspect a registered flow's structure (table or JSON).
 chainweaver inspect my_flow --format json
 
-# Analyze execution traces for bottlenecks.
-chainweaver profile trace1.json trace2.json
+# Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
+# and per-step / per-tool retry / skip / fallback / failure aggregates.
+chainweaver profile trace_a.json trace_b.json --format json
 
-# Compare two execution results step-by-step.
-chainweaver diff a.json b.json
+# Compare two ExecutionResult JSON files step-by-step.
+chainweaver diff baseline.json current.json --perf-tolerance 25
 
 # Observed-determinism attestation: run N inputs × M repeats.
 chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 3
+
+# Advisory optimization suggestions for a saved flow.
+chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.json
+
+# Check saved flows for tool schema drift against the live registry.
+chainweaver doctor flows/ --check-drift --tools my_pkg.tools
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:

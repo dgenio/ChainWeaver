@@ -348,6 +348,11 @@ class StepRecord(BaseModel):
             callable was not invoked.  ``duration_ms`` for cached steps
             reflects only the cache lookup time.  ``False`` for normal
             executions (the default).
+        fallback_used: ``True`` when the primary tool failed and the
+            step's ``on_error="fallback:<tool_name>"`` policy invoked a
+            fallback tool (issue #176).  Set regardless of whether the
+            fallback itself succeeded or failed; ``False`` for normal
+            execution, retry-success, ``skip``, and ``fail`` paths.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -366,6 +371,7 @@ class StepRecord(BaseModel):
     retry_errors: list[str] = Field(default_factory=list)
     skipped: bool = False
     cached: bool = False
+    fallback_used: bool = False
 
 
 class ExecutionResult(BaseModel):
@@ -628,6 +634,18 @@ class FlowExecutor:
         if name not in self._tools:
             raise ToolNotFoundError(name)
         return self._tools[name]
+
+    @property
+    def registered_tools(self) -> dict[str, Tool]:
+        """Return a snapshot of currently registered tools (issue #178).
+
+        Returns a *copy* of the internal ``{name: Tool}`` registry, so callers
+        can safely iterate or mutate the returned dict without affecting the
+        executor's state.  Use this instead of reaching for the private
+        ``_tools`` attribute when computing tool schema hashes, building
+        compatibility reports, or attestation artifacts.
+        """
+        return dict(self._tools)
 
     def get_drift_report(self) -> list[DriftInfo]:
         """Compare registered tools' current schema hashes against each flow's snapshot.
@@ -1703,6 +1721,7 @@ class FlowExecutor:
             skipped: bool,
             retry_errors: list[str],
             cached: bool = False,
+            fallback_used: bool = False,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -1725,6 +1744,7 @@ class FlowExecutor:
                 retry_errors=list(retry_errors),
                 skipped=skipped,
                 cached=cached,
+                fallback_used=fallback_used,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -1987,6 +2007,9 @@ class FlowExecutor:
         try:
             fallback_tool = self.get_tool(fallback_name)
         except ToolNotFoundError as missing:
+            # The fallback tool itself is missing — we attempted the
+            # fallback policy, so the record reflects that even though
+            # no fallback tool actually ran.
             return make_record(
                 inputs=inputs,
                 outputs=None,
@@ -1994,6 +2017,7 @@ class FlowExecutor:
                 success=False,
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
+                fallback_used=True,
             )
 
         try:
@@ -2007,6 +2031,7 @@ class FlowExecutor:
                 success=False,
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
+                fallback_used=True,
             )
 
         return make_record(
@@ -2016,6 +2041,7 @@ class FlowExecutor:
             success=True,
             skipped=False,
             retry_errors=[*retry_errors, str(wrapped_error)],
+            fallback_used=True,
         )
 
     # ------------------------------------------------------------------
