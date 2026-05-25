@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`FlowExecutor.registered_tools`** (#178): public read-only accessor
   that returns a snapshot of currently registered tools as
   `dict[str, Tool]`.  Replaces ad-hoc private `_tools` access in
-  downstream consumers (the new `doctor` command is the first
-  in-tree user; future `attest`/optimizer consumers can follow).
+  downstream consumers; `doctor --check-drift` and `attest_flow`
+  now use the public accessor.
 - **Profile reliability aggregates** (#176): `chainweaver profile`
   JSON output now carries `retry_count`, `skipped`, `fallback_used`,
   `cached`, and `error_type` on every step entry, plus an

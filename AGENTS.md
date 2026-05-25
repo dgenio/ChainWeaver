@@ -58,7 +58,7 @@ chainweaver/
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, doctor
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, doctor
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
