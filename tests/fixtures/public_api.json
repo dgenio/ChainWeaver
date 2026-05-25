@@ -1,5 +1,7 @@
 {
   "__all__": [
+    "AttestationInputError",
+    "AttestationReport",
     "BaseMiddleware",
     "ChainAnalyzer",
     "ChainWeaverError",
@@ -59,6 +61,7 @@
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
@@ -66,6 +69,7 @@
     "ToolOutputSizeError",
     "ToolTimeoutError",
     "TraceRecorder",
+    "attest_flow",
     "check_flow_compatibility",
     "cli",
     "compile_flow",
@@ -80,10 +84,43 @@
     "flow_to_yaml",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology"
   ],
+  "python_version": [
+    3,
+    14
+  ],
   "symbols": {
+    "AttestationInputError": {
+      "kind": "class",
+      "module": "chainweaver.attest",
+      "qualname": "AttestationInputError",
+      "signature": "(field_name: str, annotation_repr: str) -> None"
+    },
+    "AttestationReport": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "aggregate_fingerprint": "str",
+        "chainweaver_version": "str",
+        "divergences": "list[dict[str, Any]]",
+        "ended_at_iso": "str",
+        "flow_name": "str",
+        "flow_schema_fingerprint": "str",
+        "flow_version": "str",
+        "host_info": "dict[str, str]",
+        "n": "int",
+        "observed_deterministic": "bool",
+        "repeats": "int",
+        "seed": "int",
+        "started_at_iso": "str",
+        "tool_schema_hashes": "dict[str, str]",
+        "total_duration_ms": "float"
+      },
+      "module": "chainweaver.attest",
+      "qualname": "AttestationReport"
+    },
     "BaseMiddleware": {
       "kind": "class",
       "module": "chainweaver.middleware",
@@ -609,6 +646,18 @@
       "module": "chainweaver.middleware",
       "qualname": "StepStartContext"
     },
+    "Suggestion": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "code": "str",
+        "message": "str",
+        "step_index": "int | NoneType",
+        "title": "str",
+        "tool_name": "str | NoneType"
+      },
+      "module": "chainweaver.analyzer",
+      "qualname": "Suggestion"
+    },
     "Tool": {
       "kind": "class",
       "module": "chainweaver.tools",
@@ -649,6 +698,12 @@
       "module": "chainweaver.observation",
       "qualname": "TraceRecorder",
       "signature": "() -> None"
+    },
+    "attest_flow": {
+      "kind": "function",
+      "module": "chainweaver.attest",
+      "qualname": "attest_flow",
+      "signature": "(*, flow: Flow | DAGFlow, executor: FlowExecutor, n: int, repeats: int, seed: int, seed_inputs: list[dict[str, Any]] | None = None) -> AttestationReport"
     },
     "check_flow_compatibility": {
       "kind": "function",
@@ -732,6 +787,12 @@
       "module": "chainweaver.compat",
       "qualname": "schema_fingerprint",
       "signature": "(model: type[BaseModel]) -> str"
+    },
+    "suggest_optimizations": {
+      "kind": "function",
+      "module": "chainweaver.analyzer",
+      "qualname": "suggest_optimizations",
+      "signature": "(flow: Flow | DAGFlow, *, tools: Iterable[Tool] | None = None, traces: list[ExecutionResult] | None = None) -> list[Suggestion]"
     },
     "tool": {
       "kind": "function",

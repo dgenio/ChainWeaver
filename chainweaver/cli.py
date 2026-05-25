@@ -24,6 +24,12 @@ Available commands
   fallbacks, and failures (issues #147 and #176).
 - ``chainweaver diff <a.json> <b.json>`` — compare two
   ``ExecutionResult`` JSON files step-by-step (issue #148).
+- ``chainweaver attest <flow>`` — observed-determinism attestation:
+  run a flow N x M times and emit a reproducible JSON artifact
+  (issue #154).
+- ``chainweaver suggest <flow>`` — emit advisory optimization
+  suggestions for a flow file, optionally informed by trace files
+  (issue #155).
 - ``chainweaver doctor <path>`` — diagnostic command; ``--check-drift``
   reports missing tools and tool-schema fingerprint drift for one or
   more saved flow files (issue #175).
@@ -68,7 +74,7 @@ import sys
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from deepdiff import DeepDiff
@@ -85,6 +91,9 @@ from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml
 from chainweaver.tools import Tool
 from chainweaver.viz import _render_step_bar_chart, flow_to_ascii, flow_to_dot
+
+if TYPE_CHECKING:
+    from chainweaver.attest import AttestationReport
 
 app = typer.Typer(
     name="chainweaver",
@@ -1216,6 +1225,294 @@ def diff_command(
 
 
 # ---------------------------------------------------------------------------
+# attest command (issue #154)
+# ---------------------------------------------------------------------------
+
+
+_ATTEST_FLOW_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file.",
+)
+_ATTEST_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help="Python module path that exposes Tool instances at top level. Repeatable.",
+)
+_ATTEST_RUNS_OPTION = typer.Option(
+    100,
+    "--runs",
+    help="Number of distinct inputs to generate (ignored when --seed-input is set).",
+)
+_ATTEST_REPEATS_OPTION = typer.Option(
+    3,
+    "--repeats",
+    help="Number of executions per input. Must be >= 2.",
+)
+_ATTEST_SEED_OPTION = typer.Option(
+    0,
+    "--seed",
+    help="Integer seed for the input generator. Same seed → same inputs.",
+)
+_ATTEST_SEED_INPUT_OPTION = typer.Option(
+    None,
+    "--seed-input",
+    help=(
+        "Optional JSON file containing a list of input objects to use "
+        "directly (bypasses the generator). Useful for flows whose "
+        "input_schema can't be synthesized automatically."
+    ),
+)
+_ATTEST_FORMAT_OPTION = typer.Option(
+    OutputFormat.JSON,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'json' (default — the attestation artifact) or 'table'.",
+)
+
+
+@app.command("attest")
+def attest_command(
+    flow_file: Path = _ATTEST_FLOW_ARG,
+    tools: list[str] = _ATTEST_TOOLS_OPTION,
+    runs: int = _ATTEST_RUNS_OPTION,
+    repeats: int = _ATTEST_REPEATS_OPTION,
+    seed: int = _ATTEST_SEED_OPTION,
+    seed_input: Path | None = _ATTEST_SEED_INPUT_OPTION,
+    output_format: OutputFormat = _ATTEST_FORMAT_OPTION,
+) -> None:
+    """Run an observed-determinism attestation against a compiled flow.
+
+    Generates ``--runs`` distinct inputs (or reads them from
+    ``--seed-input``), runs the flow ``--repeats`` times per input, and
+    emits a JSON attestation report.  When all repeats agree the
+    attestation passes (exit 0); any divergence fails it (exit 1).
+
+    Framing: this produces *observed-deterministic* evidence, not a
+    formal proof.  Re-running with the same seed and ChainWeaver
+    version yields a byte-identical ``aggregate_fingerprint``.
+
+    Exit codes:
+
+    - ``0`` — observed-deterministic across all inputs.
+    - ``1`` — divergence detected, flow execution failed, or CLI-level
+      error (bad input, missing tool, bad arguments).
+    - ``2`` — flow file or tools module not found / not importable.
+    """
+    if runs < 1:
+        typer.echo("chainweaver: --runs must be >= 1.", err=True)
+        raise typer.Exit(code=1)
+    if repeats < 2:
+        typer.echo("chainweaver: --repeats must be >= 2.", err=True)
+        raise typer.Exit(code=1)
+
+    _require_existing_file(flow_file)
+
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    seed_inputs: list[dict[str, Any]] | None = None
+    if seed_input is not None:
+        _require_existing_file(seed_input)
+        try:
+            parsed = json.loads(seed_input.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            typer.echo(f"chainweaver: malformed --seed-input JSON: {exc.msg}", err=True)
+            raise typer.Exit(code=1) from exc
+        if not isinstance(parsed, list) or not all(isinstance(p, dict) for p in parsed):
+            typer.echo(
+                "chainweaver: --seed-input must be a JSON array of objects.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        seed_inputs = parsed
+
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    executor = FlowExecutor(registry=registry)
+
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            executor.register_tool(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+
+    from chainweaver.attest import AttestationInputError, attest_flow
+
+    try:
+        report = attest_flow(
+            flow=flow,
+            executor=executor,
+            n=runs,
+            repeats=repeats,
+            seed=seed,
+            seed_inputs=seed_inputs,
+        )
+    except AttestationInputError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ChainWeaverError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(json.loads(report.model_dump_json()))
+    else:
+        typer.echo(_attest_report_to_table(report))
+
+    if not report.observed_deterministic:
+        raise typer.Exit(code=1)
+
+
+def _attest_report_to_table(report: AttestationReport) -> str:
+    """Render an :class:`AttestationReport` for terminal display."""
+    status = "PASS ✓" if report.observed_deterministic else "FAIL ✗"
+    lines = [
+        f"flow: {report.flow_name}  v{report.flow_version}",
+        "─" * 60,
+        f"chainweaver:  {report.chainweaver_version}",
+        f"runs:         {report.n} x {report.repeats} repeats",
+        f"seed:         {report.seed}",
+        f"duration:     {report.total_duration_ms:.1f} ms",
+        f"fingerprint:  {report.aggregate_fingerprint}",
+        "─" * 60,
+        f"observed_deterministic: {status}",
+    ]
+    if report.divergences:
+        lines.append("")
+        lines.append("Divergences:")
+        for div in report.divergences:
+            step = div["diverging_step"]
+            step_str = f"step {step}" if step is not None else "(step unknown)"
+            lines.append(f"  input #{div['input_index']} @ {step_str}: {div['error_message']}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# suggest command (issue #155)
+# ---------------------------------------------------------------------------
+
+
+_SUGGEST_FLOW_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file.",
+)
+_SUGGEST_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help=(
+        "Python module path that exposes Tool instances at top level. "
+        "Required for CW003 (dead-step) suggestions. Repeatable."
+    ),
+)
+_SUGGEST_TRACES_OPTION = typer.Option(
+    [],
+    "--trace",
+    help=(
+        "Path to a recorded ExecutionResult JSON file. Required (>= 2 traces) "
+        "for CW004 (cacheable-step) suggestions. Repeatable."
+    ),
+)
+_SUGGEST_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+
+
+@app.command("suggest")
+def suggest_command(
+    flow_file: Path = _SUGGEST_FLOW_ARG,
+    tools: list[str] = _SUGGEST_TOOLS_OPTION,
+    trace: list[Path] = _SUGGEST_TRACES_OPTION,
+    output_format: OutputFormat = _SUGGEST_FORMAT_OPTION,
+) -> None:
+    """Emit advisory optimization suggestions for a flow file.
+
+    Suggestion families (stable codes):
+
+    - ``CW001`` — wasteful-passthrough (empty input_mapping).
+    - ``CW002`` — parallelizable-pair (adjacent steps reading disjoint
+      context keys).  Requires ``--tools``.
+    - ``CW003`` — dead-step (step outputs are not read downstream).
+      Requires ``--tools``.
+    - ``CW004`` — cacheable-step (identical outputs across observed
+      traces).  Requires two or more ``--trace`` files.
+
+    Exit code 0 is always returned — the suggester is advisory.
+    Machine consumers should gate on the ``suggestions`` array length
+    in ``--format json``.  Use a non-zero exit code from your own
+    wrapper when desired.
+
+    Exit codes: 0 = ran successfully (regardless of suggestion count),
+    1 = malformed input, 2 = file not found.
+    """
+    _require_existing_file(flow_file)
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    tool_objs: list[Tool] = []
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            tool_objs.append(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+
+    trace_results: list[ExecutionResult] = []
+    for path in trace:
+        trace_results.append(_load_execution_result(path))
+
+    from chainweaver.analyzer import suggest_optimizations
+
+    if isinstance(flow, DAGFlow):
+        suggestions = []
+    else:
+        suggestions = suggest_optimizations(
+            flow,
+            tools=tool_objs if tool_objs else None,
+            traces=trace_results if trace_results else None,
+        )
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(
+            {
+                "flow_name": flow.name,
+                "flow_version": flow.version,
+                "suggestion_count": len(suggestions),
+                "suggestions": [json.loads(s.model_dump_json()) for s in suggestions],
+            }
+        )
+        return
+
+    if not suggestions:
+        typer.echo(f"No suggestions for flow '{flow.name}'.")
+        return
+    lines = [
+        f"Suggestions for flow '{flow.name}' v{flow.version}:",
+        "─" * 60,
+    ]
+    for s in suggestions:
+        loc = f"step {s.step_index} ({s.tool_name})" if s.step_index is not None else "(flow)"
+        lines.append(f"  [{s.code} {s.title}] {loc}")
+        lines.append(f"    {s.message}")
+    typer.echo("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
 # doctor command (issue #175)
 # ---------------------------------------------------------------------------
 
@@ -1250,7 +1547,7 @@ def _doctor_check_drift(
     drift_count = sum(1 for issue in raw_issues if issue.issue_type == "schema_mismatch")
     fingerprints_present = flow.tool_schema_hashes is not None and bool(flow.tool_schema_hashes)
     # When no fingerprints are recorded, schema drift is structurally
-    # undetectable.  Missing-tool checks still ran.
+    # undetectable. Missing-tool checks still ran.
     return {
         "path": str(source_path),
         "flow_name": flow.name,
@@ -1332,7 +1629,7 @@ def doctor_command(
       registry does not provide.
     * ``schema_mismatch``: the live tool's input/output schema fingerprint
       differs from the value recorded in the flow's
-      ``tool_schema_hashes`` snapshot.  Flows that do not record
+      ``tool_schema_hashes`` snapshot. Flows that do not record
       fingerprints are reported as ``fingerprints_present=False`` and
       only checked for missing tools.
 
@@ -1368,8 +1665,7 @@ def doctor_command(
 
     # Build a tool dict by importing every requested module, exactly like
     # ``run`` does, but route through a FlowExecutor so we exercise the
-    # same registration semantics (and use the new public accessor for
-    # issue #178).
+    # same registration semantics (and use the public accessor for #178).
     executor = FlowExecutor(registry=FlowRegistry())
     seen_tool_names: set[str] = set()
     for module_name in tools:
@@ -1404,7 +1700,10 @@ def doctor_command(
     else:
         if load_errors:
             for err in load_errors:
-                typer.echo(f"chainweaver: failed to load {err['path']}: {err['error']}", err=True)
+                typer.echo(
+                    f"chainweaver: failed to load {err['path']}: {err['error']}",
+                    err=True,
+                )
         typer.echo(_format_doctor_table(results))
         if drift_count:
             typer.echo(f"\n{drift_count} flow(s) with drift, {len(results) - drift_count} ok")

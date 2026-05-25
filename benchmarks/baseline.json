@@ -1,0 +1,50 @@
+[
+  {
+    "name": "compiled_total_ms_n2_llm100_tool0",
+    "unit": "ms",
+    "value": 0.1712270000098215,
+    "extra": "min=0.15ms max=0.27ms repeats=5"
+  },
+  {
+    "name": "compiled_overhead_ms_n2_llm100_tool0",
+    "unit": "ms",
+    "value": 0.11604399992393155,
+    "extra": "min=0.11ms max=0.21ms repeats=5"
+  },
+  {
+    "name": "compiled_total_ms_n5_llm200_tool0",
+    "unit": "ms",
+    "value": 0.2554729999246774,
+    "extra": "min=0.17ms max=0.35ms repeats=5"
+  },
+  {
+    "name": "compiled_overhead_ms_n5_llm200_tool0",
+    "unit": "ms",
+    "value": 0.18204899993179424,
+    "extra": "min=0.11ms max=0.19ms repeats=5"
+  },
+  {
+    "name": "compiled_total_ms_n10_llm200_tool10",
+    "unit": "ms",
+    "value": 102.22814000007929,
+    "extra": "min=101.95ms max=102.98ms repeats=5"
+  },
+  {
+    "name": "compiled_overhead_ms_n10_llm200_tool10",
+    "unit": "ms",
+    "value": 0.3404490003049432,
+    "extra": "min=0.29ms max=0.49ms repeats=5"
+  },
+  {
+    "name": "compiled_total_ms_n5_llm500_tool50",
+    "unit": "ms",
+    "value": 251.69717199992192,
+    "extra": "min=251.61ms max=251.76ms repeats=5"
+  },
+  {
+    "name": "compiled_overhead_ms_n5_llm500_tool50",
+    "unit": "ms",
+    "value": 0.3047160000733129,
+    "extra": "min=0.28ms max=0.32ms repeats=5"
+  }
+]

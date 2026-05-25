@@ -10,6 +10,7 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 ## Table of Contents
 
 - [Dev environment setup](#dev-environment-setup)
+- [Pre-commit hooks](#pre-commit-hooks)
 - [Running tests](#running-tests)
 - [Code style](#code-style)
 - [PR process](#pr-process)
@@ -39,6 +40,46 @@ Python 3.10 or later is required.
 
 ---
 
+## Pre-commit hooks
+
+ChainWeaver ships a [`.pre-commit-config.yaml`](.pre-commit-config.yaml) that
+mirrors the four CI checks plus a few hygiene hooks. Set it up once per
+clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+After installation, the hooks run automatically on every `git commit`.
+You can also run them manually against the whole tree:
+
+```bash
+pre-commit run --all-files
+```
+
+The hooks invoke exactly the commands documented in
+[`AGENTS.md` §7](AGENTS.md#7-validation-commands) — same scope
+(`chainweaver/ tests/ examples/`), same flags — so a clean local run
+matches a clean CI run.
+
+### Secret scanning
+
+[`detect-secrets`](https://github.com/Yelp/detect-secrets) runs as part of
+the hooks and is gated by a committed baseline at
+[`.secrets.baseline`](.secrets.baseline). If you legitimately add a
+secret-shaped string (e.g. a new test fixture), update the baseline:
+
+```bash
+detect-secrets scan --baseline .secrets.baseline
+detect-secrets audit .secrets.baseline
+```
+
+Do **not** suppress the hook with `--no-verify`. Fix the underlying issue
+or update the baseline with an audit trail.
+
+---
+
 ## Running tests
 
 Run the full test suite:
@@ -57,6 +98,25 @@ python -m pytest tests/ -v
 ```
 
 CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.13.
+
+---
+
+## Pre-commit hooks
+
+A `.pre-commit-config.yaml` at the repo root mirrors three of the four validation commands above (ruff check, ruff format --check, mypy) plus secret scanning. pytest is excluded to keep commit speed reasonable — run it manually before pushing or rely on CI. Hooks use `language: system` so they run from the project venv with the same tool versions.
+
+```bash
+# One-time install (after `pip install -e ".[dev]"`)
+pip install pre-commit
+pre-commit install
+
+# Run all hooks against every tracked file (recommended after a rebase)
+pre-commit run --all-files
+```
+
+Once installed, the hooks run automatically on `git commit`. If a hook fails, fix the underlying issue and re-stage — do not bypass the hook with `--no-verify`.
+
+Hook versions are pinned in `.pre-commit-config.yaml`. Bumping a hook is a deliberate change: update the pin in the same PR that benefits from it.
 
 ---
 
