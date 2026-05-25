@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779444210206,
+  "lastUpdate": 1779706095742,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -216,6 +216,78 @@ window.BENCHMARK_DATA = {
             "value": 0.36685000003444657,
             "unit": "ms",
             "extra": "min=0.36ms max=0.39ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "797ad16d9d99415e3974852b5a4401c61556f6d8",
+          "message": "Merge pull request #179 from dgenio/claude/triage-issues-W2BcC\n\nfeat: add doctor CLI, profile reliability aggregates, public registered_tools (#175, #176, #178)",
+          "timestamp": "2026-05-25T11:47:24+01:00",
+          "tree_id": "204164b5a0dcbf7bd22042674c5b941b8c0369a2",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/797ad16d9d99415e3974852b5a4401c61556f6d8"
+        },
+        "date": 1779706095248,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.1543189999893002,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.10092299999087118,
+            "unit": "ms",
+            "extra": "min=0.10ms max=0.14ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.21077499991406512,
+            "unit": "ms",
+            "extra": "min=0.19ms max=0.26ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.12203400001453701,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.14ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.80719899994983,
+            "unit": "ms",
+            "extra": "min=101.66ms max=102.04ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.34305700012282614,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.42ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.2905020000744,
+            "unit": "ms",
+            "extra": "min=251.19ms max=251.68ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.3076990001318336,
+            "unit": "ms",
+            "extra": "min=0.30ms max=0.34ms repeats=5"
           }
         ]
       }
