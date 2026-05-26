@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779822621730,
+  "lastUpdate": 1779828621345,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -360,6 +360,78 @@ window.BENCHMARK_DATA = {
             "value": 0.31469399999650705,
             "unit": "ms",
             "extra": "min=0.29ms max=0.36ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e58f95e1213fd659ab5fe94b34986d6c030a910",
+          "message": "Merge pull request #182 from dgenio/claude/triage-issues-JSgiS\n\nfeat: determinism + safety contracts, conditional branching, property tests",
+          "timestamp": "2026-05-26T21:49:26+01:00",
+          "tree_id": "8c1360db8d8008a97f91862d7840cafb43fe142a",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/0e58f95e1213fd659ab5fe94b34986d6c030a910"
+        },
+        "date": 1779828620394,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.14956199993321206,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.097428999879412,
+            "unit": "ms",
+            "extra": "min=0.10ms max=0.14ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.2033129999290395,
+            "unit": "ms",
+            "extra": "min=0.20ms max=0.23ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.12219399991408864,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.14ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.51409900004182,
+            "unit": "ms",
+            "extra": "min=101.33ms max=101.78ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.27615999965746596,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.34ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.47593200017582,
+            "unit": "ms",
+            "extra": "min=251.08ms max=251.57ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2985749999879772,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.36ms repeats=5"
           }
         ]
       }
