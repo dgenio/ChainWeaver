@@ -2321,6 +2321,33 @@ class FlowExecutor:
                     record = self._execute_capability_step(
                         flat_index, step, context, flow.name, trace_id
                     )
+                    # Capability steps are dispatched through the
+                    # ``_execute_capability_step`` hook, bypassing
+                    # ``_execute_step``'s lifecycle firing.  Emit the same
+                    # events here so middleware, tracing, and ``stream_flow``
+                    # observe capability steps too.  Mirror ``_execute_step``:
+                    # ``on_step_start`` fires only once the step ran past input
+                    # resolution (skipped for pre-resolution failures such as
+                    # the base-class rejection or a missing input mapping);
+                    # ``on_step_end`` always fires.
+                    if record.success or record.inputs:
+                        self._fire_step_start(
+                            StepStartContext(
+                                trace_id=trace_id,
+                                flow_name=flow.name,
+                                step_index=record.step_index,
+                                tool_name=step.tool_name,
+                                inputs=dict(record.inputs),
+                                started_at=record.started_at,
+                            )
+                        )
+                    self._fire_step_end(
+                        StepEndContext(
+                            trace_id=trace_id,
+                            flow_name=flow.name,
+                            step_record=record,
+                        )
+                    )
                     level_records.append(record)
                     flat_index += 1
                     if not record.success:

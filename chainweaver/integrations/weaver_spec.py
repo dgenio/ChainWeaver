@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from chainweaver.flow import DAGFlow, Flow
 
@@ -116,6 +116,21 @@ class RoutingDecision(BaseModel):
             raise ValueError(f"RoutingDecision.confidence must be in [0.0, 1.0]; got {value}.")
         return value
 
+    @model_validator(mode="after")
+    def _selected_is_candidate(self) -> RoutingDecision:
+        """Ensure ``selected_capability_id`` is one of ``candidates``.
+
+        The docstring contracts that ``candidates`` includes the selection;
+        enforcing it here turns a catalog/router misconfiguration into a loud
+        validation error instead of a confusing downstream lookup failure.
+        """
+        if self.selected_capability_id not in self.candidates:
+            raise ValueError(
+                f"RoutingDecision.selected_capability_id '{self.selected_capability_id}' "
+                f"must be one of candidates {self.candidates!r}."
+            )
+        return self
+
 
 class SelectableItem(BaseModel):
     """A routable capability advertised to contextweaver (weaver-spec I-03).
@@ -127,17 +142,16 @@ class SelectableItem(BaseModel):
 
     Attributes:
         capability_id: Stable, dotted identifier.
-        name: Human-readable display name (defaults to ``capability_id``).
+        name: Human-readable display name.  :func:`flow_to_selectable_item`
+            sets this to the flow's ``name``.
         description: One-paragraph summary of what the capability does.
         version: PEP 440 version string of the underlying flow.
-        input_schema: JSON Schema for the capability inputs, derived
-            from the flow's ``input_schema`` when set, else from the
-            first step's tool ``input_schema``.  ``None`` when no
-            schema can be inferred.
-        output_schema: JSON Schema for the capability outputs, derived
-            from the flow's ``output_schema`` when set, else from the
-            last step's tool ``output_schema``.  ``None`` when no
-            schema can be inferred.
+        input_schema: JSON Schema for the capability inputs, derived from
+            the flow's resolved ``input_schema`` (its ``input_schema_ref``)
+            when set.  ``None`` when the flow declares no input schema ref.
+        output_schema: JSON Schema for the capability outputs, derived from
+            the flow's resolved ``output_schema`` (its ``output_schema_ref``)
+            when set.  ``None`` when the flow declares no output schema ref.
         tags: Optional taxonomy tags used by contextweaver for catalog
             filtering.
         deterministic: Whether the underlying flow is marked

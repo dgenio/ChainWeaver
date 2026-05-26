@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KernelBackedExecutor`, a `FlowExecutor` subclass that delegates
   `DAGFlowStep` instances with `step_type="capability"` through a
   structural `KernelProtocol`.  Capability steps produce the same
-  `StepRecord` shape as tool steps, so observability and tracing are
-  uniform.  Ships an in-process `InMemoryKernel` for tests and offline
+  `StepRecord` shape as tool steps and emit the same
+  `on_step_start` / `on_step_end` middleware events, so observability,
+  tracing, and `stream_flow` are uniform.  Ships an in-process
+  `InMemoryKernel` for tests and offline
   runs and a new `KernelInvocationError` exception.  No agent-kernel
   PyPI dependency — `KernelProtocol` is a structural protocol so any
   transport (in-process, gRPC, HTTP, stub) can satisfy it.
@@ -43,9 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `decision_candidates` set call the registered callback to pick which
   candidate to invoke; failures (callback raises, or returns outside
   the candidate set) abort the step with a new `DecisionCallbackError`
-  rather than silently falling back to the static `tool_name`.  Steps
-  without `decision_candidates` never invoke the callback — existing
-  flows behave identically.
+  rather than silently falling back to the static `tool_name`.
+  `FlowStep` validates at construction that `tool_name` is itself a
+  member of `decision_candidates` (it is the default a callback may
+  return).  Steps without `decision_candidates` never invoke the
+  callback — existing flows behave identically.
 - **Contextweaver routing adapter** (#106): new
   `chainweaver/integrations/contextweaver.py` exposing
   `RoutingDecisionAdapter` (a `DecisionCallback` impl that asks a

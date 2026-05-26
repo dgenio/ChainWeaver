@@ -114,6 +114,16 @@ def test_flow_step_rejects_duplicate_candidates() -> None:
         FlowStep(tool_name="t", decision_candidates=["a", "b", "a"])
 
 
+def test_flow_step_rejects_tool_name_outside_candidates() -> None:
+    with pytest.raises(ValueError, match="must be a member of decision_candidates"):
+        FlowStep(tool_name="t", decision_candidates=["a", "b"])
+
+
+def test_flow_step_accepts_tool_name_in_candidates() -> None:
+    step = FlowStep(tool_name="a", decision_candidates=["a", "b"])
+    assert step.decision_candidates == ["a", "b"]
+
+
 def _build_executor_with_decision(callback: Any = None) -> FlowExecutor:
     flow = Flow(
         name="picky",

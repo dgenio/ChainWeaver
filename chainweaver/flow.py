@@ -249,6 +249,23 @@ class FlowStep(BaseModel):
             f"on_error must be 'fail', 'skip', or 'fallback:<tool_name>'; got '{value}'."
         )
 
+    @model_validator(mode="after")
+    def _check_tool_name_in_candidates(self) -> FlowStep:
+        """Ensure ``tool_name`` is itself one of the ``decision_candidates``.
+
+        ``DecisionContext`` documents ``default_tool_name`` (the step's
+        ``tool_name``) as always present in ``candidates``, and a callback that
+        returns the default must clear the executor's membership check.  Reject
+        configurations where the default is not a candidate so the gap fails at
+        construction rather than at execution time.
+        """
+        if self.decision_candidates is not None and self.tool_name not in self.decision_candidates:
+            raise ValueError(
+                f"tool_name '{self.tool_name}' must be a member of decision_candidates "
+                f"{self.decision_candidates!r}; it is the default a callback may return."
+            )
+        return self
+
 
 class Flow(BaseModel):
     """A deterministic, ordered sequence of tool invocations.

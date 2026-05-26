@@ -42,15 +42,35 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
 from chainweaver.exceptions import KernelInvocationError
-from chainweaver.executor import FlowExecutor, StepRecord, _exc_to_strings, _now_utc
+from chainweaver.executor import FlowExecutor, StepRecord
 from chainweaver.flow import DAGFlowStep
 from chainweaver.integrations.weaver_spec import CapabilityToken
 from chainweaver.log_utils import get_logger, log_step_error
 
 _logger = get_logger("chainweaver.integrations.agent_kernel")
+
+
+def _now_utc() -> datetime:
+    """Return the current UTC time as a timezone-aware ``datetime``.
+
+    Kept local so this integration does not reach into
+    :mod:`chainweaver.executor` private helpers — the executor stays free to
+    refactor its internals without breaking the kernel backend.
+    """
+    return datetime.now(timezone.utc)
+
+
+def _exc_to_strings(exc: Exception) -> tuple[str, str]:
+    """Render an exception as ``(error_type, error_message)`` strings.
+
+    Mirrors the executor's record-building convention locally; see
+    :func:`_now_utc` for why the helper is duplicated rather than imported.
+    """
+    return type(exc).__name__, str(exc)
 
 
 @runtime_checkable

@@ -43,6 +43,11 @@ def test_routing_decision_rejects_out_of_range_confidence() -> None:
         RoutingDecision(selected_capability_id="x", candidates=("x",), confidence=1.5)
 
 
+def test_routing_decision_rejects_selection_outside_candidates() -> None:
+    with pytest.raises(ValueError, match="must be one of candidates"):
+        RoutingDecision(selected_capability_id="ghost", candidates=("x", "y"))
+
+
 def test_routing_decision_round_trip_json() -> None:
     rd = RoutingDecision(
         selected_capability_id="x",

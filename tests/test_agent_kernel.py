@@ -15,8 +15,22 @@ from chainweaver.integrations.agent_kernel import (
     KernelProtocol,
 )
 from chainweaver.integrations.weaver_spec import CapabilityToken
+from chainweaver.middleware import StepEndContext, StepStartContext
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+
+
+class _RecordingMiddleware:
+    """Records lifecycle hook invocations in order for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, Any]] = []
+
+    def on_step_start(self, ctx: StepStartContext) -> None:
+        self.events.append(("step_start", ctx))
+
+    def on_step_end(self, ctx: StepEndContext) -> None:
+        self.events.append(("step_end", ctx))
 
 
 def _ingest_capability(inputs: dict[str, Any], token: CapabilityToken) -> dict[str, Any]:
@@ -65,6 +79,45 @@ def test_kernel_backed_executor_runs_capability_step() -> None:
     result = ex.execute_flow("cap_dag", {"records": [1, 2, 3]})
     assert result.success is True
     assert result.execution_log[0].outputs == {"rows": 3, "via": "data.ingest"}
+
+
+def test_capability_step_emits_lifecycle_events() -> None:
+    """Capability steps fire on_step_start/on_step_end like tool steps (issue #89)."""
+    dag = _build_capability_dag()
+    reg = FlowRegistry()
+    reg.register_flow(dag)
+    kernel = InMemoryKernel({"data.ingest": _ingest_capability})
+    recorder = _RecordingMiddleware()
+    ex = KernelBackedExecutor(registry=reg, kernel=kernel, middleware=[recorder])
+    result = ex.execute_flow("cap_dag", {"records": [1, 2, 3]})
+    assert result.success is True
+    kinds = [kind for kind, _ in recorder.events]
+    assert "step_start" in kinds
+    assert "step_end" in kinds
+    assert kinds.index("step_start") < kinds.index("step_end")
+    start_ctx = next(ctx for kind, ctx in recorder.events if kind == "step_start")
+    end_ctx = next(ctx for kind, ctx in recorder.events if kind == "step_end")
+    assert start_ctx.tool_name == "ingest_capability_proxy"
+    assert end_ctx.step_record.success is True
+    assert end_ctx.step_record.outputs == {"rows": 3, "via": "data.ingest"}
+
+
+def test_capability_step_failure_still_emits_step_end() -> None:
+    """A failing capability step still emits on_step_end for observability (issue #89)."""
+
+    def boom(inputs: dict[str, Any], token: CapabilityToken) -> dict[str, Any]:
+        raise RuntimeError("kernel broke")
+
+    dag = _build_capability_dag()
+    reg = FlowRegistry()
+    reg.register_flow(dag)
+    kernel = InMemoryKernel({"data.ingest": boom})
+    recorder = _RecordingMiddleware()
+    ex = KernelBackedExecutor(registry=reg, kernel=kernel, middleware=[recorder])
+    result = ex.execute_flow("cap_dag", {"records": [1]})
+    assert result.success is False
+    end_ctx = next(ctx for kind, ctx in recorder.events if kind == "step_end")
+    assert end_ctx.step_record.success is False
 
 
 def test_kernel_backed_executor_still_runs_tool_steps() -> None:
