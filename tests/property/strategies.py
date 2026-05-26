@@ -1,118 +1,169 @@
-"""Hypothesis strategies for ChainWeaver property tests (issue #143).
+"""Hypothesis strategies for property-based determinism tests.
 
-The search space is intentionally narrow: every flow is composed from the
-three helper tools in :mod:`tests.helpers` (``double``, ``add_ten``,
-``format_result``).  Strategies cover:
+Strategies are restricted to schemas and tool callables from
+``tests/helpers.py``. Generating arbitrary Pydantic schemas at runtime
+is intentionally out of scope per ``docs/agent-context/invariants.md``
+and the rationale in issue #143 — we want broad coverage of *inputs and
+flow shapes* against a fixed, known-good toolbelt.
 
-- ``initial_inputs`` — bounded integer inputs the helper tools can accept.
-- ``linear_flows`` — flows built from a random-length prefix of a valid
-  step ordering.
-- ``equivalent_dag_flows`` — a linear flow rewritten into a
-  one-step-per-node DAG with sequential ``depends_on``.
-
-The strategies do NOT touch network I/O, LLMs, or randomness in the
-executor.  They only generate **data**; the executor still runs as the
-deterministic graph runner it is.
+The input schema strategy is derived from each helper schema's JSON
+schema via ``hypothesis_jsonschema.from_schema`` so the strategy stays
+in sync with the Pydantic model automatically: adding a field to
+``helpers.NumberInput`` would widen the search space at the next test
+run with no strategy change.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from typing import Any, cast
 
-# Hypothesis is collected by pytest with ``tests/`` on the path (see
-# ``tests/conftest.py``).  Add a defensive fallback so the strategies
-# module can be imported by direct ``python -m`` invocations too.
-_TESTS_DIR = Path(__file__).resolve().parent.parent
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
+from helpers import (
+    FormattedOutput,
+    NumberInput,
+    ValueInput,
+    ValueOutput,
+    _add_ten_fn,
+    _double_fn,
+    _format_fn,
+)
+from hypothesis import strategies as st
+from hypothesis_jsonschema import from_schema
 
-from hypothesis import strategies as st  # noqa: E402
+from chainweaver import (
+    DAGFlow,
+    DAGFlowStep,
+    Flow,
+    FlowExecutor,
+    FlowRegistry,
+    FlowStep,
+    Tool,
+)
 
-from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep  # noqa: E402
-
-# A short, fixed step prefix order: the helper tools chain through
-# ``number -> value -> value -> result``.  The full valid orderings under
-# this schema family are:
-#
-#   - ["double"]
-#   - ["double", "add_ten"]
-#   - ["double", "add_ten", "format_result"]
-#
-# ``format_result`` is a terminal step because it produces ``result``,
-# which no helper tool consumes.  ``add_ten`` only makes sense after
-# ``double`` (which produces ``value``) or as the first step if the
-# initial input already carries ``value``.  To keep the property tests
-# self-evidently valid we always start with ``double``.
-
-_LINEAR_CHAINS: list[list[str]] = [
-    ["double"],
-    ["double", "add_ten"],
-    ["double", "add_ten", "format_result"],
-]
-
-_INPUT_MAPPINGS: dict[str, dict[str, str]] = {
-    "double": {"number": "number"},
-    "add_ten": {"value": "value"},
-    "format_result": {"value": "value"},
-}
+DOUBLE = "double"
+ADD_TEN = "add_ten"
+FORMAT_RESULT = "format_result"
 
 
-def linear_flows() -> st.SearchStrategy[Flow]:
-    """A strategy generating valid linear :class:`Flow` instances."""
+def number_input_strategy() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy that yields dicts validating against ``NumberInput``.
 
-    return st.sampled_from(_LINEAR_CHAINS).map(_make_linear_flow)
+    Derived from ``NumberInput.model_json_schema()`` with
+    ``additionalProperties`` set to ``false`` so the strategy only
+    generates payloads matching the exact ``{"number": int}`` shape.
+    """
+    schema = NumberInput.model_json_schema()
+    schema["additionalProperties"] = False
+    return cast(
+        "st.SearchStrategy[dict[str, Any]]",
+        from_schema(schema),
+    )
 
 
-def _make_linear_flow(tool_names: list[str]) -> Flow:
+def step_flow_strategy() -> st.SearchStrategy[list[str]]:
+    """Strategy that yields valid linear step sequences over the helper tools.
+
+    Every sequence starts with ``double`` (the only tool that consumes
+    ``NumberInput``) and is then any number of ``add_ten`` steps,
+    optionally terminated by ``format_result``.
+    """
+    body = st.lists(st.just(ADD_TEN), min_size=0, max_size=5)
+    tail: st.SearchStrategy[list[str]] = st.sampled_from([[FORMAT_RESULT], []])
+    return st.builds(lambda b, t: [DOUBLE, *b, *t], body, tail)
+
+
+def _input_mapping_for(tool_name: str) -> dict[str, str]:
+    """Return the canonical input mapping for a helper tool."""
+    if tool_name == DOUBLE:
+        return {"number": "number"}
+    return {"value": "value"}
+
+
+def build_linear_flow(name: str, step_names: list[str]) -> Flow:
+    """Construct a :class:`Flow` from a list of helper tool names."""
     return Flow(
-        name="prop_flow",
+        name=name,
         version="0.1.0",
-        description="Property-test linear flow.",
+        description="Property-test flow.",
         steps=[
-            FlowStep(tool_name=name, input_mapping=_INPUT_MAPPINGS[name]) for name in tool_names
+            FlowStep(tool_name=tool, input_mapping=_input_mapping_for(tool)) for tool in step_names
         ],
     )
 
 
-def equivalent_dag_flows() -> st.SearchStrategy[tuple[Flow, DAGFlow]]:
-    """A strategy generating ``(linear, dag)`` pairs that must execute identically."""
-
-    return st.sampled_from(_LINEAR_CHAINS).map(_make_equivalent_pair)
-
-
-def _make_equivalent_pair(tool_names: list[str]) -> tuple[Flow, DAGFlow]:
-    linear = _make_linear_flow(tool_names)
-    dag_steps: list[DAGFlowStep] = []
-    for idx, name in enumerate(tool_names):
-        depends_on = [f"s{idx - 1}"] if idx > 0 else []
-        dag_steps.append(
+def build_equivalent_dag(name: str, step_names: list[str]) -> DAGFlow:
+    """Construct a sequential :class:`DAGFlow` matching ``step_names``."""
+    steps: list[DAGFlowStep] = []
+    for index, tool in enumerate(step_names):
+        depends_on = [f"s{index - 1}"] if index > 0 else []
+        steps.append(
             DAGFlowStep(
-                tool_name=name,
-                step_id=f"s{idx}",
+                step_id=f"s{index}",
+                tool_name=tool,
+                input_mapping=_input_mapping_for(tool),
                 depends_on=depends_on,
-                input_mapping=_INPUT_MAPPINGS[name],
             )
         )
-    dag = DAGFlow(
-        name="prop_dag",
+    return DAGFlow(
+        name=name,
         version="0.1.0",
-        description="Property-test linear-equivalent DAG.",
-        steps=dag_steps,
+        description="Property-test DAG flow.",
+        steps=steps,
     )
-    return linear, dag
 
 
-def initial_inputs() -> st.SearchStrategy[dict[str, int]]:
-    """A strategy generating well-typed inputs the helper tools accept.
+def make_helper_tools() -> list[Tool]:
+    """Construct fresh :class:`Tool` instances for the three helpers."""
+    return [
+        Tool(
+            name=DOUBLE,
+            description="Doubles a number.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+        ),
+        Tool(
+            name=ADD_TEN,
+            description="Adds 10 to a value.",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        ),
+        Tool(
+            name=FORMAT_RESULT,
+            description="Formats a value.",
+            input_schema=ValueInput,
+            output_schema=FormattedOutput,
+            fn=_format_fn,
+        ),
+    ]
 
-    The integer range is deliberately bounded so the format string in
-    ``format_result`` stays small and the comparison stays trivial — the
-    point is to stress the executor's determinism, not Python's int
-    rendering.
+
+def fresh_executor(flow: Flow | DAGFlow) -> FlowExecutor:
+    """Build a registry + executor wired with the helper toolbelt."""
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    executor = FlowExecutor(registry=registry)
+    for tool in make_helper_tools():
+        executor.register_tool(tool)
+    return executor
+
+
+# Excluded from equality assertions: these vary by run-by-design.
+VOLATILE_FIELDS: frozenset[str] = frozenset(
+    {
+        "trace_id",
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "total_duration_ms",
+    }
+)
+
+
+def step_record_signature(record: Any) -> dict[str, Any]:
+    """Return the deterministic subset of a :class:`StepRecord`.
+
+    Drops fields listed in :data:`VOLATILE_FIELDS`.
     """
-
-    return st.builds(
-        lambda n: {"number": n},
-        n=st.integers(min_value=-10_000, max_value=10_000),
-    )
+    dump = record.model_dump()
+    return {key: value for key, value in dump.items() if key not in VOLATILE_FIELDS}

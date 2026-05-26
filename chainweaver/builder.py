@@ -38,8 +38,10 @@ class FlowBuilder:
     validated :class:`~chainweaver.flow.Flow` via :meth:`build`.
 
     Args:
-        name: Unique name for the flow.
-        description: Human-readable description of what the flow does.
+        name: Optional unique name for the flow.  May also be set via
+            :meth:`name`.
+        description: Optional human-readable description of what the flow does.
+            May also be set via :meth:`description`.
 
     Example::
 
@@ -55,9 +57,9 @@ class FlowBuilder:
 
     _DEFAULT_VERSION: str = "0.1.0"
 
-    def __init__(self, name: str, description: str) -> None:
-        self._name: str = name
-        self._description: str = description
+    def __init__(self, name: str | None = None, description: str | None = None) -> None:
+        self._name: str = name or ""
+        self._description: str = description or ""
         self._version: str = self._DEFAULT_VERSION
         self._steps: list[FlowStep] = []
         self._input_schema: type[BaseModel] | None = None
@@ -105,6 +107,31 @@ class FlowBuilder:
     # Schema and metadata
     # ------------------------------------------------------------------
 
+    def name(self, value: str) -> FlowBuilder:
+        """Set the flow name.
+
+        This compatibility alias supports older fluent examples that start
+        with ``FlowBuilder().name("...")``.
+        """
+        self._name = value
+        return self
+
+    def description(self, value: str) -> FlowBuilder:
+        """Set the flow description.
+
+        This compatibility alias supports older fluent examples that start
+        with ``FlowBuilder().description("...")``.
+        """
+        self._description = value
+        return self
+
+    def version(self, value: str) -> FlowBuilder:
+        """Set the flow version.
+
+        Alias for :meth:`with_version` retained for older fluent examples.
+        """
+        return self.with_version(value)
+
     def with_input_schema(self, schema: type[BaseModel]) -> FlowBuilder:
         """Set the flow-level input schema.
 
@@ -134,9 +161,8 @@ class FlowBuilder:
     def with_version(self, version: str) -> FlowBuilder:
         """Set the flow's PEP 440 version string.
 
-        Defaults to ``"0.1.0"`` when not called.  The :class:`Flow` constructor
-        requires an explicit version, so the builder picks a sensible default
-        so that quick prototypes and tests stay terse.
+        Defaults to ``"0.1.0"`` when not called, matching the
+        :class:`Flow` constructor default.
 
         Args:
             version: A PEP 440-compatible version string (e.g. ``"1.2.0"``).

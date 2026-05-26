@@ -1,0 +1,68 @@
+name: Question
+description: Ask a question about using ChainWeaver — concepts, APIs, or whether it fits your use case.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reaching out! Before you file, please check:
+
+        - The [README](https://github.com/dgenio/ChainWeaver#readme) and
+          [`docs/`](https://github.com/dgenio/ChainWeaver/tree/main/docs).
+        - Existing open and closed [issues](https://github.com/dgenio/ChainWeaver/issues?q=is%3Aissue)
+          and [discussions](https://github.com/dgenio/ChainWeaver/discussions)
+          for a similar question.
+
+        If you're reporting a bug, please use the Bug Report form instead.
+        If you're requesting a feature, use the Feature Request form.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know? Be specific.
+      placeholder: |
+        e.g. "How do I share state between two FlowSteps without listing every
+        field in input_mapping?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you've tried
+      description: |
+        Code snippets, links to docs you read, or approaches you considered.
+        Helps us understand where the gap is.
+      render: python
+    validations:
+      required: false
+
+  - type: dropdown
+    id: python_version
+    attributes:
+      label: Python version
+      options:
+        - "3.10"
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "Not applicable"
+    validations:
+      required: false
+
+  - type: input
+    id: chainweaver_version
+    attributes:
+      label: ChainWeaver version
+      placeholder: "e.g. 0.4.0 (run `python -c 'import chainweaver; print(chainweaver.__version__)'`)"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help us answer your question.
+    validations:
+      required: false

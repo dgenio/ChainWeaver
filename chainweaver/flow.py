@@ -238,6 +238,30 @@ class FlowStep(BaseModel):
 
             An empty mapping (the default) means the tool receives the full
             current context as-is.
+        retry: Optional :class:`RetryPolicy` driving the executor's retry
+            behaviour for this step.
+        on_error: How the executor reacts when all retry attempts are
+            exhausted: ``"fail"`` (the default), ``"skip"``, or
+            ``"fallback:<tool_name>"``.  Step-contract failures
+            (:attr:`input_contract` / :attr:`output_contract`) intentionally
+            bypass this policy and always abort the step — contract
+            mismatches are wiring bugs rather than transient errors.
+        input_contract: Optional ``"module:qualname"`` reference to a
+            :class:`~pydantic.BaseModel` subclass that the executor
+            validates against the *resolved* step inputs **before** the
+            tool is invoked (issue #172).  This is independent from the
+            tool's own ``input_schema``: it expresses a step-level
+            contract that the wiring (``input_mapping`` + accumulated
+            context) must satisfy, surfacing mapping mistakes with a
+            schema-shaped error rather than waiting for the tool's own
+            validation to fail.
+        output_contract: Optional ``"module:qualname"`` reference to a
+            :class:`~pydantic.BaseModel` subclass that the executor
+            validates against the tool's outputs **after** the tool has
+            run (issue #172).  Use this when the step has a tighter
+            output contract than the tool's own ``output_schema`` — e.g.
+            a tool that returns a superset of fields but this step only
+            promises a subset.
 
     Example::
 
@@ -249,12 +273,22 @@ class FlowStep(BaseModel):
             tool_name="scale",
             input_mapping={"number": "value", "factor": 3},
         )
+
+        # Add typed step contracts (issue #172)
+        step = FlowStep(
+            tool_name="scale",
+            input_mapping={"number": "value", "factor": 3},
+            input_contract=FlowStep.contract_ref_from(ScaleInput),
+            output_contract=FlowStep.contract_ref_from(ScaleOutput),
+        )
     """
 
     tool_name: str
     input_mapping: dict[str, Any] = Field(default_factory=dict)
     retry: RetryPolicy | None = None
     on_error: str = "fail"
+    input_contract: str | None = None
+    output_contract: str | None = None
 
     @field_validator("on_error")
     @classmethod
@@ -266,6 +300,38 @@ class FlowStep(BaseModel):
         raise ValueError(
             f"on_error must be 'fail', 'skip', or 'fallback:<tool_name>'; got '{value}'."
         )
+
+    @staticmethod
+    def contract_ref_from(cls: type[BaseModel]) -> str:
+        """Return a ``"module:qualname"`` ref string for *cls* (issue #172).
+
+        Convenience helper mirroring :meth:`Flow.schema_ref_from`.
+        """
+        return _qualified_name(cls)
+
+    @property
+    def resolved_input_contract(self) -> type[BaseModel] | None:
+        """Resolve :attr:`input_contract` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.input_contract is None:
+            return None
+        return resolve_class_ref(self.input_contract, expected_base=BaseModel)
+
+    @property
+    def resolved_output_contract(self) -> type[BaseModel] | None:
+        """Resolve :attr:`output_contract` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.output_contract is None:
+            return None
+        return resolve_class_ref(self.output_contract, expected_base=BaseModel)
 
 
 class Flow(BaseModel):
@@ -301,6 +367,17 @@ class Flow(BaseModel):
             :class:`~chainweaver.executor.FlowExecutor` validates the
             accumulated context against the resolved schema **after** the
             last step finishes.
+        context_schema_ref: An optional ``"module:qualname"`` reference to
+            a :class:`~pydantic.BaseModel` subclass describing the shape
+            of the *accumulated execution context* (issue #152).  The
+            executor validates the context against the resolved schema
+            at flow end, once every step has completed successfully
+            (skipped when an earlier step aborts the flow, since no
+            ``final_output`` is produced in that case).  The primary
+            value of this field is static typing — flow authors get
+            mypy + IDE autocomplete + a single source of truth for
+            context keys; runtime validation at the flow boundary is a
+            secondary safety net.
 
     Example::
 
@@ -315,11 +392,12 @@ class Flow(BaseModel):
             ],
             input_schema_ref=Flow.schema_ref_from(NumberInput),
             output_schema_ref=Flow.schema_ref_from(FormattedOutput),
+            context_schema_ref=Flow.schema_ref_from(MyFlowContext),
         )
     """
 
     name: str
-    version: str
+    version: str = "0.1.0"
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
@@ -327,6 +405,7 @@ class Flow(BaseModel):
     trigger_conditions: dict[str, Any] | None = None
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
+    context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
 
     @staticmethod
@@ -384,6 +463,19 @@ class Flow(BaseModel):
         if not self.deterministic:
             return DeterminismLevel.NONE
         return DeterminismLevel.FULL
+
+    @property
+    def context_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152).
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.context_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.context_schema_ref, expected_base=BaseModel)
+        return resolved
 
     def to_ascii(self) -> str:
         """Return a single-line ASCII flow diagram (issue #79)."""
@@ -611,6 +703,13 @@ class DAGFlow(BaseModel):
             :class:`~pydantic.BaseModel` subclass validated against the
             final merged context after all steps finish.  Resolved lazily
             via the :attr:`output_schema` property.
+        context_schema_ref: Optional ``"module:qualname"`` ref to a
+            :class:`~pydantic.BaseModel` subclass validated against the
+            accumulated context at flow end, once every step has
+            completed successfully (issue #152; validation is skipped
+            when an earlier step aborts the flow).  Mirrors the
+            :class:`Flow` field of the same name; see there for the
+            DX motivation.
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
@@ -642,6 +741,7 @@ class DAGFlow(BaseModel):
     trigger_conditions: dict[str, Any] | None = None
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
+    context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
 
     @staticmethod
@@ -685,6 +785,14 @@ class DAGFlow(BaseModel):
         if any(step.branches for step in self.steps):
             return DeterminismLevel.PARTIAL
         return DeterminismLevel.FULL
+
+    @property
+    def context_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152)."""
+        if self.context_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.context_schema_ref, expected_base=BaseModel)
+        return resolved
 
     def to_ascii(self) -> str:
         """Return a multi-line ASCII rendering of this DAG (issue #79)."""

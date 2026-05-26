@@ -1,0 +1,477 @@
+{
+  "$defs": {
+    "ConditionalEdge": {
+      "description": "A guarded outgoing edge from a :class:`DAGFlowStep` (issue #9).\n\nConditional edges drive runtime branching in a DAG: after a decision\nstep runs successfully, the executor walks its ``branches`` in order\nand the *first* edge whose :attr:`predicate` evaluates truthy against\nthe merged context picks the next active path.  Non-selected dependent\nsteps are recorded as ``StepRecord(skipped=True)``.\n\nThe predicate grammar is intentionally narrow \u2014 variable lookups,\nsubscript, comparison operators, ``in`` / ``not in``, ``and`` / ``or``\n/ ``not`` \u2014 and is evaluated by\n:func:`~chainweaver.contracts.evaluate_predicate`, which parses the\nstring with :mod:`ast` and walks the tree by hand.  :func:`eval` is\nnever called.  See :class:`~chainweaver.exceptions.PredicateSyntaxError`\nfor failure modes.\n\nAttributes:\n    target_step_id: The ``step_id`` of the dependent step to activate\n        when :attr:`predicate` matches.  Must reference a step that\n        also lists the branching step in its ``depends_on``.\n    predicate: A restricted boolean expression evaluated against the\n        merged execution context \u2014 for example\n        ``\"status == 'ok'\"`` or ``\"count > 0 and country in ('PT','ES')\"``.\n\nExample::\n\n    DAGFlowStep(\n        tool_name=\"probe\",\n        step_id=\"probe\",\n        depends_on=[],\n        branches=[\n            ConditionalEdge(target_step_id=\"fast\", predicate=\"cache_hit == True\"),\n            ConditionalEdge(target_step_id=\"slow\", predicate=\"cache_hit == False\"),\n        ],\n    )",
+      "properties": {
+        "predicate": {
+          "title": "Predicate",
+          "type": "string"
+        },
+        "target_step_id": {
+          "title": "Target Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_step_id",
+        "predicate"
+      ],
+      "title": "ConditionalEdge",
+      "type": "object"
+    },
+    "DAGFlow": {
+      "description": "A deterministic, DAG-structured sequence of tool invocations.\n\nSteps are ordered by their ``depends_on`` declarations.  Independent\nsteps (no unmet predecessors) form an execution *level* and run\nsequentially within that level (parallel/async execution for independent\nlevels is planned for v0.2).\n\nAttributes:\n    name: Unique identifier for the flow.\n    description: Human-readable description of what the flow does.\n    steps: List of :class:`DAGFlowStep` objects.  Order within the list\n        does not imply execution order \u2014 the executor derives order from\n        ``depends_on`` edges.\n    deterministic: When ``True`` (the default) the executor guarantees\n        that no LLM calls are inserted between steps.\n    trigger_conditions: Optional free-form metadata for agent-level\n        dispatch (not evaluated by ChainWeaver itself).\n    input_schema_ref: Optional ``\"module:qualname\"`` ref to a Pydantic\n        :class:`~pydantic.BaseModel` subclass validated against\n        ``initial_input`` before the first step runs.  Resolved lazily\n        via the :attr:`input_schema` property.\n    output_schema_ref: Optional ``\"module:qualname\"`` ref to a Pydantic\n        :class:`~pydantic.BaseModel` subclass validated against the\n        final merged context after all steps finish.  Resolved lazily\n        via the :attr:`output_schema` property.\n    context_schema_ref: Optional ``\"module:qualname\"`` ref to a\n        :class:`~pydantic.BaseModel` subclass validated against the\n        accumulated context at flow end, once every step has\n        completed successfully (issue #152; validation is skipped\n        when an earlier step aborts the flow).  Mirrors the\n        :class:`Flow` field of the same name; see there for the\n        DX motivation.\n\nRaises:\n    DAGDefinitionError: If topology is invalid (cycle, duplicate\n        ``step_id``, or unknown ``depends_on`` reference) when\n        :func:`validate_dag_topology` is invoked, such as during flow\n        registration or before execution.\n\nExample::\n\n    dag = DAGFlow(\n        name=\"diamond\",\n        version=\"1.0.0\",\n        description=\"A \u2192 (B, C) \u2192 D\",\n        steps=[\n            DAGFlowStep(tool_name=\"a\", step_id=\"A\", depends_on=[]),\n            DAGFlowStep(tool_name=\"b\", step_id=\"B\", depends_on=[\"A\"]),\n            DAGFlowStep(tool_name=\"c\", step_id=\"C\", depends_on=[\"A\"]),\n            DAGFlowStep(tool_name=\"d\", step_id=\"D\", depends_on=[\"B\", \"C\"]),\n        ],\n    )",
+      "properties": {
+        "context_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Schema Ref"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "deterministic": {
+          "default": true,
+          "title": "Deterministic",
+          "type": "boolean"
+        },
+        "input_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Schema Ref"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "output_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Schema Ref"
+        },
+        "status": {
+          "$ref": "#/$defs/FlowStatus",
+          "default": "active"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/DAGFlowStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "tool_schema_hashes": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Schema Hashes"
+        },
+        "trigger_conditions": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Conditions"
+        },
+        "type": {
+          "const": "DAGFlow",
+          "description": "Discriminator written by chainweaver.serialization.flow_to_dict; distinguishes Flow ('Flow') from DAGFlow ('DAGFlow') on load.",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "steps",
+        "type"
+      ],
+      "title": "DAGFlow",
+      "type": "object"
+    },
+    "DAGFlowStep": {
+      "description": "A single step inside a :class:`DAGFlow`.\n\nExtends :class:`FlowStep` with an explicit identity and dependency\ndeclaration so that the executor can build a dependency graph and execute\nsteps in topological order.\n\nAttributes:\n    step_id: Unique identifier for this step within the flow.  Used to\n        reference the step in ``depends_on`` lists of other steps.\n    depends_on: List of ``step_id`` values that must complete before this\n        step can start.  An empty list (the default) means the step has\n        no dependencies and runs in the first execution level.\n    step_type: Discriminator that indicates how the step is executed.\n        ``\"tool\"`` (the default) means a locally-registered\n        :class:`~chainweaver.tools.Tool` is invoked.  The reserved value\n        ``\"capability\"`` is a forward-compat slot for kernel-delegated\n        capability invocations via the Weaver Stack agent-kernel contract\n        (see invariant I-07 in weaver-spec).  Only ``\"tool\"`` is executed\n        today; ``\"capability\"`` will be dispatched by\n        ``KernelBackedExecutor`` in a future release.\n    capability_id: Weaver Stack capability identifier used when\n        ``step_type == \"capability\"``.  Ignored (and should be ``None``)\n        for ``step_type == \"tool\"``.\n    branches: Optional list of :class:`ConditionalEdge` outgoing\n        guards (issue #9).  When non-empty, this step is a *decision*\n        step: after it runs, the executor evaluates each branch's\n        predicate against the merged context and the first match\n        selects the active downstream path.  Non-selected immediate\n        dependents are skipped (their :class:`StepRecord` carries\n        ``skipped=True``), and the skip propagates to dependents whose\n        only inbound paths are themselves skipped.  When ``branches``\n        is empty (the default), the step is a regular DAG node and\n        every dependent runs.\n    default_next: Step id activated when none of :attr:`branches` match\n        (issue #9).  Treated as if it were a final-fallback\n        ``ConditionalEdge`` whose predicate is always true.  Ignored\n        when ``branches`` is empty.\n\nExample::\n\n    step = DAGFlowStep(\n        tool_name=\"fetch_data\",\n        step_id=\"fetch\",\n        depends_on=[],\n    )\n    step_b = DAGFlowStep(\n        tool_name=\"transform\",\n        step_id=\"transform\",\n        depends_on=[\"fetch\"],\n    )",
+      "properties": {
+        "branches": {
+          "items": {
+            "$ref": "#/$defs/ConditionalEdge"
+          },
+          "title": "Branches",
+          "type": "array"
+        },
+        "capability_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Id"
+        },
+        "default_next": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Next"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "input_contract": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Contract"
+        },
+        "input_mapping": {
+          "additionalProperties": true,
+          "title": "Input Mapping",
+          "type": "object"
+        },
+        "on_error": {
+          "default": "fail",
+          "title": "On Error",
+          "type": "string"
+        },
+        "output_contract": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Contract"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "step_id": {
+          "title": "Step Id",
+          "type": "string"
+        },
+        "step_type": {
+          "default": "tool",
+          "enum": [
+            "tool",
+            "capability"
+          ],
+          "title": "Step Type",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "step_id"
+      ],
+      "title": "DAGFlowStep",
+      "type": "object"
+    },
+    "Flow": {
+      "description": "A deterministic, ordered sequence of tool invocations.\n\nAttributes:\n    name: Unique identifier for the flow.\n    description: Human-readable description of what the flow does.\n    steps: Ordered list of :class:`FlowStep` objects.\n    deterministic: Metadata annotation for downstream orchestrators.\n        When ``True`` (the default) this signals the flow is designed\n        to run without LLM calls.  ``FlowExecutor`` is unconditionally\n        LLM-free and does not evaluate this flag.\n    trigger_conditions: Optional free-form metadata that an agent or\n        higher-level orchestrator can use to decide when to invoke this\n        flow.  ChainWeaver itself does not evaluate these conditions.\n    input_schema_ref: An optional ``\"module:qualname\"`` reference to a\n        Pydantic :class:`~pydantic.BaseModel` subclass describing the\n        shape of the *initial_input* dictionary that a caller must\n        provide when executing this flow.  When set, the\n        :class:`~chainweaver.executor.FlowExecutor` validates\n        *initial_input* against the resolved schema **before** the first\n        step runs.\n\n        String refs (rather than live class objects) keep the flow\n        JSON/YAML-serializable; use :meth:`schema_ref_from` to derive\n        the ref from a class.  The :attr:`input_schema` property\n        resolves the ref lazily.\n    output_schema_ref: An optional ``\"module:qualname\"`` reference to a\n        Pydantic :class:`~pydantic.BaseModel` subclass describing the\n        shape of the final merged context produced after every step has\n        completed.  When set, the\n        :class:`~chainweaver.executor.FlowExecutor` validates the\n        accumulated context against the resolved schema **after** the\n        last step finishes.\n    context_schema_ref: An optional ``\"module:qualname\"`` reference to\n        a :class:`~pydantic.BaseModel` subclass describing the shape\n        of the *accumulated execution context* (issue #152).  The\n        executor validates the context against the resolved schema\n        at flow end, once every step has completed successfully\n        (skipped when an earlier step aborts the flow, since no\n        ``final_output`` is produced in that case).  The primary\n        value of this field is static typing \u2014 flow authors get\n        mypy + IDE autocomplete + a single source of truth for\n        context keys; runtime validation at the flow boundary is a\n        secondary safety net.\n\nExample::\n\n    flow = Flow(\n        name=\"double_add_format\",\n        version=\"1.0.0\",\n        description=\"Doubles a number, adds 10, and formats the result.\",\n        steps=[\n            FlowStep(tool_name=\"double\",    input_mapping={\"number\": \"number\"}),\n            FlowStep(tool_name=\"add_ten\",   input_mapping={\"value\": \"value\"}),\n            FlowStep(tool_name=\"format_result\", input_mapping={\"value\": \"value\"}),\n        ],\n        input_schema_ref=Flow.schema_ref_from(NumberInput),\n        output_schema_ref=Flow.schema_ref_from(FormattedOutput),\n        context_schema_ref=Flow.schema_ref_from(MyFlowContext),\n    )",
+      "properties": {
+        "context_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Schema Ref"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "deterministic": {
+          "default": true,
+          "title": "Deterministic",
+          "type": "boolean"
+        },
+        "input_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Schema Ref"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "output_schema_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Schema Ref"
+        },
+        "status": {
+          "$ref": "#/$defs/FlowStatus",
+          "default": "active"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/FlowStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "tool_schema_hashes": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Schema Hashes"
+        },
+        "trigger_conditions": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Conditions"
+        },
+        "type": {
+          "const": "Flow",
+          "description": "Discriminator written by chainweaver.serialization.flow_to_dict; distinguishes Flow ('Flow') from DAGFlow ('DAGFlow') on load.",
+          "type": "string"
+        },
+        "version": {
+          "default": "0.1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "steps",
+        "type"
+      ],
+      "title": "Flow",
+      "type": "object"
+    },
+    "FlowStatus": {
+      "description": "Lifecycle status of a flow.\n\nAttributes:\n    ACTIVE: Normal operation \u2014 the flow can be executed.\n    NEEDS_REVIEW: Flagged by drift detection or manual review.\n    DISABLED: Manually disabled \u2014 excluded from execution.",
+      "enum": [
+        "active",
+        "needs_review",
+        "disabled"
+      ],
+      "title": "FlowStatus",
+      "type": "string"
+    },
+    "FlowStep": {
+      "description": "A single step inside a :class:`Flow`.\n\nAttributes:\n    tool_name: The name of the :class:`~chainweaver.tools.Tool` to invoke.\n    input_mapping: Maps keys expected by the tool's *input_schema* to keys\n        present in the accumulated execution context (initial input merged\n        with all previous step outputs).\n\n        If a value is a string it is treated as a key lookup in the context.\n        If a value is any other type (int, float, bool, \u2026) it is used as a\n        literal constant.\n\n        An empty mapping (the default) means the tool receives the full\n        current context as-is.\n    retry: Optional :class:`RetryPolicy` driving the executor's retry\n        behaviour for this step.\n    on_error: How the executor reacts when all retry attempts are\n        exhausted: ``\"fail\"`` (the default), ``\"skip\"``, or\n        ``\"fallback:<tool_name>\"``.  Step-contract failures\n        (:attr:`input_contract` / :attr:`output_contract`) intentionally\n        bypass this policy and always abort the step \u2014 contract\n        mismatches are wiring bugs rather than transient errors.\n    input_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the *resolved* step inputs **before** the\n        tool is invoked (issue #172).  This is independent from the\n        tool's own ``input_schema``: it expresses a step-level\n        contract that the wiring (``input_mapping`` + accumulated\n        context) must satisfy, surfacing mapping mistakes with a\n        schema-shaped error rather than waiting for the tool's own\n        validation to fail.\n    output_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the tool's outputs **after** the tool has\n        run (issue #172).  Use this when the step has a tighter\n        output contract than the tool's own ``output_schema`` \u2014 e.g.\n        a tool that returns a superset of fields but this step only\n        promises a subset.\n\nExample::\n\n    # Pass the \"value\" from the previous step as \"value\" to this tool\n    step = FlowStep(tool_name=\"add_ten\", input_mapping={\"value\": \"value\"})\n\n    # Mix a context lookup with a literal constant\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n    )\n\n    # Add typed step contracts (issue #172)\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n        input_contract=FlowStep.contract_ref_from(ScaleInput),\n        output_contract=FlowStep.contract_ref_from(ScaleOutput),\n    )",
+      "properties": {
+        "input_contract": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Contract"
+        },
+        "input_mapping": {
+          "additionalProperties": true,
+          "title": "Input Mapping",
+          "type": "object"
+        },
+        "on_error": {
+          "default": "fail",
+          "title": "On Error",
+          "type": "string"
+        },
+        "output_contract": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Contract"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name"
+      ],
+      "title": "FlowStep",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "description": "Per-step retry configuration (issue #76).\n\nDrives the retry behaviour of :class:`~chainweaver.executor.FlowExecutor`\nwhen attached to a :class:`FlowStep`.  Backoff is exponential and\ndeterministic by default: the first retry waits ``backoff_seconds``, the\nsecond waits ``backoff_seconds * backoff_multiplier``, and so on.\n\nSetting ``jitter=True`` opts a single retry loop into uniform jitter\n(multiplier in ``[0.5, 1.5)``).  This is the only place in the package\nwhere :mod:`random` is used; ``executor.py`` itself never imports it.\nSee ``docs/agent-context/invariants.md`` for the carve-out.\n\nAttributes:\n    max_retries: Number of retry attempts after the initial call (so\n        ``max_retries=3`` allows up to 4 invocations total).\n    backoff_seconds: Initial delay before the first retry, in seconds.\n    backoff_multiplier: Geometric multiplier applied to ``backoff_seconds``\n        between retries.  Must be ``>= 1.0``.\n    jitter: When ``True``, multiply each computed delay by a uniform\n        sample in ``[0.5, 1.5)``.\n    retryable_errors: Exception class references that trigger a retry.\n        Each entry is a ``\"module:qualname\"`` string (e.g.\n        ``\"builtins.ValueError\"`` written as ``\"builtins:ValueError\"``).\n        Anything else fails immediately.  Defaults to\n        ``(\"builtins:Exception\",)`` \u2014 retry on any error.\n\n        String refs (rather than live class objects) keep the policy\n        JSON/YAML-serializable; refs are resolved to types just before\n        the retry loop in :mod:`chainweaver.executor`.",
+      "properties": {
+        "backoff_multiplier": {
+          "default": 2.0,
+          "minimum": 1.0,
+          "title": "Backoff Multiplier",
+          "type": "number"
+        },
+        "backoff_seconds": {
+          "default": 1.0,
+          "minimum": 0.0,
+          "title": "Backoff Seconds",
+          "type": "number"
+        },
+        "jitter": {
+          "default": false,
+          "title": "Jitter",
+          "type": "boolean"
+        },
+        "max_retries": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "retryable_errors": {
+          "default": [
+            "builtins:Exception"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Retryable Errors",
+          "type": "array"
+        }
+      },
+      "title": "RetryPolicy",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/dgenio/ChainWeaver/main/schemas/flow.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "JSON Schema for ChainWeaver flow files (.flow.json / .flow.yaml). Discriminated by the 'type' field: 'Flow' for linear flows, 'DAGFlow' for directed-acyclic-graph flows.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Flow"
+    },
+    {
+      "$ref": "#/$defs/DAGFlow"
+    }
+  ],
+  "title": "ChainWeaver flow file"
+}

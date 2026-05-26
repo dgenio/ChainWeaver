@@ -485,8 +485,10 @@ def attest_flow(
     observed_deterministic = not divergences
     aggregate = _hash("|".join(sorted(fingerprints)))
 
-    # Collect tool_schema_hashes from the executor's registered tools.
-    tool_schema_hashes = {name: tool.schema_hash for name, tool in executor._tools.items()}
+    # Collect tool_schema_hashes from the executor's public registered-tool snapshot.
+    tool_schema_hashes = {
+        name: tool.schema_hash for name, tool in executor.registered_tools.items()
+    }
 
     return AttestationReport(
         chainweaver_version=cw_version,

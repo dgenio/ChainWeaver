@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
-from chainweaver.analyzer import ChainAnalyzer, ToolChain
+from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
@@ -120,6 +120,7 @@ from chainweaver.middleware import (
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
+from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
     flow_from_dict,
     flow_from_json,
@@ -216,6 +217,7 @@ __all__ = [
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
@@ -232,6 +234,7 @@ __all__ = [
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
@@ -241,6 +244,7 @@ __all__ = [
     "merge_safety",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology",
 ]

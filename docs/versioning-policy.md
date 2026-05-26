@@ -62,7 +62,7 @@ The public API is everything exported from `chainweaver/__init__.py`
    raised at first use via `warnings.warn(..., DeprecationWarning,
    stacklevel=2)` and document the replacement in its docstring.
 2. **List.**  Add an entry to the relevant
-   `## [x.y.z] - YYYY-MM-DD` section of [CHANGELOG.md](../CHANGELOG.md)
+   `## [x.y.z] - YYYY-MM-DD` section of [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md)
    under `### Deprecated`.
 3. **Retain.**  Keep the deprecated API functional for at least one
    minor release before removal.  For pre-1.0 releases this window may
@@ -102,8 +102,29 @@ by serialized flows **must** live at module top level.
 
 ## Tracking changes
 
-Every release adds a section to [CHANGELOG.md](../CHANGELOG.md) following
+Every release adds a section to [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md) following
 the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) convention.
 PRs that introduce user-visible changes are expected to add an
 `Unreleased` entry in the same commit; release tagging promotes the
 entry into a versioned heading.
+
+## Public-API snapshot guard
+
+`tests/test_public_api_snapshot.py` compares the live `chainweaver`
+surface against the checked-in golden file `tests/fixtures/public_api.json`.
+CI fails if any of these change without an accompanying regen:
+
+- a symbol added to or removed from `__all__`,
+- a class's public attribute or method shape (annotations, defaults,
+  parameter kinds),
+- a public function's signature or return annotation,
+- a Pydantic model's field set or field types.
+
+After an intentional API change, regenerate the fixture in the same PR:
+
+```bash
+python tests/scripts/regen_public_api.py
+```
+
+The fixture diff is the receipt — reviewers can read it as the explicit
+surface delta and map it to the SemVer bump table above.

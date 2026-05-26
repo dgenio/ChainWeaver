@@ -1,0 +1,14 @@
+{
+  "_comment": "SchemaStore catalog entry for ChainWeaver flow files (issue #139). Maintainer-facing: copy this object into the 'schemas' array of https://github.com/SchemaStore/schemastore/blob/master/src/api/json/catalog.json and open a PR there. Once accepted, VS Code (via redhat.vscode-yaml) and JetBrains IDEs offer autocomplete on .flow.yaml/.flow.json files with zero user-side setup.",
+  "name": "ChainWeaver flow file",
+  "description": "Deterministic tool-flow definition consumed by ChainWeaver's FlowExecutor (https://github.com/dgenio/ChainWeaver).",
+  "fileMatch": [
+    "**/*.flow.json",
+    "**/*.flow.yaml",
+    "**/*.flow.yml"
+  ],
+  "url": "https://raw.githubusercontent.com/dgenio/ChainWeaver/main/schemas/flow.schema.json",
+  "versions": {
+    "main": "https://raw.githubusercontent.com/dgenio/ChainWeaver/main/schemas/flow.schema.json"
+  }
+}

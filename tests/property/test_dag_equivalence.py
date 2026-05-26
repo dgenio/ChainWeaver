@@ -1,57 +1,46 @@
-"""DAG-equivalence property (issue #143).
+"""Property-based test: linear Flow ≡ trivially-sequential DAGFlow.
 
-A linear :class:`Flow` and the trivially equivalent :class:`DAGFlow`
-(one node per step, sequential ``depends_on``) must produce the same
-``final_output`` given the same ``initial_input``.  This stresses the
-DAG execution path on the same logical scenarios the linear executor
-already covers.
+For any valid ``(flow_steps, initial_input)`` pair, the linear ``Flow`` and a
+``DAGFlow`` built with one node per step and explicit sequential
+``depends_on`` edges produce identical ``final_output``.
+
+A failure here means either the DAG executor's level-by-level execution
+diverges from the linear executor's step-by-step semantics, or the
+context-merge order differs between the two paths.
 """
 
 from __future__ import annotations
 
 import pytest
 from hypothesis import HealthCheck, given, settings
-
-from chainweaver.executor import FlowExecutor
-from chainweaver.flow import DAGFlow, Flow
-from chainweaver.registry import FlowRegistry
-from chainweaver.tools import Tool
-from property.strategies import equivalent_dag_flows, initial_inputs
-
-pytestmark = pytest.mark.property
-
-
-def _build_executor(flow: Flow | DAGFlow, tools: list[Tool]) -> FlowExecutor:
-    registry = FlowRegistry()
-    registry.register_flow(flow)
-    ex = FlowExecutor(registry=registry)
-    for tool in tools:
-        ex.register_tool(tool)
-    return ex
-
-
-@given(pair=equivalent_dag_flows(), initial=initial_inputs())
-@settings(
-    max_examples=50,
-    deadline=500,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
+from strategies import (
+    build_equivalent_dag,
+    build_linear_flow,
+    fresh_executor,
+    number_input_strategy,
+    step_flow_strategy,
 )
-def test_linear_and_equivalent_dag_agree(
-    pair: tuple[Flow, DAGFlow],
-    initial: dict[str, int],
-    double_tool: Tool,
-    add_ten_tool: Tool,
-    format_tool: Tool,
-) -> None:
-    linear, dag = pair
-    tools = [double_tool, add_ten_tool, format_tool]
 
-    linear_ex = _build_executor(linear, tools)
-    dag_ex = _build_executor(dag, tools)
+PROPERTY_SETTINGS = settings(
+    max_examples=50,
+    deadline=200,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 
-    res_linear = linear_ex.execute_flow(linear.name, dict(initial))
-    res_dag = dag_ex.execute_flow(dag.name, dict(initial))
 
-    assert res_linear.success is True
-    assert res_dag.success is True
-    assert res_linear.final_output == res_dag.final_output
+@pytest.mark.property
+class TestDagEquivalence:
+    @PROPERTY_SETTINGS
+    @given(flow_steps=step_flow_strategy(), payload=number_input_strategy())
+    def test_linear_and_sequential_dag_match(
+        self,
+        flow_steps: list[str],
+        payload: dict[str, int],
+    ) -> None:
+        linear = build_linear_flow("dag_lin", flow_steps)
+        dag = build_equivalent_dag("dag_seq", flow_steps)
+        linear_result = fresh_executor(linear).execute_flow("dag_lin", payload)
+        dag_result = fresh_executor(dag).execute_flow("dag_seq", payload)
+        assert linear_result.success is True
+        assert dag_result.success is True
+        assert linear_result.final_output == dag_result.final_output

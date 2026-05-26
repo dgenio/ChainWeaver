@@ -103,6 +103,7 @@ files that conflict with these names:
 | `observer.py` | #78 | Runtime flow observer |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
+| ~~`schemas.py`~~ | #135 ✅ | JSON Schema export for flow files (delivered) |
 | `mcp/` | #70, #72 | MCP adapter + flow server |
 | `integrations/` | #82 | LangChain/LlamaIndex bridge adapters |
 | `export/` | #25 | Flow export formats |
