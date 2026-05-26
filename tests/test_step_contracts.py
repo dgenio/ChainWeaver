@@ -26,6 +26,7 @@ from chainweaver.flow import (
     DAGFlowStep,
     Flow,
     FlowStep,
+    RetryPolicy,
 )
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json
@@ -435,3 +436,135 @@ class TestDAGContextSchema:
             and "step_output_contract" in (r.error_message or "")
             for r in result.execution_log
         )
+
+
+# ---------------------------------------------------------------------------
+# DAG step retry / on_error parity (regression guard)
+#
+# ``DAGFlowStep`` inherits ``retry`` and ``on_error`` from ``FlowStep``.  The
+# DAG executor builds a lightweight ``FlowStep`` proxy before delegating to
+# ``_execute_step``; if those fields are not forwarded, DAG steps silently
+# diverge from linear steps and always run with the defaults (no retries,
+# ``on_error="fail"``).  These tests assert end-to-end parity.
+# ---------------------------------------------------------------------------
+
+
+class _FlakyTool:
+    """Callable that fails *fail_until_attempt* times before succeeding."""
+
+    def __init__(self, fail_until_attempt: int) -> None:
+        self.fail_until_attempt = fail_until_attempt
+        self.attempts = 0
+
+    def __call__(self, inp: NumberInput) -> dict[str, object]:
+        self.attempts += 1
+        if self.attempts <= self.fail_until_attempt:
+            raise RuntimeError(f"intermittent failure on attempt {self.attempts}.")
+        return {"value": inp.number * 2}
+
+
+def _flaky_tool(fail_until_attempt: int) -> tuple[Tool, _FlakyTool]:
+    counter = _FlakyTool(fail_until_attempt=fail_until_attempt)
+    tool = Tool(
+        name="flaky_dag",
+        description="Fails N times before succeeding.",
+        input_schema=NumberInput,
+        output_schema=ValueOutput,
+        fn=counter,
+    )
+    return tool, counter
+
+
+def _build_dag_executor(*tools: Tool, step: DAGFlowStep) -> FlowExecutor:
+    dag = DAGFlow(
+        name="dag_retry_flow",
+        version="0.1.0",
+        description="Single-step DAG used to assert retry / on_error parity.",
+        steps=[step],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(dag)
+    ex = FlowExecutor(registry=registry)
+    for tool in tools:
+        ex.register_tool(tool)
+    return ex
+
+
+class TestDAGStepRetryParity:
+    def test_dag_step_honors_retry_policy(self) -> None:
+        """A DAGFlowStep with retry= must retry the same way a linear step does."""
+        tool, counter = _flaky_tool(fail_until_attempt=2)
+        step = DAGFlowStep(
+            tool_name="flaky_dag",
+            step_id="F",
+            depends_on=[],
+            input_mapping={"number": "number"},
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+        )
+        ex = _build_dag_executor(tool, step=step)
+        result = ex.execute_flow("dag_retry_flow", {"number": 4})
+        assert result.success is True
+        assert counter.attempts == 3  # initial + 2 retries
+        record = result.execution_log[0]
+        assert record.success is True
+        assert record.outputs == {"value": 8}
+        assert record.retry_count == 2
+
+    def test_dag_step_without_retry_makes_single_attempt(self) -> None:
+        """Default behaviour must match linear flows: no retries when policy is absent."""
+        tool, counter = _flaky_tool(fail_until_attempt=10)
+        step = DAGFlowStep(
+            tool_name="flaky_dag",
+            step_id="F",
+            depends_on=[],
+            input_mapping={"number": "number"},
+        )
+        ex = _build_dag_executor(tool, step=step)
+        result = ex.execute_flow("dag_retry_flow", {"number": 1})
+        assert result.success is False
+        assert counter.attempts == 1
+
+
+class TestDAGStepOnErrorParity:
+    def test_dag_step_on_error_skip_continues(self) -> None:
+        """``on_error="skip"`` on a DAG step must succeed the flow and skip outputs."""
+        tool, _ = _flaky_tool(fail_until_attempt=10)
+        step = DAGFlowStep(
+            tool_name="flaky_dag",
+            step_id="F",
+            depends_on=[],
+            input_mapping={"number": "number"},
+            on_error="skip",
+        )
+        ex = _build_dag_executor(tool, step=step)
+        result = ex.execute_flow("dag_retry_flow", {"number": 1})
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.success is True
+        assert record.skipped is True
+        assert record.outputs == {}
+
+    def test_dag_step_on_error_fallback_invokes_alt(self) -> None:
+        """``on_error="fallback:<tool>"`` on a DAG step must invoke the fallback tool."""
+        primary, _ = _flaky_tool(fail_until_attempt=10)
+        alt_fn = lambda inp: {"value": inp.number + 100}  # noqa: E731
+        alt = Tool(
+            name="alt_dag",
+            description="Fallback tool for the DAG retry parity tests.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=alt_fn,
+        )
+        step = DAGFlowStep(
+            tool_name="flaky_dag",
+            step_id="F",
+            depends_on=[],
+            input_mapping={"number": "number"},
+            on_error="fallback:alt_dag",
+        )
+        ex = _build_dag_executor(primary, alt, step=step)
+        result = ex.execute_flow("dag_retry_flow", {"number": 7})
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.success is True
+        assert record.outputs == {"value": 107}

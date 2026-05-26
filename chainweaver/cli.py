@@ -1276,7 +1276,7 @@ def dump_schema_command(
         if not output.exists():
             typer.echo(
                 f"chainweaver: schema file '{output}' does not exist. "
-                "Run `chainweaver dump-schema --output {path}` to create it.",
+                f"Run `chainweaver dump-schema --output '{output}'` to create it.",
                 err=True,
             )
             raise typer.Exit(code=1)
@@ -1284,7 +1284,7 @@ def dump_schema_command(
         if existing != rendered:
             typer.echo(
                 f"chainweaver: schema file '{output}' is out of date. "
-                "Re-run `chainweaver dump-schema --output {path}` and commit "
+                f"Re-run `chainweaver dump-schema --output '{output}'` and commit "
                 "the result.",
                 err=True,
             )

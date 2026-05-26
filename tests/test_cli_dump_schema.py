@@ -56,13 +56,23 @@ class TestDumpSchemaCheck:
         out.write_text('{"stale": true}\n', encoding="utf-8")
         result = runner.invoke(app, ["dump-schema", "--check", "--output", str(out)])
         assert result.exit_code == 1
-        assert "out of date" in (result.stdout + result.stderr)
+        output = result.stdout + result.stderr
+        assert "out of date" in output
+        # Guidance must interpolate the real path, not print the literal
+        # ``{path}`` placeholder token.
+        assert str(out) in output
+        assert "{path}" not in output
 
     def test_check_fails_when_file_missing(self, tmp_path: Path) -> None:
         out = tmp_path / "missing.schema.json"
         result = runner.invoke(app, ["dump-schema", "--check", "--output", str(out)])
         assert result.exit_code == 1
-        assert "does not exist" in (result.stdout + result.stderr)
+        output = result.stdout + result.stderr
+        assert "does not exist" in output
+        # Guidance must interpolate the real path, not print the literal
+        # ``{path}`` placeholder token.
+        assert str(out) in output
+        assert "{path}" not in output
 
     def test_check_without_output_returns_2(self) -> None:
         result = runner.invoke(app, ["dump-schema", "--check"])

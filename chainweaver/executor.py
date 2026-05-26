@@ -2331,13 +2331,16 @@ class FlowExecutor:
 
                 # Build a lightweight FlowStep-compatible view so _execute_step
                 # can be reused without modification.  Forward the step
-                # contract refs (issue #172) so DAG steps benefit from
-                # the same step-level validation as linear flows.
+                # contract refs (issue #172) plus retry / on_error so DAG
+                # steps benefit from the same per-step contract as linear
+                # flows; otherwise the proxy silently drops those fields.
                 proxy = FlowStep(
                     tool_name=step.tool_name,
                     input_mapping=step.input_mapping,
                     input_contract=step.input_contract,
                     output_contract=step.output_contract,
+                    retry=step.retry,
+                    on_error=step.on_error,
                 )
                 record = self._execute_step(flat_index, proxy, context, flow.name, trace_id)
                 level_records.append(record)
