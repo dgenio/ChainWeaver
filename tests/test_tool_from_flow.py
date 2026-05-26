@@ -719,6 +719,87 @@ class TestFromFlowSafetyDerivation:
 
 
 # ---------------------------------------------------------------------------
+# Tool.cacheable <-> safety.cacheable reconciliation (issue #19 review)
+# ---------------------------------------------------------------------------
+
+
+class TestToolCacheableReconciliation:
+    """``Tool.cacheable`` (executor step-cache flag) and
+    ``Tool.safety.cacheable`` (exported metadata) must never silently
+    disagree.
+    """
+
+    @staticmethod
+    def _tool(*, cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> Tool:
+        return Tool(
+            name="noop",
+            description="noop",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": inp.number},
+            cacheable=cacheable,
+            safety=safety,
+        )
+
+    def test_default_is_cacheable_on_both(self) -> None:
+        tool = self._tool()
+        assert tool.cacheable is True
+        assert tool.safety.cacheable is True
+
+    def test_cacheable_flag_propagates_to_default_contract(self) -> None:
+        # Passing cacheable=False without a safety contract must mark the
+        # derived contract non-cacheable too (previously diverged).
+        tool = self._tool(cacheable=False)
+        assert tool.cacheable is False
+        assert tool.safety.cacheable is False
+
+    def test_explicit_safety_drives_cacheable(self) -> None:
+        tool = self._tool(safety=ToolSafetyContract(cacheable=False))
+        assert tool.cacheable is False
+        assert tool.safety.cacheable is False
+
+    def test_conflicting_cacheable_and_safety_raises(self) -> None:
+        with pytest.raises(ValueError, match="conflicting cacheable"):
+            self._tool(cacheable=True, safety=ToolSafetyContract(cacheable=False))
+
+    def test_from_flow_propagates_non_cacheable_constituent(
+        self,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        # A non-cacheable constituent must surface on both the wrapped
+        # tool's contract and its executor step-cache flag.
+        double_uncacheable = Tool(
+            name="double",
+            description="Doubles a number (non-cacheable).",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": inp.number * 2},
+            cacheable=False,
+        )
+        flow = Flow(
+            name="cacheable_demo",
+            version="0.1.0",
+            description="One non-cacheable constituent.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
+                FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_uncacheable)
+        ex.register_tool(add_ten_tool)
+        ex.register_tool(format_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety.cacheable is False
+        assert wrapped.cacheable is False
+
+
+# ---------------------------------------------------------------------------
 # Tool.safety attribute (issue #19) — direct construction
 # ---------------------------------------------------------------------------
 

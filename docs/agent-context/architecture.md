@@ -56,7 +56,7 @@ and tools, the same flow produces the same output every time.
 | `step_type` + `capability_id` on `DAGFlowStep` | Forward-compat slots for Weaver Stack kernel integration (weaver-spec I-07). Only `"tool"` is executed today; `"capability"` is reserved for `KernelBackedExecutor`. |
 | Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
 | Branch targets must be direct dependents (#9) | Keeps conditional routing local — a `ConditionalEdge.target_step_id` (or `default_next`) must reference a step that already lists the branching step in its `depends_on`.  This makes "skipped" propagation a one-hop computation in the executor and prevents branches from jumping across unrelated subgraphs.  Enforced at registration time by `validate_dag_topology`. |
-| AST-based predicate evaluator (#9) | Predicate strings are parsed with `ast.parse(mode="eval")` and walked against an explicit node allow-list — `eval`/`exec` are **never** called.  The grammar deliberately excludes attribute access, function calls, and arithmetic so predicates stay routing decisions, not computations. |
+| AST-based predicate evaluator (#9) | Predicate strings are parsed with `ast.parse(mode="eval")` and walked against an explicit node allow-list — `eval`/`exec` are **never** called.  The grammar deliberately excludes attribute access, function calls, and binary arithmetic so predicates stay routing decisions, not computations (unary `+`/`-` is permitted so signed literals like `n == -1` parse). |
 
 ---
 

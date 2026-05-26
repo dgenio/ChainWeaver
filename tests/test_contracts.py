@@ -171,6 +171,24 @@ class TestEvaluatePredicateHappyPath:
         assert evaluate_predicate("not a", ctx) is False
         assert evaluate_predicate("n > 0 and n < 10", ctx) is True
 
+    def test_and_short_circuits(self) -> None:
+        # ``and`` must stop at the first falsy operand — the right operand
+        # references a name absent from the context, which would raise if it
+        # were evaluated.  Matches native Python short-circuit semantics.
+        assert evaluate_predicate("flag and missing == 1", {"flag": False}) is False
+
+    def test_or_short_circuits(self) -> None:
+        # ``or`` must stop at the first truthy operand and never reach the
+        # second (a subscript that would otherwise raise on a missing key).
+        ctx = {"flag": True, "data": {}}
+        assert evaluate_predicate("flag or data['missing'] == 1", ctx) is True
+
+    def test_unary_signed_literals(self) -> None:
+        # Unary +/- are permitted so negative/positive literals compare.
+        assert evaluate_predicate("n == -1", {"n": -1}) is True
+        assert evaluate_predicate("n < -5", {"n": -10}) is True
+        assert evaluate_predicate("n == +3", {"n": 3}) is True
+
     def test_subscript(self) -> None:
         ctx = {"data": {"key": "value"}}
         assert evaluate_predicate("data['key'] == 'value'", ctx) is True

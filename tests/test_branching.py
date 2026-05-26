@@ -487,3 +487,49 @@ class TestPredicateFailure:
         assert len(failing) == 1
         assert failing[0].error_type == "PredicateSyntaxError"
         assert "ghost" in (failing[0].error_message or "")
+
+    def test_predicate_failure_does_not_duplicate_record(self) -> None:
+        # Regression: a failing branch predicate must convert the branching
+        # step's record to a failure in place, not append a second record.
+        # Two records for one step would inflate the log past the number of
+        # executed steps and shift step indexes.
+        flow = DAGFlow(
+            name="bad_predicate_single_record",
+            version="0.1.0",
+            description="Predicate references a name not in context.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="probe",
+                    step_id="probe",
+                    depends_on=[],
+                    branches=[
+                        ConditionalEdge(
+                            target_step_id="fast",
+                            predicate="ghost == 'ok'",
+                        ),
+                    ],
+                ),
+                DAGFlowStep(
+                    tool_name="fast",
+                    step_id="fast",
+                    depends_on=["probe"],
+                    input_mapping={"status": "status"},
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(_probe_tool("ok"))
+        ex.register_tool(_fast_tool())
+
+        result = ex.execute_flow("bad_predicate_single_record", {"seed": 1})
+        assert result.success is False
+        # The probe step ran once; the log holds exactly one record for it
+        # (converted to a failure), not a success record plus a synthetic one.
+        assert len(result.execution_log) == 1
+        only = result.execution_log[0]
+        assert only.step_index == 0
+        assert only.tool_name == "probe"
+        assert only.success is False
+        assert only.error_type == "PredicateSyntaxError"

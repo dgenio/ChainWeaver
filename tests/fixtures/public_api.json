@@ -712,7 +712,7 @@
       "kind": "class",
       "module": "chainweaver.tools",
       "qualname": "Tool",
-      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True, safety: ToolSafetyContract | None = None) -> None"
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> None"
     },
     "ToolChain": {
       "kind": "GenericAlias",

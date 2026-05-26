@@ -39,8 +39,9 @@ They are non-negotiable.
 > the resulting tree against an explicit node allow-list — **no**
 > :func:`eval` / :func:`exec` is ever called.  The grammar is limited to
 > variable lookups, subscript, the six comparison operators, ``in`` /
-> ``not in``, ``and`` / ``or`` / ``not``, and literal constants — no
-> attribute access, no function calls, no arithmetic.  Any rejected node
+> ``not in``, ``and`` / ``or`` / ``not``, unary ``+`` / ``-`` (for signed
+> literals such as ``n == -1``), and literal constants — no attribute
+> access, no function calls, no *binary* arithmetic.  Any rejected node
 > raises :class:`~chainweaver.exceptions.PredicateSyntaxError`.  The
 > evaluator is pure-Python and deterministic: same predicate + same
 > context always yields the same boolean.  Branching makes the

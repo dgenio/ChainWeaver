@@ -2366,21 +2366,26 @@ class FlowExecutor:
                     )
                     if isinstance(branch_outcome, PredicateSyntaxError):
                         err_type, err_msg = _exc_to_strings(branch_outcome)
-                        now = _now_utc()
-                        log.extend(level_records)
-                        log.append(
-                            StepRecord(
-                                step_index=flat_index,
-                                tool_name=step.tool_name,
-                                inputs={},
-                                error_type=err_type,
-                                error_message=err_msg,
-                                success=False,
-                                started_at=now,
-                                ended_at=now,
-                                duration_ms=0.0,
-                            )
+                        # The step ran exactly once, so its log must hold one
+                        # record.  Convert the step's own (successful) record
+                        # to a failure in place rather than appending a second
+                        # record at ``flat_index`` — a second record would make
+                        # ``len(log)`` exceed the number of executed steps and
+                        # shift step indexes.  Mirrors the sibling-conflict
+                        # handling above.
+                        record_failed = StepRecord(
+                            step_index=record.step_index,
+                            tool_name=step.tool_name,
+                            inputs=record.inputs,
+                            error_type=err_type,
+                            error_message=err_msg,
+                            success=False,
+                            started_at=record.started_at,
+                            ended_at=_now_utc(),
+                            duration_ms=record.duration_ms,
                         )
+                        log.extend(level_records[:-1])
+                        log.append(record_failed)
                         _logger.error(
                             "DAGFlow '%s' branch evaluation failed at step '%s': %s",
                             flow.name,

@@ -270,8 +270,9 @@ def evaluate_predicate(predicate: str, context: dict[str, Any]) -> bool:
     """Evaluate a restricted boolean expression against *context*.
 
     Supports a narrow grammar: variable lookups, ``[...]`` subscripting,
-    literal constants, ``==``, ``!=``, ``<``, ``<=``, ``>``, ``>=``,
-    ``in``, ``not in``, ``and``, ``or``, and ``not``.  The grammar is
+    literal constants, unary ``+`` / ``-`` (for signed literals), ``==``,
+    ``!=``, ``<``, ``<=``, ``>``, ``>=``, ``in``, ``not in``, ``and``,
+    ``or``, and ``not``.  The grammar is
     intentionally small enough to specify in one sentence and large enough
     to express every routing predicate in the cookbook recipes.
 
@@ -281,11 +282,14 @@ def evaluate_predicate(predicate: str, context: dict[str, Any]) -> bool:
     :data:`_ALLOWED_AST_NODES`; anything not on the list raises
     :class:`PredicateSyntaxError` with the offending node name.
 
+    Unary ``+`` / ``-`` are permitted so signed numeric literals (e.g.
+    ``n == -1``) parse and compare correctly.
+
     Variable lookups read from *context* and from a small literal namespace
     holding ``True``, ``False``, and ``None``.  Anything else raises
     :class:`PredicateSyntaxError`.  Attribute access, function calls, and
-    arithmetic are deliberately *not* supported — predicates are routing
-    decisions, not computations.
+    *binary* arithmetic are deliberately *not* supported — predicates are
+    routing decisions, not computations.
 
     Args:
         predicate: A predicate string (e.g. ``"status == 'ok'"``).
@@ -353,16 +357,24 @@ def evaluate_predicate(predicate: str, context: dict[str, Any]) -> bool:
             )
 
         if isinstance(node, ast.BoolOp):
-            values = [_eval(v) for v in node.values]
+            # Short-circuit exactly like Python: stop at the first operand
+            # that determines the result so later operands are never
+            # evaluated.  This keeps ``flag and data['missing'] == 1`` from
+            # raising when ``flag`` is falsy — the right operand is simply
+            # not reached, matching native ``and`` / ``or`` semantics.
             if isinstance(node.op, ast.And):
                 result: Any = True
-                for value in values:
-                    result = result and value
+                for value_node in node.values:
+                    result = _eval(value_node)
+                    if not result:
+                        return result
                 return result
             # ast.Or
             result = False
-            for value in values:
-                result = result or value
+            for value_node in node.values:
+                result = _eval(value_node)
+                if result:
+                    return result
             return result
 
         if isinstance(node, ast.Compare):

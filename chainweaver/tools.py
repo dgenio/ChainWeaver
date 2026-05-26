@@ -109,7 +109,7 @@ class Tool:
         timeout_seconds: float | None = None,
         max_output_size: int | None = None,
         schema_version: str = "0.0.0",
-        cacheable: bool = True,
+        cacheable: bool | None = None,
         safety: ToolSafetyContract | None = None,
     ) -> None:
         self.name = name
@@ -121,20 +121,34 @@ class Tool:
         self.max_output_size = max_output_size
         self.schema_version = schema_version
         # ``cacheable`` controls whether ``FlowExecutor``'s step cache
-        # (issue #127) is allowed to memoize this tool's outputs.
-        # Default ``True`` keeps the convenient "drop in a cache and it
-        # works for pure tools" experience; mark side-effecting or
-        # external-state-reading tools ``cacheable=False`` so they
-        # always run.  Has no effect when no step cache is configured.
-        self.cacheable = cacheable
-        # Structured safety / determinism metadata (issue #19).  Defaults
-        # to ``ToolSafetyContract()`` — maximally permissive — so existing
-        # tool definitions keep working unchanged.  Consumed by
-        # :meth:`Tool.from_flow` (issue #125) to derive the wrapped
-        # flow's contract, and by downstream catalog / governance
-        # consumers.  The executor itself does not enforce contract
-        # fields in v1.
-        self.safety: ToolSafetyContract = safety or ToolSafetyContract()
+        # (issue #127) is allowed to memoize this tool's outputs.  It
+        # mirrors ``ToolSafetyContract.cacheable`` (issue #19), which is the
+        # exported metadata downstream governance / catalog consumers read.
+        # The two must never silently disagree, so they are reconciled here:
+        #
+        # - ``cacheable=None`` (unspecified): derive it from ``safety`` when a
+        #   contract is supplied, otherwise default to ``True`` — the
+        #   convenient "drop in a cache and it works for pure tools" default.
+        # - explicit ``cacheable`` + explicit ``safety`` that disagree: raise
+        #   rather than silently letting one win.
+        #
+        # ``self.safety`` defaults to a maximally-permissive contract so bare
+        # ``Tool(...)`` constructors keep working unchanged.  It is consumed by
+        # :meth:`Tool.from_flow` (issue #125) and downstream consumers; the
+        # executor itself does not enforce contract fields in v1.
+        if safety is None:
+            effective_cacheable = True if cacheable is None else cacheable
+            self.cacheable = effective_cacheable
+            self.safety: ToolSafetyContract = ToolSafetyContract(cacheable=effective_cacheable)
+        else:
+            if cacheable is not None and cacheable != safety.cacheable:
+                raise ValueError(
+                    f"Tool '{name}' received conflicting cacheable settings: "
+                    f"cacheable={cacheable} but safety.cacheable={safety.cacheable}. "
+                    f"Set one, or make them agree."
+                )
+            self.cacheable = safety.cacheable
+            self.safety = safety
 
     @cached_property
     def input_schema_hash(self) -> str:
