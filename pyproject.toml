@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.7.0"
+version = "0.8.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -53,6 +53,9 @@ dev = [
     "mypy>=1.0",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
+    "griffe>=2.0",
+    "hypothesis>=6.150",
+    "hypothesis-jsonschema>=0.23",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
@@ -66,7 +69,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Bare-name imports inside tests/ (e.g. `from helpers import ...`,
+# `from strategies import ...`) resolve because pytest prepends these
+# directories to `sys.path` before collection.
+pythonpath = ["tests", "tests/property"]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "property: Hypothesis property-based determinism test (also run via `pytest -m property`)",
+]
 
 [tool.ruff]
 target-version = "py310"

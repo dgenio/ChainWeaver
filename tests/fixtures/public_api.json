@@ -61,6 +61,7 @@
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
@@ -83,6 +84,7 @@
     "flow_to_yaml",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology"
   ],
@@ -117,8 +119,7 @@
         "total_duration_ms": "float"
       },
       "module": "chainweaver.attest",
-      "qualname": "AttestationReport",
-      "signature": "(*, chainweaver_version: str, flow_name: str, flow_version: str, flow_schema_fingerprint: str, tool_schema_hashes: dict[str, str], n: int, repeats: int, seed: int, host_info: dict[str, str], started_at_iso: str, ended_at_iso: str, total_duration_ms: float, observed_deterministic: bool, aggregate_fingerprint: str, divergences: list[dict[str, Any]]) -> None"
+      "qualname": "AttestationReport"
     },
     "BaseMiddleware": {
       "kind": "class",
@@ -194,8 +195,7 @@
         "cost_per_token_usd": "float"
       },
       "module": "chainweaver.cost",
-      "qualname": "CostProfile",
-      "signature": "(*, avg_llm_latency_ms: Annotated[float, annotated_types.Ge(ge=0)] = 300.0, avg_tokens_per_call: Annotated[float, annotated_types.Ge(ge=0)] = 750.0, cost_per_token_usd: Annotated[float, annotated_types.Ge(ge=0)] = 4e-05) -> None"
+      "qualname": "CostProfile"
     },
     "CostReport": {
       "kind": "pydantic-model",
@@ -208,8 +208,7 @@
         "steps_executed": "int"
       },
       "module": "chainweaver.cost",
-      "qualname": "CostReport",
-      "signature": "(*, steps_executed: int, llm_calls_avoided: int, latency_saved_ms: float, cost_saved_usd: float, actual_execution_ms: float, profile: chainweaver.cost.CostProfile) -> None"
+      "qualname": "CostReport"
     },
     "DAGDefinitionError": {
       "kind": "class",
@@ -232,8 +231,7 @@
         "version": "str"
       },
       "module": "chainweaver.flow",
-      "qualname": "DAGFlow",
-      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.DAGFlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
+      "qualname": "DAGFlow"
     },
     "DAGFlowStep": {
       "kind": "pydantic-model",
@@ -248,8 +246,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.flow",
-      "qualname": "DAGFlowStep",
-      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail', step_id: str, depends_on: list[str] = <factory>, step_type: Literal['tool', 'capability'] = 'tool', capability_id: str | NoneType = None) -> None"
+      "qualname": "DAGFlowStep"
     },
     "DriftInfo": {
       "kind": "class",
@@ -267,8 +264,7 @@
         "steps": "list[chainweaver.executor.StepPlan]"
       },
       "module": "chainweaver.executor",
-      "qualname": "ExecutionPlan",
-      "signature": "(*, flow_name: str, step_count: int, steps: list[chainweaver.executor.StepPlan] = <factory>, final_context_shape: dict[str, str] = <factory>, all_resolvable: bool = True) -> None"
+      "qualname": "ExecutionPlan"
     },
     "ExecutionResult": {
       "kind": "pydantic-model",
@@ -285,8 +281,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.executor",
-      "qualname": "ExecutionResult",
-      "signature": "(*, flow_name: str, success: bool, final_output: dict[str, Any] | NoneType, execution_log: list[chainweaver.executor.StepRecord] = <factory>, trace_id: str, started_at: datetime.datetime, ended_at: datetime.datetime, total_duration_ms: float, cost_report: chainweaver.cost.CostReport | NoneType = None, initial_input: dict[str, Any] = <factory>) -> None"
+      "qualname": "ExecutionResult"
     },
     "ExecutionSnapshot": {
       "kind": "pydantic-model",
@@ -303,8 +298,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.checkpoint",
-      "qualname": "ExecutionSnapshot",
-      "signature": "(*, trace_id: str, flow_name: str, flow_version: str, initial_input: dict[str, Any], started_at: datetime.datetime, context: dict[str, Any], execution_log: list[chainweaver.executor.StepRecord] = <factory>, completed_steps: int = 0, completed_dag_levels: int = 0, tool_schema_hashes: dict[str, str] = <factory>) -> None"
+      "qualname": "ExecutionSnapshot"
     },
     "FileCheckpointer": {
       "kind": "class",
@@ -339,8 +333,7 @@
         "version": "str"
       },
       "module": "chainweaver.flow",
-      "qualname": "Flow",
-      "signature": "(*, name: str, version: str = '0.1.0', description: str, steps: list[chainweaver.flow.FlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
+      "qualname": "Flow"
     },
     "FlowAlreadyExistsError": {
       "kind": "class",
@@ -368,8 +361,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.middleware",
-      "qualname": "FlowEndContext",
-      "signature": "(*, trace_id: str, flow_name: str, result: chainweaver.executor.ExecutionResult) -> None"
+      "qualname": "FlowEndContext"
     },
     "FlowEvent": {
       "kind": "pydantic-model",
@@ -388,8 +380,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.events",
-      "qualname": "FlowEvent",
-      "signature": "(*, kind: Literal['flow_start', 'step_start', 'step_end', 'flow_end'], flow_name: str, trace_id: str, timestamp: datetime.datetime, flow_version: str | NoneType = None, initial_input: dict[str, Any] | NoneType = None, total_steps: int | NoneType = None, step_index: int | NoneType = None, tool_name: str | NoneType = None, inputs: dict[str, Any] | NoneType = None, step_record: chainweaver.executor.StepRecord | NoneType = None, result: chainweaver.executor.ExecutionResult | NoneType = None) -> None"
+      "qualname": "FlowEvent"
     },
     "FlowExecutionError": {
       "kind": "class",
@@ -438,8 +429,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.middleware",
-      "qualname": "FlowStartContext",
-      "signature": "(*, trace_id: str, flow_name: str, flow_version: str, initial_input: dict[str, Any], started_at: datetime.datetime, total_steps: int) -> None"
+      "qualname": "FlowStartContext"
     },
     "FlowStatus": {
       "kind": "enum",
@@ -461,8 +451,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.flow",
-      "qualname": "FlowStep",
-      "signature": "(*, tool_name: str, input_mapping: dict[str, Any] = <factory>, retry: chainweaver.flow.RetryPolicy | NoneType = None, on_error: str = 'fail') -> None"
+      "qualname": "FlowStep"
     },
     "InMemoryCheckpointer": {
       "kind": "class",
@@ -504,8 +493,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.observation",
-      "qualname": "ObservedStep",
-      "signature": "(*, tool_name: str, inputs: dict[str, Any], outputs: dict[str, Any] | NoneType = None, recorded_at: datetime.datetime, duration_ms: float = 0.0) -> None"
+      "qualname": "ObservedStep"
     },
     "ObservedTrace": {
       "kind": "pydantic-model",
@@ -517,8 +505,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.observation",
-      "qualname": "ObservedTrace",
-      "signature": "(*, trace_id: str, source: str, started_at: datetime.datetime, ended_at: datetime.datetime | NoneType = None, steps: list[chainweaver.observation.ObservedStep] = <factory>) -> None"
+      "qualname": "ObservedTrace"
     },
     "RedactionPolicy": {
       "kind": "pydantic-model",
@@ -529,8 +516,7 @@
         "redact_replacement": "str"
       },
       "module": "chainweaver.log_utils",
-      "qualname": "RedactionPolicy",
-      "signature": "(*, redact_keys: frozenset[str] = frozenset({'api_key', 'apikey', 'authorization', 'password', 'secret', 'token'}), redact_pattern: re.Pattern[str] | NoneType = None, max_value_length: int | NoneType = None, redact_replacement: str = '***REDACTED***') -> None"
+      "qualname": "RedactionPolicy"
     },
     "RegistryStore": {
       "kind": "class",
@@ -553,8 +539,7 @@
         "original_trace_id": "str"
       },
       "module": "chainweaver.executor",
-      "qualname": "ReplayResult",
-      "signature": "(*, original_trace_id: str, new_result: chainweaver.executor.ExecutionResult, mode: chainweaver.executor.ReplayMode, diffs: list[chainweaver.executor.StepDiff] = <factory>, all_steps_match: bool = True) -> None"
+      "qualname": "ReplayResult"
     },
     "RetryPolicy": {
       "kind": "pydantic-model",
@@ -566,8 +551,7 @@
         "retryable_errors": "tuple[str, Ellipsis]"
       },
       "module": "chainweaver.flow",
-      "qualname": "RetryPolicy",
-      "signature": "(*, max_retries: Annotated[int, annotated_types.Ge(ge=0)] = 3, backoff_seconds: Annotated[float, annotated_types.Ge(ge=0)] = 1.0, backoff_multiplier: Annotated[float, annotated_types.Ge(ge=1)] = 2.0, jitter: bool = False, retryable_errors: tuple[str, Ellipsis] = ('builtins:Exception',)) -> None"
+      "qualname": "RetryPolicy"
     },
     "SchemaValidationError": {
       "kind": "class",
@@ -589,8 +573,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.cache",
-      "qualname": "StepCacheKey",
-      "signature": "(*, tool_name: str, schema_hash: str, input_value_hash: str) -> None"
+      "qualname": "StepCacheKey"
     },
     "StepDiff": {
       "kind": "pydantic-model",
@@ -602,8 +585,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.executor",
-      "qualname": "StepDiff",
-      "signature": "(*, step_index: int, tool_name: str, field: str, expected: Any, actual: Any) -> None"
+      "qualname": "StepDiff"
     },
     "StepEndContext": {
       "kind": "pydantic-model",
@@ -613,8 +595,7 @@
         "trace_id": "str"
       },
       "module": "chainweaver.middleware",
-      "qualname": "StepEndContext",
-      "signature": "(*, trace_id: str, flow_name: str, step_record: chainweaver.executor.StepRecord) -> None"
+      "qualname": "StepEndContext"
     },
     "StepPlan": {
       "kind": "pydantic-model",
@@ -628,8 +609,7 @@
         "warnings": "list[str]"
       },
       "module": "chainweaver.executor",
-      "qualname": "StepPlan",
-      "signature": "(*, step_index: int, tool_name: str, input_sources: dict[str, str], input_schema: dict[str, str] = <factory>, output_schema: dict[str, str] = <factory>, unresolved_keys: list[str] = <factory>, warnings: list[str] = <factory>) -> None"
+      "qualname": "StepPlan"
     },
     "StepRecord": {
       "kind": "pydantic-model",
@@ -639,6 +619,7 @@
         "ended_at": "datetime.datetime",
         "error_message": "str | NoneType",
         "error_type": "str | NoneType",
+        "fallback_used": "bool",
         "inputs": "dict[str, Any]",
         "outputs": "dict[str, Any] | NoneType",
         "retry_count": "int",
@@ -650,8 +631,7 @@
         "tool_name": "str"
       },
       "module": "chainweaver.executor",
-      "qualname": "StepRecord",
-      "signature": "(*, step_index: int, tool_name: str, inputs: dict[str, Any], outputs: dict[str, Any] | NoneType = None, error_type: str | NoneType = None, error_message: str | NoneType = None, success: bool = True, started_at: datetime.datetime, ended_at: datetime.datetime, duration_ms: float, retry_count: int = 0, retry_errors: list[str] = <factory>, skipped: bool = False, cached: bool = False) -> None"
+      "qualname": "StepRecord"
     },
     "StepStartContext": {
       "kind": "pydantic-model",
@@ -664,8 +644,19 @@
         "trace_id": "str"
       },
       "module": "chainweaver.middleware",
-      "qualname": "StepStartContext",
-      "signature": "(*, trace_id: str, flow_name: str, step_index: int, tool_name: str, inputs: dict[str, Any], started_at: datetime.datetime) -> None"
+      "qualname": "StepStartContext"
+    },
+    "Suggestion": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "code": "str",
+        "message": "str",
+        "step_index": "int | NoneType",
+        "title": "str",
+        "tool_name": "str | NoneType"
+      },
+      "module": "chainweaver.analyzer",
+      "qualname": "Suggestion"
     },
     "Tool": {
       "kind": "class",
@@ -718,7 +709,7 @@
       "kind": "function",
       "module": "chainweaver.compat",
       "qualname": "check_flow_compatibility",
-      "signature": "(flow: Flow, tools: dict[str, Tool]) -> list[CompatibilityIssue]"
+      "signature": "(flow: Flow | DAGFlow, tools: dict[str, Tool]) -> list[CompatibilityIssue]"
     },
     "cli": {
       "kind": "module",
@@ -796,6 +787,12 @@
       "module": "chainweaver.compat",
       "qualname": "schema_fingerprint",
       "signature": "(model: type[BaseModel]) -> str"
+    },
+    "suggest_optimizations": {
+      "kind": "function",
+      "module": "chainweaver.analyzer",
+      "qualname": "suggest_optimizations",
+      "signature": "(flow: Flow | DAGFlow, *, tools: Iterable[Tool] | None = None, traces: list[ExecutionResult] | None = None) -> list[Suggestion]"
     },
     "tool": {
       "kind": "function",

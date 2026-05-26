@@ -96,6 +96,26 @@ Think of it as the difference between an **interpreter** and a **compiler**:
 | Observability | Prompt logs only | Structured step logs |
 | Reusability | Prompt templates | Registered, versioned flows |
 
+### How is this different from LangChain / LangGraph / Prefect / Dagster / Temporal?
+
+Short answer: those frameworks each make a different design choice that's
+right for their own audience. ChainWeaver makes one specific trade-off —
+**no LLM calls between steps, enforced at the framework level** — and
+aligns the rest of the design (Pydantic-validated I/O, file-serializable
+flows, no server) around it.
+
+| | ChainWeaver | LangChain LCEL | LangGraph | Prefect 3 | Dagster | Temporal |
+|---|---|---|---|---|---|---|
+| LLM-free between steps | ✅ hard invariant | ⚠️ possible, not enforced | ⚠️ possible, not enforced | ✅ N/A | ✅ N/A | ✅ N/A |
+| Pydantic-validated I/O | ✅ required | ⚠️ optional | ✅ | ✅ Pydantic 2 native | ⚠️ Dagster `Config` | ⚠️ optional |
+| Lean dep set | ✅ 4 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
+| File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
+
+See [docs/comparisons.md](docs/comparisons.md) for the full matrix —
+including version pins, citations to each alternative's own docs, and a
+"when to pick which" guide.
+
 ---
 
 ## Is this for me?
@@ -536,11 +556,14 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 | **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, offline LLM compiler | planned |
 | **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
 
+Curious how ChainWeaver compares to LangChain, LangGraph, Prefect,
+Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
+
 ---
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with eight subcommands:
+ChainWeaver ships a `chainweaver` console script with the following subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
@@ -558,14 +581,21 @@ chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 # Inspect a registered flow's structure (table or JSON).
 chainweaver inspect my_flow --format json
 
-# Analyze execution traces for bottlenecks.
-chainweaver profile trace1.json trace2.json
+# Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
+# and per-step / per-tool retry / skip / fallback / failure aggregates.
+chainweaver profile trace_a.json trace_b.json --format json
 
-# Compare two execution results step-by-step.
-chainweaver diff a.json b.json
+# Compare two ExecutionResult JSON files step-by-step.
+chainweaver diff baseline.json current.json --perf-tolerance 25
 
 # Observed-determinism attestation: run N inputs × M repeats.
 chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 3
+
+# Advisory optimization suggestions for a saved flow.
+chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.json
+
+# Check saved flows for tool schema drift against the live registry.
+chainweaver doctor flows/ --check-drift --tools my_pkg.tools
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:

@@ -19,13 +19,20 @@ Available commands
 - ``chainweaver run <file>`` — load a flow file from disk, register tools
   from one or more Python modules, and execute the flow (issue #129).
 - ``chainweaver profile <traces...>`` — analyze one or more
-  ``ExecutionResult`` JSON files; surface bottlenecks and (multi-file)
-  per-step p50/p95/p99 (issue #147).
+  ``ExecutionResult`` JSON files; surface bottlenecks, per-step p50/p95/p99,
+  and per-step / per-tool reliability aggregates for retries, skips,
+  fallbacks, and failures (issues #147 and #176).
 - ``chainweaver diff <a.json> <b.json>`` — compare two
   ``ExecutionResult`` JSON files step-by-step (issue #148).
 - ``chainweaver attest <flow>`` — observed-determinism attestation:
   run a flow N x M times and emit a reproducible JSON artifact
   (issue #154).
+- ``chainweaver suggest <flow>`` — emit advisory optimization
+  suggestions for a flow file, optionally informed by trace files
+  (issue #155).
+- ``chainweaver doctor <path>`` — diagnostic command; ``--check-drift``
+  reports missing tools and tool-schema fingerprint drift for one or
+  more saved flow files (issue #175).
 
 Programmatic registration entry point
 -------------------------------------
@@ -72,6 +79,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 from deepdiff import DeepDiff
 
+from chainweaver.compat import CompatibilityIssue, check_flow_compatibility
 from chainweaver.exceptions import (
     ChainWeaverError,
     FlowNotFoundError,
@@ -663,11 +671,122 @@ def _quantile(sorted_vals: list[float], q: float) -> float:
     return sorted_vals[lower] + (sorted_vals[upper] - sorted_vals[lower]) * fraction
 
 
+def _step_reliability_fields(record: Any) -> dict[str, Any]:
+    """Project the StepRecord fields that drive reliability aggregates (issue #176)."""
+    return {
+        "retry_count": int(record.retry_count),
+        "cached": bool(record.cached),
+        "skipped": bool(record.skipped),
+        "fallback_used": bool(record.fallback_used),
+        "error_type": record.error_type,
+    }
+
+
+def _aggregate_reliability(
+    records: list[Any],
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+    """Compute totals and per-tool aggregates from a flat list of step records.
+
+    Returns ``(totals, by_tool)`` where ``totals`` carries ``retry_count``,
+    ``skip_count``, ``fallback_count``, ``failure_count``, ``cached_count``
+    summed across *records*, and ``by_tool`` is keyed by ``tool_name``
+    carrying the same counts plus ``invocation_count`` (issue #176).
+    """
+    totals: dict[str, int] = {
+        "retry_count": 0,
+        "skip_count": 0,
+        "fallback_count": 0,
+        "failure_count": 0,
+        "cached_count": 0,
+    }
+    by_tool: dict[str, dict[str, int]] = {}
+    for r in records:
+        bucket = by_tool.setdefault(
+            r.tool_name,
+            {
+                "invocation_count": 0,
+                "retry_count": 0,
+                "skip_count": 0,
+                "fallback_count": 0,
+                "failure_count": 0,
+                "cached_count": 0,
+            },
+        )
+        bucket["invocation_count"] += 1
+        bucket["retry_count"] += int(r.retry_count)
+        totals["retry_count"] += int(r.retry_count)
+        if r.skipped:
+            bucket["skip_count"] += 1
+            totals["skip_count"] += 1
+        if r.fallback_used:
+            bucket["fallback_count"] += 1
+            totals["fallback_count"] += 1
+        if not r.success:
+            bucket["failure_count"] += 1
+            totals["failure_count"] += 1
+        if r.cached:
+            bucket["cached_count"] += 1
+            totals["cached_count"] += 1
+    return totals, by_tool
+
+
+def _format_reliability_footer(
+    totals: dict[str, int],
+    by_tool: dict[str, dict[str, int]],
+) -> list[str]:
+    """Render the per-step / per-tool reliability summary footer (issue #176).
+
+    Returns an empty list when nothing notable happened (no retries, skips,
+    fallbacks, failures, or cache hits) so the existing single-trace happy
+    path keeps its current compact table.
+    """
+    notable = any(v > 0 for k, v in totals.items() if k != "cached_count") or (
+        totals["cached_count"] > 0
+    )
+    if not notable:
+        return []
+    summary = (
+        f"Reliability: retries={totals['retry_count']}  "
+        f"skips={totals['skip_count']}  "
+        f"fallbacks={totals['fallback_count']}  "
+        f"failures={totals['failure_count']}  "
+        f"cached={totals['cached_count']}"
+    )
+    lines = ["─" * 70, summary]
+    problem_tools = [
+        (name, bucket)
+        for name, bucket in by_tool.items()
+        if bucket["retry_count"]
+        or bucket["skip_count"]
+        or bucket["fallback_count"]
+        or bucket["failure_count"]
+    ]
+    if problem_tools:
+        lines.append(" tool                       retries  skips  fallbacks  failures")
+        for name, bucket in sorted(
+            problem_tools,
+            key=lambda item: (
+                item[1]["failure_count"],
+                item[1]["fallback_count"],
+                item[1]["retry_count"],
+            ),
+            reverse=True,
+        ):
+            short = name if len(name) <= 26 else name[:25] + "…"
+            lines.append(
+                f" {short:<26} {bucket['retry_count']:>7}  "
+                f"{bucket['skip_count']:>5}  {bucket['fallback_count']:>9}  "
+                f"{bucket['failure_count']:>8}"
+            )
+    return lines
+
+
 def _profile_single(result: ExecutionResult, *, top: int) -> tuple[dict[str, Any], str]:
     """Build the JSON + table view for a single ``ExecutionResult``."""
     rows = [(r.step_index, r.tool_name, r.duration_ms, r.success) for r in result.execution_log]
     sum_step_ms = sum(r.duration_ms for r in result.execution_log)
     overhead_ms = result.total_duration_ms - sum_step_ms
+    totals, by_tool = _aggregate_reliability(list(result.execution_log))
 
     payload = {
         "trace_count": 1,
@@ -684,9 +803,14 @@ def _profile_single(result: ExecutionResult, *, top: int) -> tuple[dict[str, Any
                 "tool_name": r.tool_name,
                 "duration_ms": r.duration_ms,
                 "success": r.success,
+                **_step_reliability_fields(r),
             }
             for r in result.execution_log
         ],
+        "aggregates": {
+            **totals,
+            "by_tool": by_tool,
+        },
     }
 
     # Table view: sort steps by duration desc, take top-N, render bar chart.
@@ -703,9 +827,10 @@ def _profile_single(result: ExecutionResult, *, top: int) -> tuple[dict[str, Any
         " idx  tool                       duration_ms",
     ]
     body = _render_step_bar_chart(shown)
-    footer = []
+    footer: list[str] = []
     if hidden:
         footer.append(f"... {hidden} more step(s) not shown (use --top to see more)")
+    footer.extend(_format_reliability_footer(totals, by_tool))
     table = "\n".join([*header, body, *footer])
     return payload, table
 
@@ -732,15 +857,31 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
         raise typer.Exit(code=1)
     step_count = next(iter(step_counts))
 
-    # Per-step percentiles across the N traces.
+    # Per-step percentiles across the N traces, plus reliability aggregates
+    # summed across every trace at the same step index (issue #176).
     per_step: list[dict[str, Any]] = []
     chart_rows: list[tuple[int, str, float, bool]] = []
     for step_index in range(step_count):
-        durations = [r.execution_log[step_index].duration_ms for r in results]
-        tool_name = results[0].execution_log[step_index].tool_name
-        all_success = all(r.execution_log[step_index].success for r in results)
+        per_step_records = [r.execution_log[step_index] for r in results]
+        durations = [rec.duration_ms for rec in per_step_records]
+        # Guard: every trace must use the same tool at this step_index,
+        # otherwise the aggregated metrics would be silently mixed under
+        # whichever name the first trace happened to record.  Matches the
+        # mismatched-step-count guard above.
+        tool_names_here = {rec.tool_name for rec in per_step_records}
+        if len(tool_names_here) > 1:
+            typer.echo(
+                f"chainweaver: traces disagree on tool at step {step_index}: "
+                f"{sorted(tool_names_here)}. Aggregation requires identical "
+                "step-to-tool wiring across all traces.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        tool_name = per_step_records[0].tool_name
+        all_success = all(rec.success for rec in per_step_records)
         stats = _percentiles(durations)
         consistency_warning = stats["mean"] > 0 and stats["stdev"] > 0.5 * stats["mean"]
+        step_totals, _ = _aggregate_reliability(per_step_records)
         per_step.append(
             {
                 "step_index": step_index,
@@ -748,6 +889,13 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
                 "duration_ms": stats,
                 "consistency_warning": consistency_warning,
                 "success": all_success,
+                # Sums across traces at this step index — useful for spotting
+                # a step that fails intermittently.
+                "retry_count": step_totals["retry_count"],
+                "skip_count": step_totals["skip_count"],
+                "fallback_count": step_totals["fallback_count"],
+                "failure_count": step_totals["failure_count"],
+                "cached_count": step_totals["cached_count"],
             }
         )
         # Bar chart uses p50 as the representative duration.
@@ -756,12 +904,20 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
     totals = [r.total_duration_ms for r in results]
     total_stats = _percentiles(totals)
 
+    # Flatten every step record across every trace for run-wide aggregates.
+    all_records = [rec for r in results for rec in r.execution_log]
+    agg_totals, agg_by_tool = _aggregate_reliability(all_records)
+
     payload = {
         "trace_count": len(results),
         "flow_name": flow_name,
         "step_count": step_count,
         "total_duration_ms": total_stats,
         "steps": per_step,
+        "aggregates": {
+            **agg_totals,
+            "by_tool": agg_by_tool,
+        },
     }
 
     # Table view: sort by p50 desc, top-N bar chart.
@@ -785,12 +941,13 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
         for s in per_step
         if s["consistency_warning"]
     ]
-    footer = []
+    footer: list[str] = []
     if hidden:
         footer.append(f"... {hidden} more step(s) not shown (use --top to see more)")
     if warnings:
         footer.append("")
         footer.extend(warnings)
+    footer.extend(_format_reliability_footer(agg_totals, agg_by_tool))
     table = "\n".join([*header, body, *footer])
     return payload, table
 
@@ -1235,6 +1392,326 @@ def _attest_report_to_table(report: AttestationReport) -> str:
             step_str = f"step {step}" if step is not None else "(step unknown)"
             lines.append(f"  input #{div['input_index']} @ {step_str}: {div['error_message']}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# suggest command (issue #155)
+# ---------------------------------------------------------------------------
+
+
+_SUGGEST_FLOW_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file.",
+)
+_SUGGEST_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help=(
+        "Python module path that exposes Tool instances at top level. "
+        "Required for CW003 (dead-step) suggestions. Repeatable."
+    ),
+)
+_SUGGEST_TRACES_OPTION = typer.Option(
+    [],
+    "--trace",
+    help=(
+        "Path to a recorded ExecutionResult JSON file. Required (>= 2 traces) "
+        "for CW004 (cacheable-step) suggestions. Repeatable."
+    ),
+)
+_SUGGEST_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+
+
+@app.command("suggest")
+def suggest_command(
+    flow_file: Path = _SUGGEST_FLOW_ARG,
+    tools: list[str] = _SUGGEST_TOOLS_OPTION,
+    trace: list[Path] = _SUGGEST_TRACES_OPTION,
+    output_format: OutputFormat = _SUGGEST_FORMAT_OPTION,
+) -> None:
+    """Emit advisory optimization suggestions for a flow file.
+
+    Suggestion families (stable codes):
+
+    - ``CW001`` — wasteful-passthrough (empty input_mapping).
+    - ``CW002`` — parallelizable-pair (adjacent steps reading disjoint
+      context keys).  Requires ``--tools``.
+    - ``CW003`` — dead-step (step outputs are not read downstream).
+      Requires ``--tools``.
+    - ``CW004`` — cacheable-step (identical outputs across observed
+      traces).  Requires two or more ``--trace`` files.
+
+    Exit code 0 is always returned — the suggester is advisory.
+    Machine consumers should gate on the ``suggestions`` array length
+    in ``--format json``.  Use a non-zero exit code from your own
+    wrapper when desired.
+
+    Exit codes: 0 = ran successfully (regardless of suggestion count),
+    1 = malformed input, 2 = file not found.
+    """
+    _require_existing_file(flow_file)
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    tool_objs: list[Tool] = []
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            tool_objs.append(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+
+    trace_results: list[ExecutionResult] = []
+    for path in trace:
+        trace_results.append(_load_execution_result(path))
+
+    from chainweaver.analyzer import suggest_optimizations
+
+    if isinstance(flow, DAGFlow):
+        suggestions = []
+    else:
+        suggestions = suggest_optimizations(
+            flow,
+            tools=tool_objs if tool_objs else None,
+            traces=trace_results if trace_results else None,
+        )
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(
+            {
+                "flow_name": flow.name,
+                "flow_version": flow.version,
+                "suggestion_count": len(suggestions),
+                "suggestions": [json.loads(s.model_dump_json()) for s in suggestions],
+            }
+        )
+        return
+
+    if not suggestions:
+        typer.echo(f"No suggestions for flow '{flow.name}'.")
+        return
+    lines = [
+        f"Suggestions for flow '{flow.name}' v{flow.version}:",
+        "─" * 60,
+    ]
+    for s in suggestions:
+        loc = f"step {s.step_index} ({s.tool_name})" if s.step_index is not None else "(flow)"
+        lines.append(f"  [{s.code} {s.title}] {loc}")
+        lines.append(f"    {s.message}")
+    typer.echo("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# doctor command (issue #175)
+# ---------------------------------------------------------------------------
+
+
+def _doctor_check_drift(
+    flow: Flow | DAGFlow,
+    source_path: Path,
+    tools: dict[str, Tool],
+) -> dict[str, Any]:
+    """Run drift detection for a single flow and return a JSON-shaped result.
+
+    Reuses :func:`~chainweaver.compat.check_flow_compatibility` so the
+    classification of issues (``missing_tool`` / ``schema_mismatch``)
+    stays in lockstep with what the executor itself uses.
+
+    The flow is considered to have *checkable* fingerprints only when
+    ``flow.tool_schema_hashes`` is set; we surface that fact in the JSON
+    payload so CI / scripts can distinguish "fingerprints match" from
+    "no fingerprints were recorded in the first place".
+    """
+    raw_issues: list[CompatibilityIssue] = check_flow_compatibility(flow, tools)
+    issues_payload = [
+        {
+            "step_index": issue.step_index,
+            "tool_name": issue.tool_name,
+            "issue_type": issue.issue_type,
+            "detail": issue.detail,
+        }
+        for issue in raw_issues
+    ]
+    missing_count = sum(1 for issue in raw_issues if issue.issue_type == "missing_tool")
+    drift_count = sum(1 for issue in raw_issues if issue.issue_type == "schema_mismatch")
+    fingerprints_present = flow.tool_schema_hashes is not None and bool(flow.tool_schema_hashes)
+    # When no fingerprints are recorded, schema drift is structurally
+    # undetectable. Missing-tool checks still ran.
+    return {
+        "path": str(source_path),
+        "flow_name": flow.name,
+        "flow_version": flow.version,
+        "fingerprints_present": fingerprints_present,
+        "ok": not raw_issues,
+        "missing_count": missing_count,
+        "drift_count": drift_count,
+        "issues": issues_payload,
+    }
+
+
+def _format_doctor_table(results: list[dict[str, Any]]) -> str:
+    """Render the per-flow drift report as a compact human-readable table."""
+    if not results:
+        return "(no flows checked)"
+    lines: list[str] = ["─" * 70, " status  flow                            issues  source"]
+    for r in results:
+        status = "OK    " if r["ok"] else "DRIFT "
+        flow_label = f"{r['flow_name']} v{r['flow_version']}"
+        if len(flow_label) > 32:
+            flow_label = flow_label[:31] + "…"
+        issue_count = r["missing_count"] + r["drift_count"]
+        lines.append(f" {status} {flow_label:<32} {issue_count:>6}  {r['path']}")
+        for issue in r["issues"]:
+            lines.append(
+                f"          step {issue['step_index']:<3} "
+                f"[{issue['issue_type']}] {issue['detail']}"
+            )
+        if not r["fingerprints_present"]:
+            lines.append(
+                "          (no tool_schema_hashes recorded — "
+                "schema drift undetectable for this flow)"
+            )
+    return "\n".join(lines)
+
+
+_DOCTOR_PATH_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.* file or a directory of flow files.",
+)
+_DOCTOR_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help=(
+        "Python module path that exposes Tool instances at top level "
+        "(e.g. 'my_pkg.tools'). Repeatable."
+    ),
+)
+_DOCTOR_CHECK_DRIFT_OPTION = typer.Option(
+    False,
+    "--check-drift",
+    help="Compare each step's tool reference and schema fingerprint to the current registry.",
+)
+_DOCTOR_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+
+
+@app.command("doctor")
+def doctor_command(
+    path: Path = _DOCTOR_PATH_ARG,
+    check_drift: bool = _DOCTOR_CHECK_DRIFT_OPTION,
+    tools: list[str] = _DOCTOR_TOOLS_OPTION,
+    output_format: OutputFormat = _DOCTOR_FORMAT_OPTION,
+) -> None:
+    """Diagnose ChainWeaver flows against the currently registered tools.
+
+    With ``--check-drift``, loads every flow file under *path* (single
+    file or recursive directory) and compares each step's referenced tool
+    to the live registry built from the modules passed via ``--tools``:
+
+    * ``missing_tool``: the flow references a tool name that the live
+      registry does not provide.
+    * ``schema_mismatch``: the live tool's input/output schema fingerprint
+      differs from the value recorded in the flow's
+      ``tool_schema_hashes`` snapshot. Flows that do not record
+      fingerprints are reported as ``fingerprints_present=False`` and
+      only checked for missing tools.
+
+    Exit codes:
+
+    - ``0`` — no drift detected for any flow.
+    - ``1`` — drift detected for at least one flow, an unreadable /
+      malformed / unrecognised-extension flow file (surfaced under
+      ``load_errors`` in the JSON payload), or no ``--check-drift``
+      mode was selected.
+    - ``2`` — *path* itself does not exist, is neither a file nor a
+      directory, or a ``--tools`` module is not importable.
+    """
+    if not check_drift:
+        typer.echo(
+            "chainweaver: 'doctor' currently requires --check-drift "
+            "(no other modes are implemented).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if not path.exists():
+        typer.echo(f"chainweaver: path not found: {path}", err=True)
+        raise typer.Exit(code=2)
+
+    if path.is_dir():
+        flow_files = _iter_flow_files(path)
+    elif path.is_file():
+        flow_files = [path]
+    else:
+        typer.echo(f"chainweaver: not a file or directory: {path}", err=True)
+        raise typer.Exit(code=2)
+
+    # Build a tool dict by importing every requested module, exactly like
+    # ``run`` does, but route through a FlowExecutor so we exercise the
+    # same registration semantics (and use the public accessor for #178).
+    executor = FlowExecutor(registry=FlowRegistry())
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            executor.register_tool(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+    registered: dict[str, Tool] = executor.registered_tools
+
+    results: list[dict[str, Any]] = []
+    load_errors: list[dict[str, str]] = []
+    for flow_path in flow_files:
+        try:
+            flow = _load_flow_file(flow_path)
+        except FlowSerializationError as exc:
+            load_errors.append({"path": str(flow_path), "error": exc.detail})
+            continue
+        results.append(_doctor_check_drift(flow, flow_path, registered))
+
+    drift_count = sum(1 for r in results if not r["ok"])
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "flow_count": len(results),
+        "drift_count": drift_count,
+        "load_errors": load_errors,
+        "results": results,
+    }
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(payload)
+    else:
+        if load_errors:
+            for err in load_errors:
+                typer.echo(
+                    f"chainweaver: failed to load {err['path']}: {err['error']}",
+                    err=True,
+                )
+        typer.echo(_format_doctor_table(results))
+        if drift_count:
+            typer.echo(f"\n{drift_count} flow(s) with drift, {len(results) - drift_count} ok")
+        else:
+            typer.echo(f"\nall {len(results)} flow(s) ok")
+
+    if load_errors or drift_count:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
