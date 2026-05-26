@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from chainweaver.compat import schema_fingerprint
+from chainweaver.contracts import ToolSafetyContract, merge_safety
 from chainweaver.exceptions import (
     FlowExecutionError,
     FlowSerializationError,
@@ -108,7 +109,8 @@ class Tool:
         timeout_seconds: float | None = None,
         max_output_size: int | None = None,
         schema_version: str = "0.0.0",
-        cacheable: bool = True,
+        cacheable: bool | None = None,
+        safety: ToolSafetyContract | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -119,12 +121,34 @@ class Tool:
         self.max_output_size = max_output_size
         self.schema_version = schema_version
         # ``cacheable`` controls whether ``FlowExecutor``'s step cache
-        # (issue #127) is allowed to memoize this tool's outputs.
-        # Default ``True`` keeps the convenient "drop in a cache and it
-        # works for pure tools" experience; mark side-effecting or
-        # external-state-reading tools ``cacheable=False`` so they
-        # always run.  Has no effect when no step cache is configured.
-        self.cacheable = cacheable
+        # (issue #127) is allowed to memoize this tool's outputs.  It
+        # mirrors ``ToolSafetyContract.cacheable`` (issue #19), which is the
+        # exported metadata downstream governance / catalog consumers read.
+        # The two must never silently disagree, so they are reconciled here:
+        #
+        # - ``cacheable=None`` (unspecified): derive it from ``safety`` when a
+        #   contract is supplied, otherwise default to ``True`` — the
+        #   convenient "drop in a cache and it works for pure tools" default.
+        # - explicit ``cacheable`` + explicit ``safety`` that disagree: raise
+        #   rather than silently letting one win.
+        #
+        # ``self.safety`` defaults to a maximally-permissive contract so bare
+        # ``Tool(...)`` constructors keep working unchanged.  It is consumed by
+        # :meth:`Tool.from_flow` (issue #125) and downstream consumers; the
+        # executor itself does not enforce contract fields in v1.
+        if safety is None:
+            effective_cacheable = True if cacheable is None else cacheable
+            self.cacheable = effective_cacheable
+            self.safety: ToolSafetyContract = ToolSafetyContract(cacheable=effective_cacheable)
+        else:
+            if cacheable is not None and cacheable != safety.cacheable:
+                raise ValueError(
+                    f"Tool '{name}' received conflicting cacheable settings: "
+                    f"cacheable={cacheable} but safety.cacheable={safety.cacheable}. "
+                    f"Set one, or make them agree."
+                )
+            self.cacheable = safety.cacheable
+            self.safety = safety
 
     @cached_property
     def input_schema_hash(self) -> str:
@@ -202,6 +226,7 @@ class Tool:
         description: str | None = None,
         input_schema: type[BaseModel] | None = None,
         output_schema: type[BaseModel] | None = None,
+        safety: ToolSafetyContract | None = None,
     ) -> Tool:
         """Wrap a registered flow as a :class:`Tool` (issue #24).
 
@@ -245,6 +270,19 @@ class Tool:
             output_schema: Override for the derived output schema.
                 Required for DAG flows with multiple sink nodes when no
                 flow-level ``output_schema_ref`` is set.
+            safety: Override for the derived :class:`ToolSafetyContract`
+                (issue #125).  When ``None`` (the default), the wrapper's
+                contract is computed from the constituent step tools'
+                contracts via :func:`~chainweaver.contracts.merge_safety`
+                — "most-restrictive wins" across every field (worst
+                :class:`SideEffectLevel`, worst :class:`StabilityLevel`,
+                worst :class:`DeterminismLevel`, AND across
+                ``idempotent`` / ``cacheable``, OR across
+                ``requires_review``).  When explicitly set, the override
+                wins outright with no merge.  Step tools that have not
+                yet been registered on *executor* are skipped during
+                derivation — their contracts are unknown, so they
+                cannot contribute.
 
         Returns:
             A :class:`Tool` instance whose ``fn`` executes *flow*.  The
@@ -347,12 +385,29 @@ class Tool:
                 )
             return result.final_output
 
+        # --- Safety derivation (issue #125) -------------------------------
+        if safety is not None:
+            resolved_safety: ToolSafetyContract = safety
+        else:
+            constituent_contracts: list[ToolSafetyContract] = []
+            for step in flow.steps:
+                try:
+                    inner_tool = executor.get_tool(step.tool_name)
+                except ToolNotFoundError:
+                    # Tool unregistered at composition time — its contract
+                    # is unknown.  Skip rather than guess; callers that
+                    # care can pass ``safety=...`` explicitly.
+                    continue
+                constituent_contracts.append(inner_tool.safety)
+            resolved_safety = merge_safety(constituent_contracts)
+
         return cls(
             name=tool_name,
             description=tool_description,
             input_schema=resolved_input,
             output_schema=resolved_output,
             fn=_flow_fn,
+            safety=resolved_safety,
         )
 
 

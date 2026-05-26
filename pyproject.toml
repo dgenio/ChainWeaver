@@ -40,6 +40,14 @@ yaml = [
 otel = [
     "opentelemetry-api>=1.20",
 ]
+# Property-based testing extra (issue #143).  Pulls the Hypothesis stack the
+# property suite needs — including hypothesis-jsonschema, which main's suite
+# uses to derive strategies from the Pydantic JSON schemas.  Enable via
+# ``pip install 'chainweaver[test]'``.
+test = [
+    "hypothesis>=6.150",
+    "hypothesis-jsonschema>=0.23",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

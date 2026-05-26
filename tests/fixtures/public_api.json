@@ -13,11 +13,13 @@
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "ConditionalEdge",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DeterminismLevel",
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
@@ -48,12 +50,15 @@
     "InvalidFlowVersionError",
     "ObservedStep",
     "ObservedTrace",
+    "PredicateSyntaxError",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "SideEffectLevel",
+    "StabilityLevel",
     "StepCache",
     "StepCacheKey",
     "StepDiff",
@@ -67,12 +72,14 @@
     "ToolDefinitionError",
     "ToolNotFoundError",
     "ToolOutputSizeError",
+    "ToolSafetyContract",
     "ToolTimeoutError",
     "TraceRecorder",
     "attest_flow",
     "check_flow_compatibility",
     "cli",
     "compile_flow",
+    "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -83,6 +90,7 @@
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "merge_safety",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",
@@ -188,6 +196,15 @@
       "qualname": "CompilationWarning",
       "signature": "(step_index: int, tool_name: str, field_name: str | None, issue_type: str, detail: str) -> None"
     },
+    "ConditionalEdge": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "predicate": "str",
+        "target_step_id": "str"
+      },
+      "module": "chainweaver.flow",
+      "qualname": "ConditionalEdge"
+    },
     "CostProfile": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -238,7 +255,9 @@
     "DAGFlowStep": {
       "kind": "pydantic-model",
       "model_fields": {
+        "branches": "list[chainweaver.flow.ConditionalEdge]",
         "capability_id": "str | NoneType",
+        "default_next": "str | NoneType",
         "depends_on": "list[str]",
         "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
@@ -251,6 +270,11 @@
       },
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
+    },
+    "DeterminismLevel": {
+      "kind": "enum",
+      "module": "chainweaver.contracts",
+      "qualname": "DeterminismLevel"
     },
     "DriftInfo": {
       "kind": "class",
@@ -514,6 +538,12 @@
       "module": "chainweaver.observation",
       "qualname": "ObservedTrace"
     },
+    "PredicateSyntaxError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "PredicateSyntaxError",
+      "signature": "(predicate: str, detail: str) -> None"
+    },
     "RedactionPolicy": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -565,6 +595,16 @@
       "module": "chainweaver.exceptions",
       "qualname": "SchemaValidationError",
       "signature": "(tool_name: str, step_index: int, detail: str, *, context: str = 'tool') -> None"
+    },
+    "SideEffectLevel": {
+      "kind": "enum",
+      "module": "chainweaver.contracts",
+      "qualname": "SideEffectLevel"
+    },
+    "StabilityLevel": {
+      "kind": "enum",
+      "module": "chainweaver.contracts",
+      "qualname": "StabilityLevel"
     },
     "StepCache": {
       "kind": "class",
@@ -669,7 +709,7 @@
       "kind": "class",
       "module": "chainweaver.tools",
       "qualname": "Tool",
-      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True) -> None"
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> None"
     },
     "ToolChain": {
       "kind": "GenericAlias",
@@ -693,6 +733,19 @@
       "module": "chainweaver.exceptions",
       "qualname": "ToolOutputSizeError",
       "signature": "(tool_name: str, size: int, max_size: int) -> None"
+    },
+    "ToolSafetyContract": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "cacheable": "bool",
+        "determinism_level": "chainweaver.contracts.DeterminismLevel",
+        "idempotent": "bool",
+        "requires_review": "bool",
+        "side_effects": "chainweaver.contracts.SideEffectLevel",
+        "stability": "chainweaver.contracts.StabilityLevel"
+      },
+      "module": "chainweaver.contracts",
+      "qualname": "ToolSafetyContract"
     },
     "ToolTimeoutError": {
       "kind": "class",
@@ -728,6 +781,12 @@
       "module": "chainweaver.compiler",
       "qualname": "compile_flow",
       "signature": "(flow: Flow, tools: dict[str, Tool]) -> CompilationResult"
+    },
+    "evaluate_predicate": {
+      "kind": "function",
+      "module": "chainweaver.contracts",
+      "qualname": "evaluate_predicate",
+      "signature": "(predicate: str, context: dict[str, Any]) -> bool"
     },
     "flow_from_dict": {
       "kind": "function",
@@ -788,6 +847,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_to_yaml",
       "signature": "(flow: AnyFlow) -> str"
+    },
+    "merge_safety": {
+      "kind": "function",
+      "module": "chainweaver.contracts",
+      "qualname": "merge_safety",
+      "signature": "(contracts: Iterable[ToolSafetyContract], *, default: ToolSafetyContract | None = None) -> ToolSafetyContract"
     },
     "result_to_mermaid": {
       "kind": "function",

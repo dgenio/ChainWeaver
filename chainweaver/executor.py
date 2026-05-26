@@ -29,6 +29,7 @@ from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_a
 
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
+from chainweaver.contracts import evaluate_predicate
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
@@ -38,6 +39,7 @@ from chainweaver.exceptions import (
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
+    PredicateSyntaxError,
     SchemaValidationError,
     ToolNotFoundError,
     ToolOutputSizeError,
@@ -2213,6 +2215,41 @@ class FlowExecutor:
     # DAG execution
     # ------------------------------------------------------------------
 
+    def _select_branch(
+        self,
+        *,
+        step: DAGFlowStep,
+        context: dict[str, Any],
+        level_outputs: dict[str, Any],
+        step_outputs: dict[str, Any] | None,
+    ) -> str | None | PredicateSyntaxError:
+        """Resolve a branching step's outgoing edge (issue #9).
+
+        Builds the post-step view of the execution context (initial
+        context + completed levels + sibling outputs from the current
+        level + this step's outputs), walks ``step.branches`` in order,
+        and returns the first matching target.  Falls back to
+        ``step.default_next`` when no predicate matches.  Returns
+        ``None`` when nothing matches and no default is set — branching
+        had no effect and every dependent runs as usual.
+
+        Returns the :class:`PredicateSyntaxError` instance instead of
+        raising so the caller can fold the failure into the standard
+        synthetic-record / abort path.
+        """
+        post_context: dict[str, Any] = {**context, **level_outputs}
+        if step_outputs:
+            post_context.update(step_outputs)
+        try:
+            for edge in step.branches:
+                if evaluate_predicate(edge.predicate, post_context):
+                    return edge.target_step_id
+        except PredicateSyntaxError as exc:
+            return exc
+        if step.default_next is not None:
+            return step.default_next
+        return None
+
     def _compute_dag_levels(self, flow: DAGFlow) -> list[list[DAGFlowStep]]:
         """Return steps grouped into topological execution levels.
 
@@ -2347,12 +2384,58 @@ class FlowExecutor:
             flat_index = 0
         levels = self._compute_dag_levels(flow)
 
+        # Conditional-branch bookkeeping (issue #9).
+        #
+        # ``skipped_ids`` accumulates step ids that branch routing has
+        # deactivated — either by direct selection (a branch picked a
+        # sibling) or by transitive skip-propagation (every predecessor
+        # of the step is itself skipped, so no live path reaches it).
+        #
+        # ``dependents_map`` is the inverse of ``depends_on``: for each
+        # step id, the set of step ids that list it as a predecessor.
+        # Building it once up front lets the "select target X, skip
+        # other dependents" step run in O(|dependents|).
+        skipped_ids: set[str] = set()
+        dependents_map: dict[str, set[str]] = {step.step_id: set() for step in flow.steps}
+        for s in flow.steps:
+            for dep in s.depends_on:
+                dependents_map[dep].add(s.step_id)
+
         for relative_level_idx, level_steps in enumerate(levels[start_level:]):
             absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []
 
             for step in level_steps:
+                # Skip propagation (issue #9): a step whose every predecessor
+                # is already skipped has no live path reaching it, so it is
+                # also skipped.  Roots (depends_on == []) are never skipped
+                # by this rule — they always run unless explicitly marked.
+                if (
+                    step.step_id not in skipped_ids
+                    and step.depends_on
+                    and all(dep in skipped_ids for dep in step.depends_on)
+                ):
+                    skipped_ids.add(step.step_id)
+
+                if step.step_id in skipped_ids:
+                    now = _now_utc()
+                    level_records.append(
+                        StepRecord(
+                            step_index=flat_index,
+                            tool_name=step.tool_name,
+                            inputs={},
+                            outputs={},
+                            success=True,
+                            skipped=True,
+                            started_at=now,
+                            ended_at=now,
+                            duration_ms=0.0,
+                        )
+                    )
+                    flat_index += 1
+                    continue
+
                 # Reject non-tool step types until KernelBackedExecutor exists.
                 if step.step_type != "tool":
                     err = FlowExecutionError(
@@ -2468,6 +2551,60 @@ class FlowExecutor:
                             initial_input=initial_input,
                         )
                     level_outputs[key] = value
+
+                # Branch evaluation (issue #9): the step succeeded; if it
+                # carries conditional edges, pick the active downstream
+                # path and mark non-selected dependents as skipped.
+                if step.branches:
+                    branch_outcome = self._select_branch(
+                        step=step,
+                        context=context,
+                        level_outputs=level_outputs,
+                        step_outputs=record.outputs,
+                    )
+                    if isinstance(branch_outcome, PredicateSyntaxError):
+                        err_type, err_msg = _exc_to_strings(branch_outcome)
+                        # The step ran exactly once, so its log must hold one
+                        # record.  Convert the step's own (successful) record
+                        # to a failure in place rather than appending a second
+                        # record at ``flat_index`` — a second record would make
+                        # ``len(log)`` exceed the number of executed steps and
+                        # shift step indexes.  Mirrors the sibling-conflict
+                        # handling above.
+                        record_failed = StepRecord(
+                            step_index=record.step_index,
+                            tool_name=step.tool_name,
+                            inputs=record.inputs,
+                            error_type=err_type,
+                            error_message=err_msg,
+                            success=False,
+                            started_at=record.started_at,
+                            ended_at=_now_utc(),
+                            duration_ms=record.duration_ms,
+                        )
+                        log.extend(level_records[:-1])
+                        log.append(record_failed)
+                        _logger.error(
+                            "DAGFlow '%s' branch evaluation failed at step '%s': %s",
+                            flow.name,
+                            step.step_id,
+                            err_msg,
+                        )
+                        return self._make_result(
+                            flow_name=flow.name,
+                            success=False,
+                            final_output=None,
+                            execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
+                            initial_input=initial_input,
+                        )
+                    selected = branch_outcome
+                    if selected is not None:
+                        for dep_id in dependents_map[step.step_id]:
+                            if dep_id != selected:
+                                skipped_ids.add(dep_id)
 
             log.extend(level_records)
             # Merge all level outputs into context after the level completes.

@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from chainweaver.contracts import DeterminismLevel
 from chainweaver.exceptions import DAGDefinitionError, FlowSerializationError
 
 
@@ -176,6 +177,50 @@ class RetryPolicy(BaseModel):
         if self.jitter:
             delay *= 0.5 + random.random()
         return delay
+
+
+class ConditionalEdge(BaseModel):
+    """A guarded outgoing edge from a :class:`DAGFlowStep` (issue #9).
+
+    Conditional edges drive runtime branching in a DAG: after a decision
+    step runs successfully, the executor walks its ``branches`` in order
+    and the *first* edge whose :attr:`predicate` evaluates truthy against
+    the merged context picks the next active path.  Non-selected dependent
+    steps are recorded as ``StepRecord(skipped=True)``.
+
+    The predicate grammar is intentionally narrow — variable lookups,
+    subscript, comparison operators, ``in`` / ``not in``, ``and`` / ``or``
+    / ``not`` — and is evaluated by
+    :func:`~chainweaver.contracts.evaluate_predicate`, which parses the
+    string with :mod:`ast` and walks the tree by hand.  :func:`eval` is
+    never called.  See :class:`~chainweaver.exceptions.PredicateSyntaxError`
+    for failure modes.
+
+    Attributes:
+        target_step_id: The ``step_id`` of the dependent step to activate
+            when :attr:`predicate` matches.  Must reference a step that
+            also lists the branching step in its ``depends_on``.
+        predicate: A restricted boolean expression evaluated against the
+            merged execution context — for example
+            ``"status == 'ok'"`` or ``"count > 0 and country in ('PT','ES')"``.
+
+    Example::
+
+        DAGFlowStep(
+            tool_name="probe",
+            step_id="probe",
+            depends_on=[],
+            branches=[
+                ConditionalEdge(target_step_id="fast", predicate="cache_hit == True"),
+                ConditionalEdge(target_step_id="slow", predicate="cache_hit == False"),
+            ],
+        )
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    target_step_id: str
+    predicate: str
 
 
 class FlowStep(BaseModel):
@@ -400,6 +445,26 @@ class Flow(BaseModel):
         return resolved
 
     @property
+    def determinism_level(self) -> DeterminismLevel:
+        """Return the structural determinism level of this flow (issue #8).
+
+        Linear :class:`Flow` instances are :class:`DeterminismLevel.FULL`
+        by definition — every step always runs, in declared order — *unless*
+        the flow author explicitly opts out by setting ``deterministic=False``,
+        in which case the level is :class:`DeterminismLevel.NONE`.
+
+        This property reflects flow *structure* only.  Tool-level safety
+        contracts are not consulted here because the flow does not have
+        access to the tool registry; consumers that want a worst-case
+        composite (this property combined with constituent tools'
+        :attr:`ToolSafetyContract.determinism_level` values) should merge
+        the two themselves.
+        """
+        if not self.deterministic:
+            return DeterminismLevel.NONE
+        return DeterminismLevel.FULL
+
+    @property
     def context_schema(self) -> type[BaseModel] | None:
         """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152).
 
@@ -551,6 +616,20 @@ class DAGFlowStep(FlowStep):
         capability_id: Weaver Stack capability identifier used when
             ``step_type == "capability"``.  Ignored (and should be ``None``)
             for ``step_type == "tool"``.
+        branches: Optional list of :class:`ConditionalEdge` outgoing
+            guards (issue #9).  When non-empty, this step is a *decision*
+            step: after it runs, the executor evaluates each branch's
+            predicate against the merged context and the first match
+            selects the active downstream path.  Non-selected immediate
+            dependents are skipped (their :class:`StepRecord` carries
+            ``skipped=True``), and the skip propagates to dependents whose
+            only inbound paths are themselves skipped.  When ``branches``
+            is empty (the default), the step is a regular DAG node and
+            every dependent runs.
+        default_next: Step id activated when none of :attr:`branches` match
+            (issue #9).  Treated as if it were a final-fallback
+            ``ConditionalEdge`` whose predicate is always true.  Ignored
+            when ``branches`` is empty.
 
     Example::
 
@@ -570,6 +649,8 @@ class DAGFlowStep(FlowStep):
     depends_on: list[str] = Field(default_factory=list)
     step_type: Literal["tool", "capability"] = "tool"
     capability_id: str | None = None
+    branches: list[ConditionalEdge] = Field(default_factory=list)
+    default_next: str | None = None
 
     @model_validator(mode="after")
     def _check_tool_has_no_capability_id(self) -> DAGFlowStep:
@@ -578,6 +659,19 @@ class DAGFlowStep(FlowStep):
             msg = (
                 f"Step '{self.step_id}' has step_type='tool' but capability_id="
                 f"'{self.capability_id}'. capability_id must be None for tool steps."
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_default_next_requires_branches(self) -> DAGFlowStep:
+        """``default_next`` is only meaningful alongside at least one branch."""
+        if self.default_next is not None and not self.branches:
+            msg = (
+                f"Step '{self.step_id}' sets default_next='{self.default_next}' "
+                f"but has no branches. default_next is the fallback when no "
+                f"branch matches and is ignored without branches; remove it "
+                f"or add the first branch."
             )
             raise ValueError(msg)
         return self
@@ -675,6 +769,24 @@ class DAGFlow(BaseModel):
         return resolved
 
     @property
+    def determinism_level(self) -> DeterminismLevel:
+        """Return the structural determinism level of this DAG flow (issue #8).
+
+        :class:`DAGFlow` instances downgrade to
+        :class:`DeterminismLevel.PARTIAL` whenever **any** step carries a
+        non-empty :attr:`DAGFlowStep.branches` list — branches make the
+        executed path data-dependent at runtime, even though the graph
+        itself is fixed.  A DAG with no branches is
+        :class:`DeterminismLevel.FULL`, and any flow that explicitly opts
+        out via ``deterministic=False`` is :class:`DeterminismLevel.NONE`.
+        """
+        if not self.deterministic:
+            return DeterminismLevel.NONE
+        if any(step.branches for step in self.steps):
+            return DeterminismLevel.PARTIAL
+        return DeterminismLevel.FULL
+
+    @property
     def context_schema(self) -> type[BaseModel] | None:
         """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152)."""
         if self.context_schema_ref is None:
@@ -765,6 +877,11 @@ def validate_dag_topology(flow: DAGFlow) -> None:
     1. No duplicate ``step_id`` values.
     2. Every ``depends_on`` entry refers to a ``step_id`` that exists.
     3. No cycles (via :class:`graphlib.TopologicalSorter`).
+    4. Every :class:`ConditionalEdge` target (and any ``default_next``) is a
+       direct dependent of the branching step — that is, the target lists
+       the branching step in its own ``depends_on``.  This keeps branch
+       routing local: a branch picks among the step's *immediate* successors
+       rather than jumping into an unrelated part of the graph.
 
     Args:
         flow: The :class:`DAGFlow` to validate.
@@ -772,7 +889,8 @@ def validate_dag_topology(flow: DAGFlow) -> None:
     Raises:
         DAGDefinitionError: On any topology violation with a structured
             ``reason`` attribute (``"duplicate_step_id"``,
-            ``"unknown_dependency"``, or ``"cycle"``).
+            ``"unknown_dependency"``, ``"cycle"``, or
+            ``"unknown_branch_target"``).
     """
     step_ids: set[str] = set()
     for step in flow.steps:
@@ -803,3 +921,33 @@ def validate_dag_topology(flow: DAGFlow) -> None:
             "cycle",
             f"Dependency cycle detected: {exc}.",
         ) from exc
+
+    # Branch validation (issue #9): every conditional edge target must be a
+    # direct dependent of the branching step.  This keeps routing local and
+    # makes "skipped" computation in the executor a one-hop decision.
+    dependents: dict[str, set[str]] = {sid: set() for sid in step_ids}
+    for step in flow.steps:
+        for dep in step.depends_on:
+            dependents[dep].add(step.step_id)
+
+    for step in flow.steps:
+        candidates: list[tuple[str, str]] = [
+            (edge.target_step_id, "branch target") for edge in step.branches
+        ]
+        if step.default_next is not None:
+            candidates.append((step.default_next, "default_next target"))
+        for target, label in candidates:
+            if target not in step_ids:
+                raise DAGDefinitionError(
+                    flow.name,
+                    "unknown_branch_target",
+                    f"Step '{step.step_id}' {label} '{target}' is not a declared step id.",
+                )
+            if target not in dependents[step.step_id]:
+                raise DAGDefinitionError(
+                    flow.name,
+                    "unknown_branch_target",
+                    f"Step '{step.step_id}' {label} '{target}' is not a "
+                    f"direct dependent (target must list '{step.step_id}' "
+                    f"in its depends_on).",
+                )
