@@ -19,6 +19,7 @@ from helpers import (
 )
 from pydantic import BaseModel
 
+from chainweaver.cache import InMemoryStepCache
 from chainweaver.exceptions import FlowSerializationError
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import (
@@ -568,3 +569,155 @@ class TestDAGStepOnErrorParity:
         record = result.execution_log[0]
         assert record.success is True
         assert record.outputs == {"value": 107}
+
+
+# ---------------------------------------------------------------------------
+# Step cache + output_contract interaction (regression guard for #181)
+#
+# Two steps that use the same tool with identical resolved inputs share a
+# cache entry keyed by ``(tool_name, schema_hash, input_value_hash)``.  If
+# the second step declares a stricter ``output_contract`` than the first,
+# the cache-hit path must re-validate the cached output against the new
+# contract — otherwise the contract-bearing step silently accepts whatever
+# was written by the contract-less step.
+# ---------------------------------------------------------------------------
+
+
+class TestStepCacheOutputContractValidation:
+    """``output_contract`` must be enforced on cache-hit, not just cache-miss."""
+
+    def test_cache_hit_with_stricter_output_contract_rejects(self, double_tool: Tool) -> None:
+        """Cached output that violates a later step's output_contract must fail."""
+        flow = Flow(
+            name="cache_contract_flow",
+            version="0.1.0",
+            description=(
+                "Two identical doubling steps; the second one carries a strict "
+                "output_contract that the cached output would violate."
+            ),
+            steps=[
+                # First step has no output_contract; it warms the cache with
+                # the tool's natural output shape (which uses ``value``).
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                # Second step shares the cache slot — same tool, same inputs —
+                # but declares an output_contract whose required key does NOT
+                # exist in the cached output, so validation must reject.
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_contract=FlowStep.contract_ref_from(_MismatchedOutput),
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry, step_cache=InMemoryStepCache())
+        ex.register_tool(double_tool)
+
+        result = ex.execute_flow("cache_contract_flow", {"number": 5})
+        assert result.success is False
+        # The second step's record must surface the contract failure on a
+        # cache hit (not on tool re-execution).
+        failing = result.execution_log[-1]
+        assert failing.success is False
+        assert failing.error_type == "SchemaValidationError"
+        assert "step_output_contract" in (failing.error_message or "")
+
+    def test_cache_hit_with_matching_output_contract_passes(self, double_tool: Tool) -> None:
+        """A cache hit whose payload satisfies the contract must succeed cached."""
+        flow = Flow(
+            name="cache_contract_pass",
+            version="0.1.0",
+            description="Cache write + cache hit, both honour an output_contract.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_contract=FlowStep.contract_ref_from(_StrictDoubleOutput),
+                ),
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_contract=FlowStep.contract_ref_from(_StrictDoubleOutput),
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry, step_cache=InMemoryStepCache())
+        ex.register_tool(double_tool)
+
+        result = ex.execute_flow("cache_contract_pass", {"number": 5})
+        assert result.success is True
+        assert len(result.execution_log) == 2
+        # The second invocation must have come from the cache.
+        assert result.execution_log[0].cached is False
+        assert result.execution_log[1].cached is True
+
+
+# ---------------------------------------------------------------------------
+# Step contracts vs on_error policy (regression guard for #181)
+#
+# ``on_error`` (``skip`` / ``fallback:<tool>``) covers tool-execution
+# failures.  Contract failures are wiring bugs, not transient errors, so
+# they must abort the step regardless of ``on_error``.  These tests pin
+# that semantics so future refactors don't accidentally relax it.
+# ---------------------------------------------------------------------------
+
+
+class TestContractsBypassOnErrorPolicy:
+    def test_input_contract_failure_ignores_on_error_skip(self, double_tool: Tool) -> None:
+        """``on_error="skip"`` must NOT skip an input_contract violation."""
+        flow = Flow(
+            name="contract_vs_skip",
+            version="0.1.0",
+            description="Step with on_error=skip and an input_contract mismatch.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    input_contract=FlowStep.contract_ref_from(_MismatchedInput),
+                    on_error="skip",
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+
+        result = ex.execute_flow("contract_vs_skip", {"number": 5})
+        assert result.success is False
+        record = result.execution_log[-1]
+        assert record.success is False
+        assert record.skipped is False
+        assert record.error_type == "SchemaValidationError"
+        assert "step_input_contract" in (record.error_message or "")
+
+    def test_output_contract_failure_ignores_on_error_skip(self, double_tool: Tool) -> None:
+        """``on_error="skip"`` must NOT skip an output_contract violation."""
+        flow = Flow(
+            name="output_contract_vs_skip",
+            version="0.1.0",
+            description="Step with on_error=skip and an output_contract mismatch.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_contract=FlowStep.contract_ref_from(_MismatchedOutput),
+                    on_error="skip",
+                ),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+
+        result = ex.execute_flow("output_contract_vs_skip", {"number": 5})
+        assert result.success is False
+        record = result.execution_log[-1]
+        assert record.success is False
+        assert record.skipped is False
+        assert record.error_type == "SchemaValidationError"
+        assert "step_output_contract" in (record.error_message or "")

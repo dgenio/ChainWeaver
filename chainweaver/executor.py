@@ -1933,6 +1933,37 @@ class FlowExecutor:
                 )
                 cached_output = self._step_cache.get(cache_key)
                 if cached_output is not None:
+                    # Apply step-level output contract on cache-hit too —
+                    # different steps may share a cache entry via the same
+                    # (tool_name, schema_hash, input_value_hash) but declare
+                    # different output_contract refs.  Without this check
+                    # the contract-bearing step silently accepts whatever
+                    # was cached by a contract-less step.
+                    if step.output_contract is not None:
+                        cached_contract_cls = step.resolved_output_contract
+                        assert cached_contract_cls is not None
+                        cached_contract_err = self._check_step_contract(
+                            step=step,
+                            step_index=step_index,
+                            payload=cached_output,
+                            contract=cached_contract_cls,
+                            context_label="step_output_contract",
+                        )
+                        if cached_contract_err is not None:
+                            log_step_error(
+                                _logger, step_index, step.tool_name, cached_contract_err
+                            )
+                            return _finish(
+                                _record(
+                                    inputs=inputs,
+                                    outputs=None,
+                                    error=cached_contract_err,
+                                    success=False,
+                                    skipped=False,
+                                    retry_errors=[],
+                                )
+                            )
+
                     log_step_end(
                         _logger,
                         step_index,

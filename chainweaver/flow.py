@@ -197,7 +197,10 @@ class FlowStep(BaseModel):
             behaviour for this step.
         on_error: How the executor reacts when all retry attempts are
             exhausted: ``"fail"`` (the default), ``"skip"``, or
-            ``"fallback:<tool_name>"``.
+            ``"fallback:<tool_name>"``.  Step-contract failures
+            (:attr:`input_contract` / :attr:`output_contract`) intentionally
+            bypass this policy and always abort the step — contract
+            mismatches are wiring bugs rather than transient errors.
         input_contract: Optional ``"module:qualname"`` reference to a
             :class:`~pydantic.BaseModel` subclass that the executor
             validates against the *resolved* step inputs **before** the
@@ -323,10 +326,13 @@ class Flow(BaseModel):
             a :class:`~pydantic.BaseModel` subclass describing the shape
             of the *accumulated execution context* (issue #152).  The
             executor validates the context against the resolved schema
-            at flow end.  The primary value of this field is static
-            typing — flow authors get mypy + IDE autocomplete + a single
-            source of truth for context keys; runtime validation at the
-            flow boundary is a secondary safety net.
+            at flow end, once every step has completed successfully
+            (skipped when an earlier step aborts the flow, since no
+            ``final_output`` is produced in that case).  The primary
+            value of this field is static typing — flow authors get
+            mypy + IDE autocomplete + a single source of truth for
+            context keys; runtime validation at the flow boundary is a
+            secondary safety net.
 
     Example::
 
@@ -605,7 +611,9 @@ class DAGFlow(BaseModel):
             via the :attr:`output_schema` property.
         context_schema_ref: Optional ``"module:qualname"`` ref to a
             :class:`~pydantic.BaseModel` subclass validated against the
-            accumulated context at flow end (issue #152).  Mirrors the
+            accumulated context at flow end, once every step has
+            completed successfully (issue #152; validation is skipped
+            when an earlier step aborts the flow).  Mirrors the
             :class:`Flow` field of the same name; see there for the
             DX motivation.
 
