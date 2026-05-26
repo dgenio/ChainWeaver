@@ -1,10 +1,19 @@
-"""Offline static analysis of tool combinations (issue #77).
+"""Offline static analysis for ChainWeaver flows (issues #77, #155).
 
-The :class:`ChainAnalyzer` discovers which :class:`~chainweaver.tools.Tool`
-objects can legitimately follow each other in a flow, purely by inspecting
-their Pydantic ``input_schema`` and ``output_schema``.  No tool is invoked
-and no LLM is consulted — this is the static "what *could* be compiled?"
-companion to the deterministic runtime side of ChainWeaver.
+This module hosts two complementary tools:
+
+* :class:`ChainAnalyzer` (issue #77) discovers which
+  :class:`~chainweaver.tools.Tool` objects can legitimately follow each
+  other in a flow, purely by inspecting their Pydantic ``input_schema``
+  and ``output_schema``.
+* :func:`suggest_optimizations` (issue #155) reads a :class:`Flow`
+  (optionally paired with recorded
+  :class:`~chainweaver.executor.ExecutionResult` traces) and emits
+  advisory :class:`Suggestion` objects with stable codes.
+
+Both are pure static passes — no tool is invoked and no LLM is
+consulted — the static "what *could* be compiled?" companion to the
+deterministic runtime side of ChainWeaver.
 
 The analyzer answers three questions:
 
@@ -40,11 +49,16 @@ Invariants
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from chainweaver.flow import Flow, FlowStep
 from chainweaver.tools import Tool
+
+if TYPE_CHECKING:
+    from chainweaver.executor import ExecutionResult
+    from chainweaver.flow import DAGFlow
 
 ToolChain = tuple[str, ...]
 """An ordered tuple of tool names representing a valid execution order."""
@@ -258,3 +272,282 @@ class ChainAnalyzer:
                 )
             )
         return flows
+
+
+# ---------------------------------------------------------------------------
+# suggest_optimizations (issue #155)
+# ---------------------------------------------------------------------------
+
+
+SUGGESTION_CODES = {
+    "CW001": "wasteful-passthrough",
+    "CW002": "parallelizable-pair",
+    "CW003": "dead-step",
+    "CW004": "cacheable-step",
+}
+"""Stable suggestion code → short slug, for filtering and grouping.
+
+The code itself is the contract: downstream CI consumers gate on the
+``code`` field of a :class:`Suggestion`, not on the slug or the
+human-readable message.
+"""
+
+
+class Suggestion(BaseModel):
+    """One advisory suggestion produced by :func:`suggest_optimizations`.
+
+    Attributes:
+        code: Stable suggestion code (e.g. ``"CW001"``).  See
+            :data:`SUGGESTION_CODES` for the registered set.
+        title: Short slug matching :data:`SUGGESTION_CODES[code]`.
+        step_index: Position of the offending step in the flow, or
+            ``None`` for flow-level suggestions.
+        tool_name: Name of the offending tool, or ``None`` for
+            flow-level suggestions.
+        message: Human-readable explanation.  Stable enough to be
+            grep'd by tooling but not stable enough to assert on
+            verbatim — code + title are the durable contract.
+    """
+
+    code: str
+    title: str
+    step_index: int | None = None
+    tool_name: str | None = None
+    message: str
+
+
+def _suggest_wasteful_passthroughs(flow: Flow) -> list[Suggestion]:
+    """CW001 — explicit input mapping recommended.
+
+    A step that uses ``input_mapping={}`` receives the entire
+    accumulated context.  When the tool's ``input_schema`` declares a
+    small subset of fields this works (Pydantic ignores extras) but
+    obscures the data flow.  We flag every step with an empty
+    ``input_mapping`` so the author can opt into explicit wiring for
+    readability — regardless of whether the tool declares input fields
+    (tool schemas are not available in this function).
+    """
+    out: list[Suggestion] = []
+    for idx, step in enumerate(flow.steps):
+        if step.input_mapping:
+            continue
+        out.append(
+            Suggestion(
+                code="CW001",
+                title=SUGGESTION_CODES["CW001"],
+                step_index=idx,
+                tool_name=step.tool_name,
+                message=(
+                    f"Step {idx} ('{step.tool_name}') uses an empty input_mapping. "
+                    "Consider an explicit mapping so the data flow is visible to readers."
+                ),
+            )
+        )
+    return out
+
+
+def _step_reads(step: FlowStep) -> set[str]:
+    """Return the set of context keys *step* reads (string values only).
+
+    Literal-constant mappings (non-string values) aren't context reads.
+    """
+    return {v for v in step.input_mapping.values() if isinstance(v, str)}
+
+
+def _suggest_parallelizable_pairs(
+    flow: Flow,
+    tools: dict[str, Tool] | None,
+) -> list[Suggestion]:
+    """CW002 — adjacent independent steps could run in a DAG level.
+
+    Two consecutive steps are flagged when step ``N+1``'s actual reads
+    don't overlap with step ``N``'s declared output fields: the data
+    dependency from N to N+1 is empty, so moving them into the same
+    DAG level is safe.
+
+    The consumer's actual reads are determined by its ``input_mapping``:
+    - Empty mapping (full-context passthrough): the step implicitly
+      reads all fields declared in its ``input_schema``.
+    - Non-empty mapping: only the string values in the mapping are
+      context reads.
+
+    Skipped when *tools* is ``None`` — without per-tool schemas there
+    is no reliable way to compute the actual data dependency.
+    """
+    if tools is None:
+        return []
+    out: list[Suggestion] = []
+    for idx in range(len(flow.steps) - 1):
+        a = flow.steps[idx]
+        b = flow.steps[idx + 1]
+        tool_a = tools.get(a.tool_name)
+        tool_b = tools.get(b.tool_name)
+        if tool_a is None or tool_b is None:
+            continue
+        a_outputs = set(tool_a.output_schema.model_fields)
+        # Determine what step b actually reads from context.
+        # Empty mapping = full-context passthrough → reads declared
+        # input_schema fields; non-empty → reads mapped sources.
+        b_reads = set(tool_b.input_schema.model_fields) if not b.input_mapping else _step_reads(b)
+        if not a_outputs or not b_reads:
+            continue
+        if a_outputs.isdisjoint(b_reads):
+            out.append(
+                Suggestion(
+                    code="CW002",
+                    title=SUGGESTION_CODES["CW002"],
+                    step_index=idx,
+                    tool_name=a.tool_name,
+                    message=(
+                        f"Steps {idx} ('{a.tool_name}') and {idx + 1} ('{b.tool_name}') "
+                        "have disjoint output/input fields; they're DAG-eligible "
+                        "(promote to DAGFlow for parallel execution)."
+                    ),
+                )
+            )
+    return out
+
+
+def _suggest_dead_steps(flow: Flow, tools: dict[str, Tool] | None) -> list[Suggestion]:
+    """CW003 — step output unread downstream.
+
+    Requires the per-tool schemas to compute output keys.  Skipped when
+    *tools* is ``None``.  The last step is exempt — its outputs land in
+    ``final_output`` rather than feeding another step.
+
+    For downstream steps with empty ``input_mapping`` (full-context
+    passthrough), we treat their declared ``input_schema`` fields as
+    implicit reads — since the executor passes the full context and
+    Pydantic validates against the schema.
+    """
+    if tools is None:
+        return []
+    out: list[Suggestion] = []
+    # Read sets per step (union across all downstream steps).
+    downstream_reads: list[set[str]] = []
+    accum: set[str] = set()
+    for idx in range(len(flow.steps) - 1, -1, -1):
+        step = flow.steps[idx]
+        downstream_reads.append(accum.copy())
+        if not step.input_mapping:
+            # Empty mapping = full-context passthrough; the step
+            # implicitly reads its declared input_schema fields.
+            tool = tools.get(step.tool_name)
+            if tool is not None:
+                accum |= set(tool.input_schema.model_fields)
+        else:
+            accum |= _step_reads(step)
+    downstream_reads.reverse()
+    for idx, step in enumerate(flow.steps[:-1]):
+        tool = tools.get(step.tool_name)
+        if tool is None:
+            continue
+        produced = set(tool.output_schema.model_fields)
+        if not produced:
+            continue
+        if produced.isdisjoint(downstream_reads[idx]):
+            out.append(
+                Suggestion(
+                    code="CW003",
+                    title=SUGGESTION_CODES["CW003"],
+                    step_index=idx,
+                    tool_name=step.tool_name,
+                    message=(
+                        f"Step {idx} ('{step.tool_name}') outputs "
+                        f"{sorted(produced)} but no downstream step reads them. "
+                        "Remove the step or wire it into a downstream input_mapping."
+                    ),
+                )
+            )
+    return out
+
+
+def _suggest_cacheable_steps(
+    flow: Flow,
+    traces: list[ExecutionResult],
+) -> list[Suggestion]:
+    """CW004 — step produced identical outputs across all observed traces.
+
+    Requires at least two traces.  For each step index that appears in
+    every trace, check whether the step's outputs are byte-identical
+    (after canonical JSON encoding) across all of them.  Identity is
+    strong evidence the step is a pure function of its inputs and a
+    cache candidate.
+    """
+    import json as _json
+
+    if len(traces) < 2:
+        return []
+    out: list[Suggestion] = []
+    step_count = len(flow.steps)
+    for idx in range(step_count):
+        signatures: set[str] = set()
+        complete = True
+        for trace in traces:
+            if idx >= len(trace.execution_log):
+                complete = False
+                break
+            record = trace.execution_log[idx]
+            if not record.success:
+                complete = False
+                break
+            signatures.add(
+                _json.dumps(record.outputs, sort_keys=True, separators=(",", ":"), default=str)
+            )
+        if not complete:
+            continue
+        if len(signatures) == 1:
+            tool_name = flow.steps[idx].tool_name
+            out.append(
+                Suggestion(
+                    code="CW004",
+                    title=SUGGESTION_CODES["CW004"],
+                    step_index=idx,
+                    tool_name=tool_name,
+                    message=(
+                        f"Step {idx} ('{tool_name}') returned identical output across all "
+                        f"{len(traces)} observed traces — candidate for caching."
+                    ),
+                )
+            )
+    return out
+
+
+def suggest_optimizations(
+    flow: Flow | DAGFlow,
+    *,
+    tools: Iterable[Tool] | None = None,
+    traces: list[ExecutionResult] | None = None,
+) -> list[Suggestion]:
+    """Return advisory :class:`Suggestion` objects for *flow*.
+
+    Args:
+        flow: The flow to analyze.  Currently linear :class:`Flow`
+            objects are supported; :class:`~chainweaver.flow.DAGFlow`
+            inputs return an empty list (no suggestions are emitted —
+            most families don't apply to topologically-ordered graphs).
+        tools: Optional iterable of :class:`Tool` objects keyed by name.
+            Required for CW002 (parallelizable-pair) and CW003
+            (dead-step) which need per-tool I/O schemas.
+        traces: Optional list of :class:`ExecutionResult` objects from
+            prior runs.  Required for CW004 (cacheable-step).
+
+    Returns:
+        A flat list of :class:`Suggestion` objects in family + index
+        order.  Empty when the flow looks clean (or when *flow* is a
+        DAGFlow).
+    """
+    from chainweaver.flow import DAGFlow as _DAGFlow
+
+    if isinstance(flow, _DAGFlow):
+        return []
+    tools_by_name: dict[str, Tool] | None = None
+    if tools is not None:
+        tools_by_name = {t.name: t for t in tools}
+    out: list[Suggestion] = []
+    out.extend(_suggest_wasteful_passthroughs(flow))
+    out.extend(_suggest_parallelizable_pairs(flow, tools_by_name))
+    out.extend(_suggest_dead_steps(flow, tools_by_name))
+    if traces:
+        out.extend(_suggest_cacheable_steps(flow, traces))
+    return out

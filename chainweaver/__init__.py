@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
-from chainweaver.analyzer import ChainAnalyzer, ToolChain
+from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
@@ -202,6 +202,7 @@ __all__ = [
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
@@ -225,6 +226,7 @@ __all__ = [
     "flow_to_yaml",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology",
 ]

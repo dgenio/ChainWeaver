@@ -60,6 +60,10 @@ class _DecoratedTool(Tool):
         input_schema: type[BaseModel],
         output_schema: type[BaseModel],
         fn: Callable[[Any], dict[str, Any]],
+        timeout_seconds: float | None = None,
+        max_output_size: int | None = None,
+        schema_version: str = "0.0.0",
+        cacheable: bool = True,
     ) -> None:
         super().__init__(
             name=name,
@@ -67,6 +71,10 @@ class _DecoratedTool(Tool):
             input_schema=input_schema,
             output_schema=output_schema,
             fn=fn,
+            timeout_seconds=timeout_seconds,
+            max_output_size=max_output_size,
+            schema_version=schema_version,
+            cacheable=cacheable,
         )
         self._original_fn = original_fn
 
@@ -81,6 +89,10 @@ def _build_tool(
     name: str | None,
     description: str | None,
     output_schema: type[BaseModel] | None,
+    timeout_seconds: float | None,
+    max_output_size: int | None,
+    schema_version: str,
+    cacheable: bool,
 ) -> _DecoratedTool:
     """Build a :class:`_DecoratedTool` from a type-annotated function."""
     tool_name = name if name is not None else fn.__name__
@@ -186,6 +198,10 @@ def _build_tool(
         input_schema=input_schema,
         output_schema=resolved_output_schema,
         fn=_adapter,
+        timeout_seconds=timeout_seconds,
+        max_output_size=max_output_size,
+        schema_version=schema_version,
+        cacheable=cacheable,
     )
 
 
@@ -199,6 +215,10 @@ def tool(
     name: str | None = ...,
     description: str | None = ...,
     output_schema: type[BaseModel] | None = ...,
+    timeout_seconds: float | None = ...,
+    max_output_size: int | None = ...,
+    schema_version: str = ...,
+    cacheable: bool = ...,
 ) -> Callable[[Callable[..., Any]], _DecoratedTool]: ...
 
 
@@ -208,6 +228,10 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     output_schema: type[BaseModel] | None = None,
+    timeout_seconds: float | None = None,
+    max_output_size: int | None = None,
+    schema_version: str = "0.0.0",
+    cacheable: bool = True,
 ) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]:
     """Create a :class:`~chainweaver.tools.Tool` from a type-annotated function.
 
@@ -231,6 +255,10 @@ def tool(
             # passed explicitly — no ``# type: ignore`` needed.
             return {"value": number * 3}
 
+        @tool(output_schema=ValueOutput, timeout_seconds=5.0)
+        def guarded_double(number: int) -> dict[str, int]:
+            return {"value": number * 2}
+
     Args:
         fn: The function to wrap (used when the decorator is applied without
             parentheses).
@@ -242,6 +270,10 @@ def tool(
             compatible with ``output_schema.model_validate``).  When unset,
             the decorator falls back to the function's return annotation,
             which must be a :class:`~pydantic.BaseModel` subclass.
+        timeout_seconds: Optional wall-clock cap passed through to ``Tool``.
+        max_output_size: Optional output-size cap passed through to ``Tool``.
+        schema_version: Schema version passed through to ``Tool``.
+        cacheable: Cache eligibility flag passed through to ``Tool``.
 
     Returns:
         A :class:`~chainweaver.tools.Tool` that is also directly callable with
@@ -253,9 +285,27 @@ def tool(
             not a :class:`~pydantic.BaseModel` subclass.
     """
     if fn is not None:
-        return _build_tool(fn, name=name, description=description, output_schema=output_schema)
+        return _build_tool(
+            fn,
+            name=name,
+            description=description,
+            output_schema=output_schema,
+            timeout_seconds=timeout_seconds,
+            max_output_size=max_output_size,
+            schema_version=schema_version,
+            cacheable=cacheable,
+        )
 
     def _decorator(fn: Callable[..., Any]) -> _DecoratedTool:
-        return _build_tool(fn, name=name, description=description, output_schema=output_schema)
+        return _build_tool(
+            fn,
+            name=name,
+            description=description,
+            output_schema=output_schema,
+            timeout_seconds=timeout_seconds,
+            max_output_size=max_output_size,
+            schema_version=schema_version,
+            cacheable=cacheable,
+        )
 
     return _decorator

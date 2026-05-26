@@ -300,13 +300,13 @@
           "type": "string"
         },
         "version": {
+          "default": "0.1.0",
           "title": "Version",
           "type": "string"
         }
       },
       "required": [
         "name",
-        "version",
         "description",
         "steps",
         "type"

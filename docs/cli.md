@@ -142,7 +142,7 @@ chainweaver run flows/etl.flow.yaml --tools my_package.tools --input input.json 
 
 ### `profile`
 
-Analyze one or more `ExecutionResult` JSON files. For a single file, surfaces per-step duration and bottlenecks. For multiple files, adds p50/p95/p99 statistics across runs.
+Analyze one or more `ExecutionResult` JSON files. For a single file, surfaces per-step duration and bottlenecks. For multiple files, adds p50/p95/p99 statistics across runs. Every output (single or multi) also carries per-step and per-tool **reliability aggregates** — retries, skips, fallbacks, failures, and cache hits — so you can see at a glance which step or tool is responsible for instability.
 
 ```
 chainweaver profile <traces...> [--top N] [--format table|json]
@@ -155,12 +155,118 @@ chainweaver profile <traces...> [--top N] [--format table|json]
 
 **Exit codes**: `0` = success, `1` = malformed trace input, `2` = file not found.
 
+**Reliability fields** (issue #176, stable JSON contract):
+
+Every entry in `steps[]` carries these in addition to `step_index`, `tool_name`, `duration_ms`, `success`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `retry_count` | int | Retries beyond the initial invocation. In multi-trace mode this is the **sum** across the N traces at the same step index. |
+| `skipped` | bool (single) / `skip_count` int (multi) | Step was `on_error="skip"`-ed. |
+| `fallback_used` | bool (single) / `fallback_count` int (multi) | Step's `on_error="fallback:<tool_name>"` policy invoked a fallback tool — set regardless of whether the fallback itself succeeded. |
+| `cached` | bool (single) / `cached_count` int (multi) | Outputs served from the executor's `step_cache`. |
+| `error_type` | str \| null (single only) | Exception class name when the step failed. |
+
+The top-level `aggregates` object rolls these up:
+
+```json
+{
+  "aggregates": {
+    "retry_count":    3,
+    "skip_count":     0,
+    "fallback_count": 1,
+    "failure_count":  0,
+    "cached_count":   0,
+    "by_tool": {
+      "fetch": {
+        "invocation_count": 2,
+        "retry_count": 3,
+        "skip_count": 0,
+        "fallback_count": 0,
+        "failure_count": 0,
+        "cached_count": 0
+      },
+      "store": { "...": "same shape" }
+    }
+  }
+}
+```
+
+The table view appends a `Reliability:` footer with the same data, plus a per-tool table sorted by failures → fallbacks → retries. The footer is suppressed for clean runs (every count zero) so happy-path output stays compact.
+
 **Example**:
 
 ```bash
 chainweaver profile trace.json
 chainweaver profile trace_a.json trace_b.json trace_c.json --top 10
 chainweaver profile trace.json --format json
+```
+
+---
+
+### `doctor`
+
+Diagnose ChainWeaver flows against the currently registered tools. With `--check-drift`, walks every flow file under *path* (single file or recursive directory), imports tools from the modules passed via `--tools`, and reports per-flow `missing_tool` / `schema_mismatch` issues.
+
+```
+chainweaver doctor <path> --check-drift [--tools MODULE...] [--format table|json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--check-drift` | — | Required. Currently the only `doctor` mode. |
+| `--tools` / `-t` | (empty) | Python module path that exposes `Tool` instances at top level. Repeatable. |
+| `--format` / `-f` | `table` | Output format: human-readable table or structured JSON. |
+
+**Exit codes**: `0` = no drift, `1` = drift detected or malformed flow file, `2` = path or `--tools` module missing.
+
+**JSON output shape** (when `--format json`):
+
+```json
+{
+  "path": "flows/",
+  "flow_count": 2,
+  "drift_count": 1,
+  "load_errors": [],
+  "results": [
+    {
+      "path": "flows/ok.flow.yaml",
+      "flow_name": "etl",
+      "flow_version": "0.1.0",
+      "fingerprints_present": true,
+      "ok": true,
+      "missing_count": 0,
+      "drift_count": 0,
+      "issues": []
+    },
+    {
+      "path": "flows/legacy.flow.yaml",
+      "flow_name": "legacy_etl",
+      "flow_version": "0.1.0",
+      "fingerprints_present": true,
+      "ok": false,
+      "missing_count": 0,
+      "drift_count": 1,
+      "issues": [
+        {
+          "step_index": 0,
+          "tool_name": "fetch",
+          "issue_type": "schema_mismatch",
+          "detail": "Tool 'fetch' schema hash changed: expected 'abc123…', got 'def456…'."
+        }
+      ]
+    }
+  ]
+}
+```
+
+`fingerprints_present: false` means the flow file was saved without a `tool_schema_hashes` snapshot — only `missing_tool` issues are detectable for those flows.
+
+**Example**:
+
+```bash
+chainweaver doctor flows/etl.flow.yaml --check-drift --tools my_pkg.tools
+chainweaver doctor flows/ --check-drift --tools my_pkg.tools --format json
 ```
 
 ---

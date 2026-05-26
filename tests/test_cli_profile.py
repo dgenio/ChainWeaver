@@ -23,6 +23,10 @@ def _make_step_record(
     tool_name: str,
     duration_ms: float,
     success: bool = True,
+    retry_count: int = 0,
+    skipped: bool = False,
+    fallback_used: bool = False,
+    cached: bool = False,
 ) -> StepRecord:
     """Minimal :class:`StepRecord` with the fields ``profile`` cares about."""
     now = datetime(2026, 5, 16, tzinfo=timezone.utc)
@@ -37,6 +41,10 @@ def _make_step_record(
         started_at=now,
         ended_at=now,
         duration_ms=duration_ms,
+        retry_count=retry_count,
+        skipped=skipped,
+        fallback_used=fallback_used,
+        cached=cached,
     )
 
 
@@ -277,6 +285,31 @@ class TestProfileMulti:
         assert exit_code == 1
         assert "different step counts" in captured.err
 
+    def test_mismatched_tool_at_step_returns_one(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Same step count, but trace B uses a different tool at index 1.
+        # Without the guard, aggregates would be silently mislabelled
+        # under whichever name the first trace happened to record.
+        path_a = tmp_path / "a.json"
+        path_b = tmp_path / "b.json"
+        _write_trace(
+            path_a,
+            _make_result(durations=[("fetch", 40.0), ("store", 20.0)]),
+        )
+        _write_trace(
+            path_b,
+            _make_result(durations=[("fetch", 40.0), ("archive", 20.0)]),
+        )
+        exit_code = cli.main(["profile", str(path_a), str(path_b)])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "disagree on tool at step 1" in captured.err
+        assert "archive" in captured.err
+        assert "store" in captured.err
+
     def test_consistency_warning_surfaces(
         self,
         tmp_path: Path,
@@ -300,3 +333,196 @@ class TestProfileMulti:
         assert exit_code == 0
         assert "inconsistent" in captured.out
         assert "wobble" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Reliability aggregates (issue #176)
+# ---------------------------------------------------------------------------
+
+
+class TestProfileReliabilitySingle:
+    """Per-step + per-tool aggregates surfaced in single-trace mode."""
+
+    def test_per_step_reliability_fields_in_json(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        log = [
+            _make_step_record(step_index=0, tool_name="fetch", duration_ms=10.0, retry_count=2),
+            _make_step_record(step_index=1, tool_name="transform", duration_ms=20.0, skipped=True),
+            _make_step_record(
+                step_index=2,
+                tool_name="store",
+                duration_ms=30.0,
+                fallback_used=True,
+                cached=False,
+            ),
+        ]
+        now = datetime(2026, 5, 16, tzinfo=timezone.utc)
+        result = ExecutionResult(
+            flow_name="etl",
+            success=True,
+            final_output={"ok": True},
+            execution_log=log,
+            trace_id="abc123",
+            started_at=now,
+            ended_at=now,
+            total_duration_ms=70.0,
+            initial_input={},
+        )
+        trace = tmp_path / "t.trace.json"
+        _write_trace(trace, result)
+        exit_code = cli.main(["profile", str(trace), "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        payload = json.loads(captured.out)
+        # Every step row now carries the reliability projection.
+        by_tool = {s["tool_name"]: s for s in payload["steps"]}
+        assert by_tool["fetch"]["retry_count"] == 2
+        assert by_tool["fetch"]["skipped"] is False
+        assert by_tool["fetch"]["fallback_used"] is False
+        assert by_tool["transform"]["skipped"] is True
+        assert by_tool["store"]["fallback_used"] is True
+        # Aggregates: totals + per-tool buckets.
+        agg = payload["aggregates"]
+        assert agg["retry_count"] == 2
+        assert agg["skip_count"] == 1
+        assert agg["fallback_count"] == 1
+        assert agg["failure_count"] == 0
+        assert agg["cached_count"] == 0
+        assert agg["by_tool"]["fetch"]["retry_count"] == 2
+        assert agg["by_tool"]["fetch"]["invocation_count"] == 1
+        assert agg["by_tool"]["transform"]["skip_count"] == 1
+        assert agg["by_tool"]["store"]["fallback_count"] == 1
+
+    def test_clean_run_has_zero_aggregates_and_no_reliability_footer(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        trace = tmp_path / "t.trace.json"
+        _write_trace(trace, _make_result())
+        exit_code = cli.main(["profile", str(trace), "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        payload = json.loads(captured.out)
+        agg = payload["aggregates"]
+        assert agg["retry_count"] == 0
+        assert agg["skip_count"] == 0
+        assert agg["fallback_count"] == 0
+        assert agg["failure_count"] == 0
+        # When nothing notable happened, the table view stays compact.
+        exit_code = cli.main(["profile", str(trace)])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "Reliability:" not in captured.out
+
+    def test_reliability_footer_surfaces_problem_tools(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        log = [
+            _make_step_record(
+                step_index=0,
+                tool_name="upload",
+                duration_ms=15.0,
+                success=False,
+            ),
+            _make_step_record(
+                step_index=1,
+                tool_name="enrich",
+                duration_ms=25.0,
+                retry_count=3,
+            ),
+        ]
+        now = datetime(2026, 5, 16, tzinfo=timezone.utc)
+        result = ExecutionResult(
+            flow_name="etl",
+            success=False,
+            final_output=None,
+            execution_log=log,
+            trace_id="abc123",
+            started_at=now,
+            ended_at=now,
+            total_duration_ms=50.0,
+            initial_input={},
+        )
+        trace = tmp_path / "t.trace.json"
+        _write_trace(trace, result)
+        exit_code = cli.main(["profile", str(trace)])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "Reliability:" in captured.out
+        assert "retries=3" in captured.out
+        assert "failures=1" in captured.out
+        # Per-tool table shows the offender first (failures sort to top).
+        assert "upload" in captured.out
+        assert "enrich" in captured.out
+
+
+class TestProfileReliabilityMulti:
+    """Cross-trace reliability aggregates in multi-trace mode."""
+
+    def test_aggregates_summed_across_traces(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Two traces of the same flow.  Trace A: fetch retries twice.
+        # Trace B: fetch retries once and store falls back.
+        now = datetime(2026, 5, 16, tzinfo=timezone.utc)
+
+        def _result(
+            *,
+            trace_id: str,
+            fetch_retries: int,
+            store_fallback: bool,
+        ) -> ExecutionResult:
+            log = [
+                _make_step_record(
+                    step_index=0,
+                    tool_name="fetch",
+                    duration_ms=10.0,
+                    retry_count=fetch_retries,
+                ),
+                _make_step_record(
+                    step_index=1,
+                    tool_name="store",
+                    duration_ms=20.0,
+                    fallback_used=store_fallback,
+                ),
+            ]
+            return ExecutionResult(
+                flow_name="etl",
+                success=True,
+                final_output={"ok": True},
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=now,
+                ended_at=now,
+                total_duration_ms=40.0,
+                initial_input={},
+            )
+
+        path_a = tmp_path / "a.json"
+        path_b = tmp_path / "b.json"
+        _write_trace(path_a, _result(trace_id="a", fetch_retries=2, store_fallback=False))
+        _write_trace(path_b, _result(trace_id="b", fetch_retries=1, store_fallback=True))
+        exit_code = cli.main(["profile", str(path_a), str(path_b), "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        payload = json.loads(captured.out)
+        # Per-step entries carry counts summed across traces at that index.
+        by_step = {s["tool_name"]: s for s in payload["steps"]}
+        assert by_step["fetch"]["retry_count"] == 3
+        assert by_step["store"]["fallback_count"] == 1
+        # Run-wide aggregates and by_tool entries roll up the same data.
+        agg = payload["aggregates"]
+        assert agg["retry_count"] == 3
+        assert agg["fallback_count"] == 1
+        assert agg["by_tool"]["fetch"]["retry_count"] == 3
+        assert agg["by_tool"]["fetch"]["invocation_count"] == 2
+        assert agg["by_tool"]["store"]["fallback_count"] == 1
+        assert agg["by_tool"]["store"]["invocation_count"] == 2

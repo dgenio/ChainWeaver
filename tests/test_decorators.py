@@ -73,6 +73,45 @@ class TestCustomName:
 
 
 # ---------------------------------------------------------------------------
+# Tool constructor kwargs
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorKwargs:
+    def test_explicit_output_schema_accepts_dict_return_annotation(self) -> None:
+        @tool(output_schema=ValueOutput, description="Doubles.")
+        def double(number: int) -> dict[str, int]:
+            return {"value": number * 2}
+
+        assert double.output_schema is ValueOutput
+        assert double.run({"number": 5}) == {"value": 10}
+
+    def test_guardrail_kwargs_pass_through(self) -> None:
+        @tool(
+            output_schema=ValueOutput,
+            description="Doubles.",
+            timeout_seconds=5.0,
+            max_output_size=1024,
+            schema_version="2.0.0",
+            cacheable=False,
+        )
+        def double(number: int) -> dict[str, int]:
+            return {"value": number * 2}
+
+        assert double.timeout_seconds == 5.0
+        assert double.max_output_size == 1024
+        assert double.schema_version == "2.0.0"
+        assert double.cacheable is False
+
+    def test_invalid_explicit_output_schema_raises(self) -> None:
+        with pytest.raises(ToolDefinitionError, match="output_schema"):
+
+            @tool(output_schema=dict)  # type: ignore[arg-type]
+            def bad(number: int) -> dict[str, int]:
+                return {"value": number}
+
+
+# ---------------------------------------------------------------------------
 # Description fallback
 # ---------------------------------------------------------------------------
 
