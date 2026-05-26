@@ -58,7 +58,8 @@ chainweaver/
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, doctor
+├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, doctor, dump-schema
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
@@ -143,6 +144,7 @@ For the full prohibited-actions list and anti-patterns, see
 | `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
 | `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
+| `context_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for the accumulated execution context (#152). Resolved lazily from `context_schema_ref`. Validated at flow end. |
 
 ### `FlowStep.input_mapping`
 

@@ -76,6 +76,7 @@
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
@@ -90,7 +91,7 @@
   ],
   "python_version": [
     3,
-    14
+    11
   ],
   "symbols": {
     "AttestationInputError": {
@@ -219,6 +220,7 @@
     "DAGFlow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
         "input_schema_ref": "str | NoneType",
@@ -238,8 +240,10 @@
       "model_fields": {
         "capability_id": "str | NoneType",
         "depends_on": "list[str]",
+        "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
+        "output_contract": "str | NoneType",
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
         "step_id": "str",
         "step_type": "Literal['tool', 'capability']",
@@ -321,6 +325,7 @@
     "Flow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
         "input_schema_ref": "str | NoneType",
@@ -445,8 +450,10 @@
     "FlowStep": {
       "kind": "pydantic-model",
       "model_fields": {
+        "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
+        "output_contract": "str | NoneType",
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
         "tool_name": "str"
       },
@@ -739,6 +746,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_from_yaml",
       "signature": "(data: str) -> AnyFlow"
+    },
+    "flow_schema_json": {
+      "kind": "function",
+      "module": "chainweaver.schemas",
+      "qualname": "flow_schema_json",
+      "signature": "() -> dict[str, Any]"
     },
     "flow_to_ascii": {
       "kind": "function",

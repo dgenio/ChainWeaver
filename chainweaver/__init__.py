@@ -110,6 +110,7 @@ from chainweaver.middleware import (
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
+from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
     flow_from_dict,
     flow_from_json,
@@ -216,6 +217,7 @@ __all__ = [
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
