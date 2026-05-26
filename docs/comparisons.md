@@ -1,152 +1,110 @@
-# How ChainWeaver compares to other orchestration libraries
+# vs LangChain / Prefect / Dagster / Temporal / LangGraph
 
-> **Last reviewed:** 2026-05-16 · **ChainWeaver version:** 0.4.0
->
-> This is a living document. Versions of the alternatives drift quickly;
-> the matrix below pins each comparison to a specific release and cites
-> the alternative's own docs. If you spot something stale, please open an
-> issue — accuracy beats convenience.
->
-> Tone goal: factual, not boastful. ChainWeaver makes a specific
-> tradeoff (smaller surface area, narrower scope) that is right for some
-> use cases and wrong for others. The sections below try to make the
-> tradeoffs clear so you can pick the tool that fits.
+ChainWeaver overlaps with several adjacent libraries. The honest comparison is that
+**no two of them solve the same problem**. This page lays out where they differ so you
+can pick the right tool — not just the one you've heard of.
 
----
+## Compact comparison
 
-## Matrix
-
-| Property | **ChainWeaver 0.4** | LangChain LCEL ([0.3.x](https://python.langchain.com/docs/concepts/lcel/)) | LangGraph ([0.6.x](https://langchain-ai.github.io/langgraph/)) | Prefect ([3.x](https://docs.prefect.io/)) | Dagster ([1.10.x](https://docs.dagster.io/)) | Temporal Python SDK ([1.x](https://docs.temporal.io/develop/python)) |
+| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
 |---|---|---|---|---|---|---|
-| **No LLM calls between steps**[¹](#footnotes) | ✅ Hard invariant | ⚠️ Possible, not enforced | ⚠️ Possible, not enforced | ✅ N/A (not LLM-aware) | ✅ N/A (not LLM-aware) | ✅ N/A (not LLM-aware) |
-| **Pydantic-validated tool I/O** | ✅ Required | ⚠️ Optional via `RunnableLambda` typing | ✅ Pydantic state schemas supported | ✅ Pydantic 2 native | ⚠️ Dagster `Config` (own type system, Pydantic-compatible) | ⚠️ Pydantic optional via `dataclass` / activity I/O |
-| **Runtime dependencies** | 4 (pydantic, tenacity, typer, packaging) | Heavy: `langchain-core` + langsmith + provider SDKs | Heavy: `langgraph` + `langchain-core` | Heavy: SQLAlchemy, anyio, httpx, prefect-client, … | Very heavy: graphql-core, alembic, pendulum, … | Heavy: gRPC, protobuf, Temporal server |
-| **File-serializable flows (YAML/JSON round-trip)** | ✅ `.flow.yaml` / `.flow.json` | ⚠️ Via LangChain Hub for some Runnables; not a first-class format | ❌ Code-defined graphs | ❌ Code-defined flows | ❌ Code-defined assets | ❌ Code-defined workflows |
-| **Standalone / no server required** | ✅ Pure in-process Python | ✅ In-process | ✅ In-process | ⚠️ Ephemeral mode in-process; production needs server | ⚠️ Requires Dagster daemon + webserver for production | ❌ Requires Temporal server |
-| **Built-in checkpoint / resume**[²](#footnotes) | 🚧 [#128](https://github.com/dgenio/ChainWeaver/issues/128) | ❌ | ✅ via `Checkpointer` | ✅ Task results, retries | ✅ Asset materializations | ✅ First-class (the whole point) |
-| **Distributed execution** | ❌ In-process only | ❌ | ⚠️ Via LangGraph Platform | ✅ Workers / agents | ✅ Run launchers | ✅ Built around it |
-| **Static schema-compatibility analysis** | 🚧 [#77](https://github.com/dgenio/ChainWeaver/issues/77) | ❌ | ❌ | ❌ | ⚠️ Asset graph validation | ❌ |
+| LLM-free between steps (by design) | **Yes (hard invariant)** | No | N/A | N/A | N/A | No |
+| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
+| Small runtime dependency set | **Yes (5 packages)** | No | No | No | No | No |
+| File-serializable flow definitions | **Yes (JSON / YAML)** | No | Python | Python | Python | No |
+| Standalone (no scheduler / server) | **Yes** | Yes | No (server) | No (daemon) | No (server) | Yes |
+| Built for MCP tool composition | Planned (#150) | No | No | No | No | No |
+| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
+| Graph branching on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
+| Durable retries / scheduling | No | No | Yes | Yes | Yes | No |
 
-Legend: ✅ supported · ⚠️ partial / configurable · ❌ not supported · 🚧 in development.
+> Versions evaluated: LangChain 0.3, LangGraph 0.3, Prefect 3, Dagster 1.9, Temporal 1.24
+> (Python SDK), ChainWeaver 0.8. Re-evaluate on each minor release of any of these.
 
-[¹]: "No LLM calls between steps" means the orchestrator itself does not invoke an LLM between user-defined steps. Several frameworks support LLM-free graphs but don't enforce the property at the framework level.
+## One paragraph each
 
-[²]: ChainWeaver's `Checkpointer` is being delivered in [PR #136](https://github.com/dgenio/ChainWeaver/pull/136); once merged the column flips to ✅.
+### LangChain LCEL
 
----
-
-## Notes per alternative
-
-### LangChain (LCEL — LangChain Expression Language)
-
-LangChain is the dominant LLM orchestration library; LCEL is its
-declarative composition layer where Runnables are piped together. LCEL
-graphs can run without LLM calls between steps if every step is a pure
-function — but the framework is built around LLM integration and
-doesn't enforce LLM-freedom.
-
-**Pick LangChain when:** your flow's primary purpose is to sequence LLM
-calls, you want the broad provider/tool integration surface, and you
-accept the dependency footprint.
-
-**Pick ChainWeaver when:** the *value* of compilation is removing
-LLM calls between tool steps — and you want that guaranteed at the
-framework level, not as a convention.
-
-Docs: <https://python.langchain.com/docs/concepts/lcel/>
-
-### LangGraph
-
-LangGraph is LangChain's graph-execution layer with state, branching,
-and checkpointing. It supports Pydantic state schemas and conditional
-edges, and the LangGraph Platform offers managed durable execution.
-
-**Pick LangGraph when:** you need agentic graphs with stateful
-branching, LLM-aware checkpointers, and the broader LangChain
-ecosystem.
-
-**Pick ChainWeaver when:** you want the *opposite* — a strictly
-deterministic, LLM-free graph runner with file-serializable definitions
-and a small dependency footprint.
-
-Docs: <https://langchain-ai.github.io/langgraph/>
+LangChain Expression Language is the closest neighbour. Both LCEL and ChainWeaver
+express "run tool A, then B, then C". LCEL is more flexible (anything that satisfies
+`Runnable` composes), more opinionated about LLM-centric primitives (prompts, retrievers,
+output parsers), and does not promise zero LLM calls between steps — `RunnableLambda |
+RunnableLambda` runs synchronously without a model, but the broader ecosystem assumes
+models are in the loop. ChainWeaver picks "deterministic-by-construction" as a hard
+invariant and trades flexibility for that guarantee. **Pick LangChain LCEL when** your
+flow mixes LLM and non-LLM steps and you want one DSL covering both.
+**Pick ChainWeaver when** the flow is fully deterministic and you want a runner that
+can prove it.
 
 ### Prefect 3
 
-Prefect is a general-purpose workflow orchestrator. Flows and tasks
-are Python functions with `@flow` / `@task` decorators. Prefect 3
-natively supports Pydantic 2 inputs and can run "ephemeral" without a
-server, but production deployments expect a Prefect server (self-hosted
-or Prefect Cloud).
-
-**Pick Prefect when:** you need a mature workflow scheduler with retries,
-caching, distributed workers, and observability — and you accept the
-operational footprint of running a server.
-
-**Pick ChainWeaver when:** you specifically want LLM-tool flow
-orchestration without a separate orchestration runtime — flows are
-in-process Python data structures, no server, no scheduler.
-
-Docs: <https://docs.prefect.io/>
+Prefect is a general-purpose workflow engine: durable execution, scheduling, retries,
+fan-out across workers, observability dashboards. It runs Python functions decorated
+with `@flow` and `@task` against a Prefect server (cloud or self-hosted). The mission
+shape is "data jobs that have to run on a schedule across time". ChainWeaver, by
+contrast, runs **inside a single agent turn**: no scheduler, no server, no calendar.
+**Pick Prefect when** your work shape is recurring data jobs.
+**Pick ChainWeaver when** your work shape is "agent decides → run this deterministic
+flow → return result".
 
 ### Dagster
 
-Dagster is an asset-oriented orchestrator. The unit of composition is an
-"asset" with explicit dependencies; the framework tracks materializations
-and lineage. Dagster has its own config system (Pydantic-compatible) and
-expects a daemon + webserver for production.
+Dagster is also a workflow engine, with a stronger emphasis on data-asset modelling:
+software-defined assets, lineage, materialisations, partitioned schedules. It's the
+"build a warehouse of curated datasets" tool. ChainWeaver doesn't model assets, doesn't
+track lineage across runs, and doesn't carry state between calls — it's stateless,
+ephemeral, embedded.
+**Pick Dagster when** you need asset lineage and partitioned data jobs.
+**Pick ChainWeaver when** you need a single agent turn to dispatch a known flow.
 
-**Pick Dagster when:** your work is data-asset-shaped (tables, files,
-ML artifacts) and you want lineage + scheduling + a UI.
+### Temporal
 
-**Pick ChainWeaver when:** your work is tool-call-shaped (function I/O
-sequences, not asset materializations) and you don't want a separate
-orchestration runtime.
+Temporal is a durable execution engine: workflows survive worker crashes, sleep for days
+without holding RAM, and resume from any point. The cost is operational complexity
+(Temporal cluster, worker processes, SDK constraints on which Python you can use inside
+activities). ChainWeaver has no durability layer — a process restart kills an
+in-flight flow — but offers checkpoint-based crash resume via `Checkpointer` for the
+common case of "I want to retry from the last successful step".
+**Pick Temporal when** you need true durable execution across hours / days / crashes.
+**Pick ChainWeaver when** the flow finishes inside a single process and you only need
+crash resume across operator-driven retries.
 
-Docs: <https://docs.dagster.io/>
+### LangGraph
 
-### Temporal (Python SDK)
+LangGraph builds a graph where **nodes can decide which edge to follow next, based on
+LLM output**. That's the polar opposite of ChainWeaver's design: ChainWeaver flows are
+compiled with the graph fixed at definition time. LangGraph is the right tool when you
+genuinely don't know the next node until a model has spoken; ChainWeaver is the right
+tool when you do know.
+**Pick LangGraph when** the next step depends on an LLM's decision.
+**Pick ChainWeaver when** the flow is fixed and you want the cheapest, most repeatable
+way to run it.
 
-Temporal is a distributed, durable execution platform — workflows can
-run for days or years across process restarts, with strong guarantees
-around exactly-once activity execution. It requires a Temporal server
-(self-hosted, Temporal Cloud, or local dev server) and a worker process
-per activity queue.
+## Combining them
 
-**Pick Temporal when:** workflows are long-running, distributed, or
-need cross-service durability guarantees that survive process death.
+These libraries are not mutually exclusive. The realistic deployment uses several:
 
-**Pick ChainWeaver when:** flows are short, in-process, deterministic
-compositions — and the framework overhead of running a server isn't
-justified by the workload.
+- An **agent framework** (LangGraph, Anthropic SDK tool-use, OpenAI Assistants, …) owns
+  the conversation and decides "what to do next".
+- ChainWeaver gets called **from inside** that agent's tool-call loop whenever the
+  next few tool calls are deterministic.
+- A **workflow engine** (Prefect, Dagster, Temporal) orchestrates the *outer* job —
+  scheduling, recurring runs, durability — and treats the agent as one step in a larger
+  workflow.
 
-Docs: <https://docs.temporal.io/develop/python>
+The result: the LLM thinks once, ChainWeaver dispatches deterministically, and the
+workflow engine handles retries and scheduling. Each layer does what it's best at.
 
----
+## Updating this page
 
-## Why "compiled, not interpreted"?
+This document is a **living comparison**. We re-evaluate on each minor release of any of
+the projects listed above. If you spot a comparison that's gone stale, open an issue —
+this page is a maintained dependency, not a marketing artefact.
 
-The phrase ChainWeaver uses for itself — "compiled, not interpreted" —
-is meant to signal one specific design choice: the path through a flow
-is fixed at definition time, not chosen at runtime by a language model.
-The five alternatives above each make a different design choice that's
-right for their own audience:
+References:
 
-- LangChain / LangGraph treat LLM intermediation as a feature.
-- Prefect / Dagster treat orchestration as infrastructure (workers,
-  schedulers, UIs).
-- Temporal treats durability as the primary contract.
-
-ChainWeaver treats "no LLM call between steps" as a hard invariant in
-`executor.py` and aligns the rest of the design around it
-(schema-validated I/O, file-serializable flows, no server). If that
-trade-off matches your workload, ChainWeaver fits. If not, one of the
-alternatives above probably fits better.
-
----
-
-## Refresh schedule
-
-This document is reviewed on each ChainWeaver minor release. If any
-alternative ships a major change that invalidates a row in the matrix,
-open an issue tagged `type:docs` and reference this file.
+- [LangChain Expression Language docs](https://python.langchain.com/docs/concepts/lcel/)
+- [Prefect 3 documentation](https://docs.prefect.io/v3/)
+- [Dagster documentation](https://docs.dagster.io/)
+- [Temporal Python SDK](https://docs.temporal.io/develop/python)
+- [LangGraph documentation](https://langchain-ai.github.io/langgraph/)

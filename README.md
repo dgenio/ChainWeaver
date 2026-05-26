@@ -1,6 +1,6 @@
 # ChainWeaver
 
-**Compile deterministic MCP tool chains into LLM-free executable flows.**
+**Compile deterministic tool flows into LLM-free executable runs.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
 [![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph before ["❌ Naive Agent Chaining · N LLM calls"]
+    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
         R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
     end
     subgraph after ["✅ ChainWeaver · 0 LLM calls"]
@@ -38,13 +38,13 @@ result = executor.execute_flow("calc", {"number": 5})
 
 > See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
 
-**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Roadmap](#roadmap)**
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
 
 ---
 
 ## Why ChainWeaver?
 
-When an LLM-powered agent chains tools together — `fetch_data → transform → store` — a
+When an LLM-powered agent routes tools together — `fetch_data → transform → store` — a
 common pattern is to insert an LLM call between *every* step so the model can "decide"
 what to do next.
 
@@ -64,14 +64,14 @@ LLM call ──► Tool C
 Response
 ```
 
-For chains that are **fully deterministic** (the next step is always the same given the
+For flows that are **fully deterministic** (the next step is always the same given the
 previous output) these intermediate LLM calls add:
 
 - **Latency** — each round-trip costs hundreds of milliseconds.
 - **Cost** — every call consumes tokens and credits.
 - **Unpredictability** — a language model might route differently on each invocation.
 
-ChainWeaver compiles deterministic multi-tool chains into **executable flows** that run
+ChainWeaver compiles deterministic multi-tool flows into **executable flows** that run
 without any LLM involvement between steps:
 
 ```
@@ -86,7 +86,7 @@ Response
 
 Think of it as the difference between an **interpreter** and a **compiler**:
 
-| Criterion | Naive LLM chaining | ChainWeaver |
+| Criterion | Naive LLM loop | ChainWeaver |
 |---|---|---|
 | LLM calls per step | 1 per step | 0 |
 | Latency | O(n × LLM RTT) | O(n × tool RTT) |
@@ -108,13 +108,58 @@ flows, no server) around it.
 |---|---|---|---|---|---|---|
 | LLM-free between steps | ✅ hard invariant | ⚠️ possible, not enforced | ⚠️ possible, not enforced | ✅ N/A | ✅ N/A | ✅ N/A |
 | Pydantic-validated I/O | ✅ required | ⚠️ optional | ✅ | ✅ Pydantic 2 native | ⚠️ Dagster `Config` | ⚠️ optional |
-| Lean dep set | ✅ 4 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
+| Lean dep set | ✅ 5 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
 | File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
 
 See [docs/comparisons.md](docs/comparisons.md) for the full matrix —
 including version pins, citations to each alternative's own docs, and a
 "when to pick which" guide.
+
+---
+
+## Is this for me?
+
+ChainWeaver is built for one specific shape of problem. The
+[full fit/non-fit page](https://chainweaver.readthedocs.io/en/latest/boundaries/) covers
+the nuances; the short version:
+
+**Use ChainWeaver when**
+
+- The flow is predictable — you can name the next tool from the previous output
+  without asking a model to decide.
+- Determinism matters — same input must produce the same output, same execution path,
+  same trace.
+- You want strict schemas, audit-grade traces, and zero LLM calls between deterministic
+  steps.
+
+**Don't use ChainWeaver when**
+
+- Every step requires open-ended reasoning to pick the next one (use an agent
+  framework: LangGraph, the OpenAI / Anthropic SDK tool-use loops).
+- You need a general workflow engine for scheduled / durable jobs across time
+  (use Prefect, Dagster, or Temporal).
+- You expect the executor to call an LLM. It deliberately doesn't.
+
+### How ChainWeaver relates to neighbours
+
+| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
+|---|---|---|---|---|---|---|
+| LLM-free between steps (by design) | **Yes** | No | N/A | N/A | N/A | No |
+| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
+| Small runtime dependency set | **Yes** (5 packages) | No | No | No | No | No |
+| File-serializable flow definitions | **Yes** (JSON / YAML) | No | Python | Python | Python | No |
+| Standalone (no server / scheduler) | **Yes** | Yes | No | No | No | Yes |
+| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
+| Graph branches on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
+
+The full one-paragraph-per-tool comparison lives at
+[docs/comparisons.md](docs/comparisons.md) and on the
+[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/). Re-evaluated
+on each minor release of any of the projects above.
+
+For the correctness argument behind the design, see
+[docs/data-integrity.md](docs/data-integrity.md).
 
 ---
 
@@ -226,7 +271,13 @@ python examples/simple_linear_flow.py   # simple arithmetic flow
 python examples/etl_flow.py             # ETL flow: fetch → validate → normalize → enrich → store
 python examples/mcp_search_flow.py      # MCP-style search → extract → format flow
 python examples/naive_vs_compiled.py    # timing comparison: naive LLM calls vs ChainWeaver flow
+python examples/coding_agent_pr_review.py    # deterministic PR-review checklist
+python examples/coding_agent_changelog.py    # changelog generation workflow template
+python examples/coding_agent_debug_log.py    # debug-log triage workflow template
 ```
+
+The hosted docs also include a [cookbook](docs/cookbook/index.md) with six paired
+scripts under `examples/cookbook/`.
 
 ### With the `@tool` decorator
 
@@ -467,7 +518,7 @@ In practice:
 1. An agent calls `tool_a`, then `tool_b`, then `tool_c` several times with
    the same routing logic.
 2. A higher-level observer detects the pattern and registers a named `Flow`.
-3. On subsequent invocations the executor runs the entire chain in a single
+3. On subsequent invocations the executor runs the entire flow in a single
    call — no intermediate LLM calls required.
 
 ---
@@ -507,7 +558,7 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 |-----------|-------|--------|
 | **v0.1.0** — Harden Foundation & Streamline DX | Infra, docs, DX APIs, CI | shipped |
 | **v0.2.0** — Build Core Execution & MCP Bridge | DAG execution, MCP adapter/server, guardrails | shipped |
-| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance pipeline | shipped |
+| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance workflow | shipped |
 | **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | **shipped (current)** |
 | **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | planned |
 | **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | planned |
@@ -580,6 +631,9 @@ python examples/simple_linear_flow.py   # simple arithmetic flow
 python examples/etl_flow.py             # ETL flow
 python examples/mcp_search_flow.py      # MCP-style search & summarize flow
 python examples/naive_vs_compiled.py    # naive vs compiled timing comparison
+python examples/coding_agent_pr_review.py
+python examples/coding_agent_changelog.py
+python examples/coding_agent_debug_log.py
 ```
 
 ---

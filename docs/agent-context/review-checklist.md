@@ -46,7 +46,7 @@
       changed, Pydantic fields added), the snapshot fixture is regenerated:
       `python tests/scripts/regen_public_api.py` — and the resulting
       `tests/fixtures/public_api.json` is committed in the same PR.
-      See [`tests/test_public_api_snapshot.py`](../../tests/test_public_api_snapshot.py).
+      See [`tests/test_public_api_snapshot.py`](https://github.com/dgenio/ChainWeaver/blob/main/tests/test_public_api_snapshot.py).
 
 ---
 

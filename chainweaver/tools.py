@@ -138,8 +138,11 @@ class Tool:
 
     @cached_property
     def schema_hash(self) -> str:
-        """Combined hash of input + output schemas (cached per instance)."""
-        combined = self.input_schema_hash + self.output_schema_hash
+        """Combined hash of input + output schemas + schema version (cached per instance)."""
+        combined = json.dumps(
+            [self.input_schema_hash, self.output_schema_hash, self.schema_version],
+            separators=(",", ":"),
+        )
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def run(self, raw_inputs: dict[str, Any]) -> dict[str, Any]:

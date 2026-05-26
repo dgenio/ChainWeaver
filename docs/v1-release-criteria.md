@@ -108,7 +108,7 @@ guarantees apply in full.
   copilot/claude instruction projections stay consistent with each
   other (governance enforced per
   [workflows.md](agent-context/workflows.md#documentation-governance-triggers)).
-- [ ] [CHANGELOG.md](../CHANGELOG.md) exists and tracks every release
+- [ ] [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md) exists and tracks every release
   back to 0.4.0 (issue #35 ✅).
 - [ ] [docs/versioning-policy.md](versioning-policy.md) defines the
   SemVer policy, public API surface, and deprecation process

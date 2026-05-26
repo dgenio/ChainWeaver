@@ -274,7 +274,7 @@ class Flow(BaseModel):
     """
 
     name: str
-    version: str
+    version: str = "0.1.0"
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
