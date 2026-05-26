@@ -7,7 +7,7 @@ example) executes the recipe end-to-end and asserts its own output.
 
 | # | Recipe | What you'll build |
 |---|---|---|
-| 1 | [Naive LLM chain → compiled flow](01-naive-to-compiled.md) | Convert a prompt-chained agent loop into a deterministic compiled flow. |
+| 1 | [Naive LLM loop → compiled flow](01-naive-to-compiled.md) | Convert a prompt-routed agent loop into a deterministic compiled flow. |
 | 2 | [MCP-style search and summarize](02-mcp-style-flow.md) | Wire two MCP-shaped tools (search and summarise) into one flow. |
 | 3 | [OpenTelemetry tracing](03-otel-tracing.md) | Emit one parent flow span plus one child span per step using `chainweaver[otel]`. |
 | 4 | [Testing flows](04-testing-flows.md) | Use vanilla pytest fixtures to test flow construction and execution. |

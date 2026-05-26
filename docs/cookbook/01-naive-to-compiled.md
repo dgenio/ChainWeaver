@@ -1,4 +1,4 @@
-# Recipe 1 — Naive LLM chain to compiled flow
+# Recipe 1 — Naive LLM loop to compiled flow
 
 **You have:** an agent loop that calls an LLM between every tool step.
 **You want:** the same three tool calls, with zero LLM calls between them.
@@ -9,7 +9,7 @@ two ways. Paired script: `examples/cookbook/recipe_01_naive_to_compiled.py`.
 ## The before
 
 ```python
-def naive_chain(url: str) -> dict:
+def naive_loop(url: str) -> dict:
     plan = llm("What is the first step for URL?")
     payload = call_tool(plan, {"url": url})       # "fetch"
 
@@ -72,7 +72,7 @@ flowchart LR
 - You can describe the next tool from the previous output **without** needing the LLM to
   decide.
 
-If any of those don't hold, the chain isn't ready to compile — go look at
+If any of those don't hold, the flow isn't ready to compile — go look at
 [When ChainWeaver fits](../boundaries.md).
 
 ## What next

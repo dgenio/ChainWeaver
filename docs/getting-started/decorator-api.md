@@ -5,10 +5,15 @@ input schema. It's the lowest-boilerplate path to a `Tool`.
 
 ```python
 from chainweaver import tool
+from pydantic import BaseModel
+
+
+class ValueOutput(BaseModel):
+    value: int
 
 
 @tool
-def double(number: int) -> dict:
+def double(number: int) -> ValueOutput:
     """Doubles a number."""
     return {"value": number * 2}
 ```
@@ -21,12 +26,13 @@ returned `Tool` is callable just like one constructed manually:
 double.name           # "double"
 double.description    # "Doubles a number."
 double.input_schema   # auto-generated BaseModel with one int field
+double.output_schema  # ValueOutput
 ```
 
 ## Explicit output schemas
 
-`@tool` does not infer output schemas — the return type annotation `-> dict` is a sentinel.
-Provide an explicit `output_schema=` kwarg when you need output validation:
+By default, `@tool` infers the output schema from a `BaseModel` return annotation. If
+you prefer a `-> dict` return annotation, provide `output_schema=` explicitly:
 
 ```python
 from pydantic import BaseModel
@@ -38,7 +44,7 @@ class ValueOutput(BaseModel):
 
 
 @tool(output_schema=ValueOutput)
-def double(number: int) -> dict:
+def double(number: int) -> dict[str, int]:
     """Doubles a number."""
     return {"value": number * 2}
 ```
@@ -53,15 +59,16 @@ def double(number: int) -> dict:
     timeout_seconds=5.0,
     max_output_size=1024,
 )
-def double(number: int) -> dict:
+def double(number: int) -> dict[str, int]:
     return {"value": number * 2}
 ```
 
-All `Tool` constructor kwargs flow through (`timeout_seconds`, `max_output_size`,
-`schema_version`, `cacheable`).
+The decorator supports the common `Tool` constructor kwargs: `name`, `description`,
+`output_schema`, `timeout_seconds`, `max_output_size`, `schema_version`, and `cacheable`.
 
 ## Limits
 
-`@tool` cannot infer schemas for parameters with complex types (e.g., nested Pydantic
-models, generics). For those, drop down to the explicit `Tool(...)` constructor — see
-[Your first flow](first-flow.md).
+`@tool` rejects positional-only parameters, `*args`, `**kwargs`, and missing parameter
+annotations because those cannot be converted into a reliable Pydantic input schema.
+For hand-shaped schemas or unusual call signatures, use the explicit `Tool(...)`
+constructor — see [Your first flow](first-flow.md).

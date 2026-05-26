@@ -8,10 +8,10 @@ Paired script: `examples/cookbook/recipe_05_schema_drift.py`.
 
 ## The mechanism
 
-Every `Tool` carries a `schema_hash` derived from its input + output schemas. Every
-registered flow records the hashes its tools had **at registration time**. When the
-runtime hashes diverge from the registered hashes, the executor surfaces a `DriftInfo`
-entry.
+Every `Tool` carries a `schema_hash` derived from its input schema, output schema, and
+`schema_version`. A flow records expected tool hashes only after
+`executor.accept_drift(flow_name)` snapshots the current registry. When runtime hashes
+diverge from that accepted baseline, the executor surfaces a `DriftInfo` entry.
 
 Two complementary surfaces cover the case:
 

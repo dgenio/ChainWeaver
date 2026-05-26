@@ -60,7 +60,7 @@ covers every realistic case.
 ## What about replay?
 
 For end-to-end regression tests, persist a representative `ExecutionResult` once, then
-re-run it via `executor.replay_flow(trace, mode=ReplayMode.STRICT)` in CI. If outputs
+re-run it via `executor.replay_flow(trace, mode=ReplayMode.VERIFY)` in CI. If outputs
 diverge, the recorded trace is the cleanest possible failure message: it tells you both
 *which step* changed and *what the old value was*.
 

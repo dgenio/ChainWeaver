@@ -56,14 +56,15 @@ from chainweaver import ReplayMode
 
 replay = executor.replay_flow(
     trace=result,
-    mode=ReplayMode.STRICT,  # or VERIFY, SKIP_VALIDATION
+    mode=ReplayMode.VERIFY,
 )
-assert replay.matches  # outputs identical to recorded trace
+assert replay.all_steps_match  # outputs identical to recorded trace
 ```
 
-`ReplayMode.STRICT` requires byte-identical step outputs. `VERIFY` only checks structural
-shape. `SKIP_VALIDATION` runs the trace without comparison (useful for re-running on a
-new tool implementation).
+`ReplayMode.VERIFY` re-runs the flow and records `StepDiff` entries for changed output
+fields. `ReplayMode.EXECUTE` re-runs the trace without comparison (useful for checking
+whether the current tools still complete). `STRICT` and `SKIP_VALIDATION` remain
+compatibility aliases for `VERIFY` and `EXECUTE`.
 
 ## Out-of-band capture
 

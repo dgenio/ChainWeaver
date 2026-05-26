@@ -15,6 +15,19 @@ class TestBasicBuild:
         flow = FlowBuilder("my_flow", "Does something.").step("tool_a").build()
         assert isinstance(flow, Flow)
 
+    def test_legacy_no_arg_fluent_metadata(self) -> None:
+        flow = (
+            FlowBuilder()
+            .name("my_flow")
+            .description("Does something.")
+            .version("2.0.0")
+            .step("tool_a")
+            .build()
+        )
+        assert flow.name == "my_flow"
+        assert flow.description == "Does something."
+        assert flow.version == "2.0.0"
+
     def test_name_and_description_preserved(self) -> None:
         flow = FlowBuilder("my_flow", "My description.").step("tool_a").build()
         assert flow.name == "my_flow"

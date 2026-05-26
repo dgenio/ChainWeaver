@@ -340,7 +340,7 @@
       },
       "module": "chainweaver.flow",
       "qualname": "Flow",
-      "signature": "(*, name: str, version: str, description: str, steps: list[chainweaver.flow.FlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
+      "signature": "(*, name: str, version: str = '0.1.0', description: str, steps: list[chainweaver.flow.FlowStep], deterministic: bool = True, status: chainweaver.flow.FlowStatus = chainweaver.flow.FlowStatus.ACTIVE, trigger_conditions: dict[str, Any] | NoneType = None, input_schema_ref: str | NoneType = None, output_schema_ref: str | NoneType = None, tool_schema_hashes: dict[str, str] | NoneType = None) -> None"
     },
     "FlowAlreadyExistsError": {
       "kind": "class",
@@ -352,7 +352,7 @@
       "kind": "class",
       "module": "chainweaver.builder",
       "qualname": "FlowBuilder",
-      "signature": "(name: str, description: str) -> None"
+      "signature": "(name: str | None = None, description: str | None = None) -> None"
     },
     "FlowBuilderError": {
       "kind": "class",
@@ -801,7 +801,7 @@
       "kind": "function",
       "module": "chainweaver.decorators",
       "qualname": "tool",
-      "signature": "(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
+      "signature": "(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None, output_schema: type[BaseModel] | None = None, timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
     },
     "validate_dag_topology": {
       "kind": "function",

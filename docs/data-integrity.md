@@ -136,13 +136,13 @@ ChainWeaver guarantees the **envelope**. It deliberately does not guarantee:
 
 | | LLM-mediated chaining | Compiled ChainWeaver flow |
 |---|---|---|
-| G1 — No data hallucination | **No.** The mediating LLM may invent fields it didn't see. | **Yes** by validation. |
+| G1 — No data hallucination | **No.** The mediating LLM may invent fields it didn't see. | **Yes** for declared schema fields; undeclared extras are dropped unless schemas forbid them. |
 | G2 — No data loss | **No.** The LLM may drop fields when re-summarising. | **Yes**, unless `input_mapping` explicitly omits a field. |
 | G3 — Type safety | **No** unless the prompt enforces a structured-output schema *and* validation runs after every call. | **Yes** by Pydantic validation. |
-| G4 — Deterministic routing | **No.** Same input may yield different chains. | **Yes** by construction. |
+| G4 — Deterministic routing | **No.** Same input may yield different flows. | **Yes** by construction. |
 | G5 — Schema-validated context | **No.** Context is free-form prompt history. | **Yes** at every boundary. |
 
-The cost difference (zero vs N LLM calls per chain) is the headline number, but the
+The cost difference (zero vs N LLM calls per flow) is the headline number, but the
 **correctness** difference is the durable one: LLM speed and price improve over time;
 the lack of validation guarantees does not.
 
@@ -155,13 +155,13 @@ Three concrete patterns confirm the guarantees hold in production:
 1. **Compile-time check.** Run `compile_flow(flow, tools)` in CI for every registered
    flow. Any breakage in field naming or type compatibility blocks the merge.
 2. **Replay verification.** Persist a representative `ExecutionResult.model_dump_json()`
-   and re-run it with `executor.replay_flow(trace, mode=ReplayMode.STRICT)` on every
+   and re-run it with `executor.replay_flow(trace, mode=ReplayMode.VERIFY)` on every
    PR. Output drift means a tool or schema changed underneath the trace — surface it.
 3. **Attestation.** For determinism-sensitive flows, run
-   `attest_flow(flow, executor, n=50, repeats=3, seed=...)` periodically and assert that
-   `aggregate_fingerprint` is non-empty (all repeats agreed). This is observed
-   determinism, not proved determinism, but it catches every regression that breaks any
-   of the five guarantees above.
+   `attest_flow(flow=flow, executor=executor, n=50, repeats=3, seed=...)` periodically
+   and assert that `aggregate_fingerprint` is non-empty (all repeats agreed). This is
+   observed determinism, not proved determinism, but it catches every regression that
+   breaks any of the five guarantees above.
 
 ## Cross-references
 

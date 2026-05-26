@@ -8,7 +8,7 @@ zero LLM calls, zero network I/O, zero randomness — by design.
 
 ```mermaid
 flowchart LR
-    subgraph before ["❌ Naive Agent Chaining · N LLM calls"]
+    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
         R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
     end
     subgraph after ["✅ ChainWeaver · 0 LLM calls"]
@@ -84,7 +84,7 @@ Optional extras: `chainweaver[yaml]`, `chainweaver[otel]`, `chainweaver[docs]`.
 ChainWeaver treats agent orchestration as a **compilation problem**, not a reasoning
 problem:
 
-| | Naive LLM chaining | ChainWeaver |
+| | Naive LLM loop | ChainWeaver |
 |---|---|---|
 | LLM calls per step | 1 per step | **0** |
 | Latency | O(n × LLM RTT) | O(n × tool RTT) |
@@ -94,4 +94,4 @@ problem:
 | Reusability | Prompt templates | **Registered, versioned flows** |
 
 ChainWeaver does not replace your agent. It sits **between** the agent's reasoning step
-and the underlying tools: once you know the chain, compile it.
+and the underlying tools: once you know the flow, compile it.

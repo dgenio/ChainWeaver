@@ -1,6 +1,6 @@
 # ChainWeaver
 
-**Compile deterministic MCP tool chains into LLM-free executable flows.**
+**Compile deterministic tool flows into LLM-free executable runs.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
 [![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph before ["❌ Naive Agent Chaining · N LLM calls"]
+    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
         R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
     end
     subgraph after ["✅ ChainWeaver · 0 LLM calls"]
@@ -44,7 +44,7 @@ result = executor.execute_flow("calc", {"number": 5})
 
 ## Why ChainWeaver?
 
-When an LLM-powered agent chains tools together — `fetch_data → transform → store` — a
+When an LLM-powered agent routes tools together — `fetch_data → transform → store` — a
 common pattern is to insert an LLM call between *every* step so the model can "decide"
 what to do next.
 
@@ -64,14 +64,14 @@ LLM call ──► Tool C
 Response
 ```
 
-For chains that are **fully deterministic** (the next step is always the same given the
+For flows that are **fully deterministic** (the next step is always the same given the
 previous output) these intermediate LLM calls add:
 
 - **Latency** — each round-trip costs hundreds of milliseconds.
 - **Cost** — every call consumes tokens and credits.
 - **Unpredictability** — a language model might route differently on each invocation.
 
-ChainWeaver compiles deterministic multi-tool chains into **executable flows** that run
+ChainWeaver compiles deterministic multi-tool flows into **executable flows** that run
 without any LLM involvement between steps:
 
 ```
@@ -86,7 +86,7 @@ Response
 
 Think of it as the difference between an **interpreter** and a **compiler**:
 
-| Criterion | Naive LLM chaining | ChainWeaver |
+| Criterion | Naive LLM loop | ChainWeaver |
 |---|---|---|
 | LLM calls per step | 1 per step | 0 |
 | Latency | O(n × LLM RTT) | O(n × tool RTT) |
@@ -106,7 +106,7 @@ the nuances; the short version:
 
 **Use ChainWeaver when**
 
-- The chain is predictable — you can name the next tool from the previous output
+- The flow is predictable — you can name the next tool from the previous output
   without asking a model to decide.
 - Determinism matters — same input must produce the same output, same execution path,
   same trace.

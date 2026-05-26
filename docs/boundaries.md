@@ -5,7 +5,7 @@ shape matches your problem — and when it doesn't.
 
 ## Use ChainWeaver when
 
-- **The chain is predictable.** You can describe the next tool given the previous
+- **The flow is predictable.** You can describe the next tool given the previous
   output, without asking a model to decide.
 - **Determinism matters.** You need the same input to produce the same output, the same
   execution path, and the same trace — every time.
@@ -44,10 +44,11 @@ and workflow engines:
   ChainWeaver can be **invoked from** them. When an agent recognises that the next few
   tool calls are deterministic, it dispatches a compiled flow instead of asking the LLM
   to think between each one.
-- **MCP servers**: ChainWeaver consumes tools from MCP servers and (planned) exposes
-  compiled flows back to other agents as MCP-callable tools.
+- **MCP servers**: the planned MCP adapter (#150) will let ChainWeaver consume tools
+  from MCP servers and expose compiled flows back as MCP-callable tools. Until then,
+  use the MCP-shaped flow pattern in the cookbook.
 - **Workflow engines** (Prefect, Dagster, Temporal): different mission. They schedule
-  *jobs* across time; ChainWeaver compiles *tool chains* within a single agent turn.
+  *jobs* across time; ChainWeaver compiles *tool flows* within a single agent turn.
 - **LCEL / LangChain Expression Language**: closest sibling. Both express "call tool A,
   then B, then C". ChainWeaver adds Pydantic-validated schemas at every boundary,
   zero-LLM-between-steps as a hard invariant, and file-serializable flow definitions.
@@ -85,7 +86,7 @@ difference for a five-step ETL flow.
 
 ## Reaching a verdict
 
-If most of the chains your agent runs look like the second snippet above, ChainWeaver
+If most of the flows your agent runs look like the second snippet above, ChainWeaver
 will pay for itself in latency and reproducibility. If most of them look like the first,
-keep your agent loop — and consider ChainWeaver only for the deterministic sub-chains
+keep your agent loop — and consider ChainWeaver only for the deterministic sub-flows
 inside it.

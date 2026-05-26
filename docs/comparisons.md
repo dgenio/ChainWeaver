@@ -13,7 +13,7 @@ can pick the right tool — not just the one you've heard of.
 | Single-dep install | **Yes (pydantic + 4 small libs)** | No | No | No | No | No |
 | File-serializable flow definitions | **Yes (JSON / YAML)** | No | Python | Python | Python | No |
 | Standalone (no scheduler / server) | **Yes** | Yes | No (server) | No (daemon) | No (server) | Yes |
-| Built for MCP tool composition | **Yes** | No | No | No | No | No |
+| Built for MCP tool composition | Planned (#150) | No | No | No | No | No |
 | Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
 | Graph branching on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
 | Durable retries / scheduling | No | No | Yes | Yes | Yes | No |
@@ -32,8 +32,8 @@ output parsers), and does not promise zero LLM calls between steps — `Runnable
 RunnableLambda` runs synchronously without a model, but the broader ecosystem assumes
 models are in the loop. ChainWeaver picks "deterministic-by-construction" as a hard
 invariant and trades flexibility for that guarantee. **Pick LangChain LCEL when** your
-chain mixes LLM and non-LLM steps and you want one DSL covering both.
-**Pick ChainWeaver when** the chain is fully deterministic and you want a runner that
+flow mixes LLM and non-LLM steps and you want one DSL covering both.
+**Pick ChainWeaver when** the flow is fully deterministic and you want a runner that
 can prove it.
 
 ### Prefect 3
@@ -45,7 +45,7 @@ shape is "data jobs that have to run on a schedule across time". ChainWeaver, by
 contrast, runs **inside a single agent turn**: no scheduler, no server, no calendar.
 **Pick Prefect when** your work shape is recurring data jobs.
 **Pick ChainWeaver when** your work shape is "agent decides → run this deterministic
-chain → return result".
+flow → return result".
 
 ### Dagster
 
@@ -55,7 +55,7 @@ software-defined assets, lineage, materialisations, partitioned schedules. It's 
 track lineage across runs, and doesn't carry state between calls — it's stateless,
 ephemeral, embedded.
 **Pick Dagster when** you need asset lineage and partitioned data jobs.
-**Pick ChainWeaver when** you need a single agent turn to dispatch a known chain.
+**Pick ChainWeaver when** you need a single agent turn to dispatch a known flow.
 
 ### Temporal
 
@@ -66,7 +66,7 @@ activities). ChainWeaver has no durability layer — a process restart kills an
 in-flight flow — but offers checkpoint-based crash resume via `Checkpointer` for the
 common case of "I want to retry from the last successful step".
 **Pick Temporal when** you need true durable execution across hours / days / crashes.
-**Pick ChainWeaver when** the chain finishes inside a single process and you only need
+**Pick ChainWeaver when** the flow finishes inside a single process and you only need
 crash resume across operator-driven retries.
 
 ### LangGraph
@@ -77,7 +77,7 @@ compiled with the graph fixed at definition time. LangGraph is the right tool wh
 genuinely don't know the next node until a model has spoken; ChainWeaver is the right
 tool when you do know.
 **Pick LangGraph when** the next step depends on an LLM's decision.
-**Pick ChainWeaver when** the chain is fixed and you want the cheapest, most repeatable
+**Pick ChainWeaver when** the flow is fixed and you want the cheapest, most repeatable
 way to run it.
 
 ## Combining them
@@ -90,7 +90,7 @@ These libraries are not mutually exclusive. The realistic deployment uses severa
   next few tool calls are deterministic.
 - A **workflow engine** (Prefect, Dagster, Temporal) orchestrates the *outer* job —
   scheduling, recurring runs, durability — and treats the agent as one step in a larger
-  pipeline.
+  workflow.
 
 The result: the LLM thinks once, ChainWeaver dispatches deterministically, and the
 workflow engine handles retries and scheduling. Each layer does what it's best at.

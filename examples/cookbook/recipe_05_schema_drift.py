@@ -8,8 +8,9 @@ Two surfaces cover the case:
 * ``check_flow_compatibility(flow, tools)`` — pure-static schema comparison.  Returns a
   list of :class:`CompatibilityIssue`; suitable for ``chainweaver validate`` in CI.
 * ``FlowExecutor.get_drift_report()`` — runtime detection.  When a registered tool's
-  schema differs from what the active flow recorded at registration time, the executor
-  surfaces a :class:`DriftInfo` entry.
+  schema differs from the active flow's accepted baseline (created with
+  ``executor.accept_drift(flow_name)``), the executor surfaces a :class:`DriftInfo`
+  entry.
 
 The script intentionally drifts a tool's input schema and asserts that both surfaces
 catch it.

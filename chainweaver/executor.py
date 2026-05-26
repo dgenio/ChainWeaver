@@ -269,10 +269,14 @@ class ReplayMode(str, Enum):
       entries on the :class:`ReplayResult`.
     - ``EXECUTE`` re-runs the flow with the recorded ``initial_input``
       and returns the new result without comparing it to the original.
+    - ``STRICT`` is a compatibility alias for ``VERIFY``.
+    - ``SKIP_VALIDATION`` is a compatibility alias for ``EXECUTE``.
     """
 
     VERIFY = "verify"
+    STRICT = "verify"
     EXECUTE = "execute"
+    SKIP_VALIDATION = "execute"
 
 
 class StepDiff(BaseModel):

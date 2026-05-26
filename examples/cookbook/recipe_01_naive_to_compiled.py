@@ -1,8 +1,8 @@
-"""Cookbook recipe 1 — Convert a naive LLM-mediated chain to a compiled flow.
+"""Cookbook recipe 1 — Convert a naive LLM-mediated loop to a compiled flow.
 
 Demonstrates the elevator pitch in code: the same three-step task (fetch → transform
 → store) expressed two ways.  The "before" version runs three LLM calls between three
-tool calls; the "after" version runs zero.  The `naive_chain` here uses a tiny in-process
+tool calls; the "after" version runs zero.  The `naive_loop` here uses a tiny in-process
 LLM stub so the example is self-contained — in real code the stub is replaced by a real
 model call.
 
@@ -67,7 +67,7 @@ def store_fn(inp: StoreInput) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# "Before" — naive LLM-mediated chain (3 LLM calls between 3 tool calls)
+# "Before" — naive LLM-mediated loop (3 LLM calls between 3 tool calls)
 # ---------------------------------------------------------------------------
 
 
@@ -80,7 +80,7 @@ def stub_llm(prompt: str) -> str:
     return "fetch"
 
 
-def naive_chain(url: str) -> dict[str, Any]:
+def naive_loop(url: str) -> dict[str, Any]:
     """A naive agent loop: ask the LLM what to do between every tool call."""
     plan = stub_llm("What is the first step for URL?")
     assert plan == "fetch", "unexpected first-step plan"
@@ -146,8 +146,8 @@ def build_compiled_executor() -> FlowExecutor:
 def main() -> None:
     url = "https://example.com/data.json"
 
-    naive_output = naive_chain(url)
-    print(f"Naive chain output:    {naive_output}")
+    naive_output = naive_loop(url)
+    print(f"Naive loop output:     {naive_output}")
 
     executor = build_compiled_executor()
     result = executor.execute_flow("fetch_transform_store", {"url": url})

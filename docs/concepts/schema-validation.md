@@ -17,8 +17,9 @@ A tool's `input_schema` and `output_schema` are Pydantic `BaseModel` subclasses.
 executor:
 
 1. Builds the input dict from the step's `input_mapping` and the accumulated context.
-2. Calls `input_schema.model_validate(input_dict)` — raises on type mismatches, missing
-   required fields, or unknown fields (Pydantic v2 default).
+2. Calls `input_schema.model_validate(input_dict)` — raises on type mismatches and
+   missing required fields. Unknown fields follow the schema's Pydantic config:
+   dropped by default, rejected when the schema sets `extra="forbid"`.
 3. Invokes `tool.fn(validated_input)`; expects a `dict`.
 4. Calls `output_schema.model_validate(output_dict)` — same guarantees.
 5. Merges the validated output back into the context.
@@ -45,7 +46,8 @@ records with `step_index=-1` (input) and `step_index=len(steps)` (output).
 
 ## Schema hashing and drift
 
-Every `Tool` exposes a `schema_hash` derived from its input and output schemas:
+Every `Tool` exposes a `schema_hash` derived from its input schema, output schema, and
+`schema_version`:
 
 ```python
 tool.schema_hash       # SHA-256 of (input_schema, output_schema, schema_version)
@@ -55,8 +57,9 @@ tool.output_schema_hash # output only
 
 The hash is stable across processes, sorted-keys-canonicalized, and short enough
 (16 hex chars) to log. When a tool's schema changes and its `schema_hash` no longer
-matches what a registered flow recorded at registration time, `FlowExecutor` surfaces a
-`DriftInfo` entry via `get_drift_report()`.
+matches what a flow has snapshotted in `tool_schema_hashes`, `FlowExecutor` surfaces a
+`DriftInfo` entry via `get_drift_report()`. Call `accept_drift(flow_name)` after
+reviewing a flow's current tool surfaces to create or refresh that baseline.
 
 See [Cookbook recipe 5 — Schema drift in CI](../cookbook/05-schema-drift.md) for the
 governance pattern.
