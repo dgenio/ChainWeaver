@@ -9,7 +9,7 @@
 #
 # Each step is small, deterministic, and pure-Python.  The example exercises the typical
 # "agent reads a log file" workflow without actually invoking an LLM — the deterministic
-# version is what an agent would compile after seeing the same chain a few times.
+# version is what an agent would compile after seeing the same sequence a few times.
 #
 # Running
 # -------

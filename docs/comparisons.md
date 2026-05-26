@@ -10,7 +10,7 @@ can pick the right tool — not just the one you've heard of.
 |---|---|---|---|---|---|---|
 | LLM-free between steps (by design) | **Yes (hard invariant)** | No | N/A | N/A | N/A | No |
 | Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
-| Single-dep install | **Yes (pydantic + 4 small libs)** | No | No | No | No | No |
+| Small runtime dependency set | **Yes (5 packages)** | No | No | No | No | No |
 | File-serializable flow definitions | **Yes (JSON / YAML)** | No | Python | Python | Python | No |
 | Standalone (no scheduler / server) | **Yes** | Yes | No (server) | No (daemon) | No (server) | Yes |
 | Built for MCP tool composition | Planned (#150) | No | No | No | No | No |
@@ -19,7 +19,7 @@ can pick the right tool — not just the one you've heard of.
 | Durable retries / scheduling | No | No | Yes | Yes | Yes | No |
 
 > Versions evaluated: LangChain 0.3, LangGraph 0.3, Prefect 3, Dagster 1.9, Temporal 1.24
-> (Python SDK), ChainWeaver 0.7. Re-evaluate on each minor release of any of these.
+> (Python SDK), ChainWeaver 0.8. Re-evaluate on each minor release of any of these.
 
 ## One paragraph each
 

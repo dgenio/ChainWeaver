@@ -12,7 +12,7 @@ It compiles multi-tool flows into executable sequences that run without any
 LLM involvement between steps.
 
 - Python 3.10+; `from __future__ import annotations` in every module.
-- Single runtime dependency: `pydantic>=2.0`.
+- Small runtime dependency set: `pydantic`, `typer`, `tenacity`, `packaging`, and `deepdiff`.
 - Core philosophy: **compiled, not interpreted** — the executor is a graph
   runner, not a reasoning engine.
 
@@ -81,7 +81,7 @@ docs/
 mkdocs.yml                   MkDocs Material site config (#133)
 .readthedocs.yaml            Read the Docs build config (#133)
 pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
-.github/workflows/           CI (ci.yml) and publish (publish.yml) pipelines
+.github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), and publish (publish.yml) workflows
 ```
 
 ### Key entry points
@@ -92,7 +92,7 @@ pyproject.toml               Ruff, mypy, pytest config (source of truth for tool
 - `FlowExecutor(..., checkpointer=..., delete_on_success=True)` → crash-resume (#128); writes an `ExecutionSnapshot` after every successful linear step or DAG level. `FlowExecutor.resume_flow(trace_id)` validates the snapshot's flow version and tool `schema_hash` values against the current registry — drift raises `CheckpointDriftError` — then continues execution with the original `trace_id`. Snapshots are deleted on terminal success when `delete_on_success=True` (the default); preserved on failure for operator-driven retry.
 - `OTelTraceExporter(tracer=...)` from `chainweaver.integrations.opentelemetry` (#126) → emits OpenTelemetry spans as a `FlowExecutorMiddleware`: one parent `chainweaver.flow.{name}` span + one child `chainweaver.tool.{name}` span per `StepRecord`. After-the-fact export of a completed `ExecutionResult` via `export_result_to_otel(result, tracer=...)`. Optional extra: `pip install 'chainweaver[otel]'`.
 - `FlowExecutor(..., middleware=[...])` → register lifecycle hooks (#131); fire order is `on_flow_start` → (`on_step_start` → `on_step_end`)* → `on_flow_end`. Hook exceptions are caught and logged at `WARNING` (chainweaver.middleware) — observability bugs never abort a flow.
-- `FlowExecutor.add_middleware(mw)` → append a middleware to the registration chain
+- `FlowExecutor.add_middleware(mw)` → append a middleware to the registration sequence
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow
 - `FlowRegistry.get_flow(name, *, version=None)` → latest or specific version
 - `FlowExecutor.register_tool(tool)` → register a tool; triggers drift detection on schema change

@@ -19,7 +19,7 @@ noted.
 > validated output, in the accumulated execution context, or is supplied as a literal in
 > the step's `input_mapping`.
 
-**Mechanism:** the executor's per-step pipeline is
+**Mechanism:** the executor's per-step execution path is
 `validate(input) → fn(input) → validate(output) → context.update(output)`. No code path
 between the two `validate` calls can add or remove fields. The intermediate context is a
 plain Python `dict` updated by direct assignment — no serialization round-trip, no
@@ -132,9 +132,9 @@ ChainWeaver guarantees the **envelope**. It deliberately does not guarantee:
 
 ---
 
-## LLM-mediated chaining vs compiled flow
+## LLM-mediated routing vs compiled flow
 
-| | LLM-mediated chaining | Compiled ChainWeaver flow |
+| | LLM-mediated routing | Compiled ChainWeaver flow |
 |---|---|---|
 | G1 — No data hallucination | **No.** The mediating LLM may invent fields it didn't see. | **Yes** for declared schema fields; undeclared extras are dropped unless schemas forbid them. |
 | G2 — No data loss | **No.** The LLM may drop fields when re-summarising. | **Yes**, unless `input_mapping` explicitly omits a field. |

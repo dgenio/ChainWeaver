@@ -18,7 +18,7 @@ example) executes the recipe end-to-end and asserts its own output.
 
 - All recipes follow the **standalone-script rule** for `examples/`: no pytest imports,
   no fixtures. Smoke-checking happens inline with `assert`.
-- Recipes pin to `chainweaver>=0.7,<1.0` in their intro; bump the pin when the public
+- Recipes pin to `chainweaver>=0.8,<1.0` in their intro; bump the pin when the public
   API changes.
 - Diagrams use Mermaid, which renders both in this site and on GitHub.
 - Each recipe ends with **What next** — usually pointing into the

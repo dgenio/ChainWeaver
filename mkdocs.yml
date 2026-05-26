@@ -102,7 +102,7 @@ nav:
       - vs LangChain, Prefect, Dagster, Temporal, LangGraph: comparisons.md
   - Cookbook:
       - Overview: cookbook/index.md
-      - 1. Naive LLM chain to compiled flow: cookbook/01-naive-to-compiled.md
+      - 1. Naive LLM loop to compiled flow: cookbook/01-naive-to-compiled.md
       - 2. MCP-style search and summarize: cookbook/02-mcp-style-flow.md
       - 3. OpenTelemetry tracing: cookbook/03-otel-tracing.md
       - 4. Testing flows: cookbook/04-testing-flows.md

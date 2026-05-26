@@ -8,7 +8,7 @@ ChainWeaver is published on PyPI and supports Python 3.10+.
 pip install chainweaver
 ```
 
-The base install ships with a single runtime dependency stack: `pydantic`, `typer`,
+The base install ships with a small runtime dependency stack: `pydantic`, `typer`,
 `tenacity`, `packaging`, and `deepdiff`. Everything else is opt-in.
 
 ## Optional extras
