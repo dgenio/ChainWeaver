@@ -38,7 +38,7 @@ def _run(coro: Any) -> Any:
 def executor_with_flow() -> FlowExecutor:
     registry = FlowRegistry()
     flow = Flow(
-        name="pipeline",
+        name="number_flow",
         version="1.0.0",
         description="Double then increment.",
         steps=[
@@ -74,15 +74,15 @@ def executor_with_flow() -> FlowExecutor:
 class TestFlowServerRegistration:
     def test_registers_one_tool_per_flow(self, executor_with_flow: FlowExecutor) -> None:
         server = FlowServer(executor_with_flow, name="cw-test")
-        assert server.registered_tool_names == ["pipeline"]
+        assert server.registered_tool_names == ["number_flow"]
 
     def test_explicit_flow_names_subset(self, executor_with_flow: FlowExecutor) -> None:
-        server = FlowServer(executor_with_flow, name="cw-test", flow_names=["pipeline"])
-        assert server.registered_tool_names == ["pipeline"]
+        server = FlowServer(executor_with_flow, name="cw-test", flow_names=["number_flow"])
+        assert server.registered_tool_names == ["number_flow"]
 
     def test_server_prefix_applied(self, executor_with_flow: FlowExecutor) -> None:
         server = FlowServer(executor_with_flow, name="cw-test", server_prefix="cw")
-        assert server.registered_tool_names == ["cw__pipeline"]
+        assert server.registered_tool_names == ["cw__number_flow"]
 
     def test_fastmcp_property_returns_underlying_instance(
         self, executor_with_flow: FlowExecutor
@@ -103,7 +103,7 @@ class TestFlowServerOverMCP:
                 return [t.name for t in listing.tools]
 
         names = _run(go())
-        assert "pipeline" in names
+        assert "number_flow" in names
 
     def test_client_invokes_flow_via_call_tool(self, executor_with_flow: FlowExecutor) -> None:
         flow_server = FlowServer(executor_with_flow, name="cw-test")
@@ -112,7 +112,7 @@ class TestFlowServerOverMCP:
             async with create_connected_server_and_client_session(
                 flow_server.fastmcp._mcp_server
             ) as client:
-                return await client.call_tool("pipeline", {"n": 5})
+                return await client.call_tool("number_flow", {"n": 5})
 
         result = _run(go())
         assert not result.isError
@@ -164,8 +164,8 @@ class TestFlowServerOverMCP:
                 flow_server.fastmcp._mcp_server
             ) as client:
                 listing = await client.list_tools()
-                return next(t for t in listing.tools if t.name == "pipeline")
+                return next(t for t in listing.tools if t.name == "number_flow")
 
-        pipeline = _run(go())
-        props = pipeline.inputSchema.get("properties", {})
+        flow_tool = _run(go())
+        props = flow_tool.inputSchema.get("properties", {})
         assert "n" in props

@@ -537,6 +537,16 @@ class FlowExecutor:
         # where to start and which records to prepend.
         self._resume_snapshot: ExecutionSnapshot | None = None
 
+    @property
+    def registry(self) -> FlowRegistry:
+        """The :class:`~chainweaver.registry.FlowRegistry` backing this executor.
+
+        Read-only accessor so callers (notably
+        :class:`chainweaver.mcp.FlowServer`) can enumerate registered
+        flows without reaching into the private ``_registry`` attribute.
+        """
+        return self._registry
+
     def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
         """Register an additional :class:`FlowExecutorMiddleware`.
 

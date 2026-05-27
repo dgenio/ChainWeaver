@@ -42,7 +42,7 @@ def _add_ten(inp: _NumOut) -> dict[str, Any]:
 def _build_executor() -> FlowExecutor:
     registry = FlowRegistry()
     flow = Flow(
-        name="number_pipeline",
+        name="number_flow",
         version="1.0.0",
         description="Double the input, then add ten.",
         steps=[
@@ -86,10 +86,10 @@ async def main() -> None:
         for tool in listing.tools:
             print(f"  tool={tool.name}  inputSchema={tool.inputSchema}")
 
-        result = await client.call_tool("number_pipeline", {"n": 5})
+        result = await client.call_tool("number_flow", {"n": 5})
         assert not result.isError, result.content
         # (5 * 2) + 10 == 20.
-        print(f"call_tool('number_pipeline', n=5) → structured={result.structuredContent}")
+        print(f"call_tool('number_flow', n=5) → structured={result.structuredContent}")
 
 
 if __name__ == "__main__":

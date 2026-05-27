@@ -2,7 +2,7 @@
 
 Spins up an in-memory FastMCP server, discovers its tools through
 :class:`chainweaver.mcp.MCPToolAdapter`, and runs a ChainWeaver flow
-that chains the discovered MCP tools without any LLM mediation
+that composes the discovered MCP tools without any LLM mediation
 between steps.
 
 Run::

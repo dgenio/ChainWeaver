@@ -2,7 +2,7 @@
 
 :class:`FlowServer` mounts a set of registered flows on a FastMCP
 server so MCP-aware agents see each compiled flow as a single
-deterministic tool — collapsing an N-step chain into one wire call.
+deterministic tool — collapsing an N-step flow into one wire call.
 This is the inverse of :mod:`chainweaver.mcp.adapter` (which goes the
 other way) and is the headline value proposition for
 "compiled, not interpreted" MCP integrations.
@@ -35,7 +35,6 @@ deep inside ``serve``.
 from __future__ import annotations
 
 import inspect
-import json
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
@@ -92,7 +91,7 @@ class FlowServer:
         executor.register_tool(fetch)
         executor.register_tool(transform)
 
-        server = FlowServer(executor, name="my-pipelines")
+        server = FlowServer(executor, name="my-flows")
         server.serve()  # blocks; speaks MCP over stdio
     """
 
@@ -129,7 +128,7 @@ class FlowServer:
         return list(self._registered_tool_names)
 
     def _register_all_flows(self) -> None:
-        registry = self.executor._registry
+        registry = self.executor.registry
         if self._explicit_flow_names is None:
             # ``list_flows`` returns every (name, version) pair; collapse
             # to the latest per name via ``get_flow`` (no version arg).
@@ -360,8 +359,3 @@ class _PermissiveInput(BaseModel):
 
 # Re-export so callers don't import private symbols.
 __all__ = ["FlowServer", "TransportName"]
-
-
-# Silences "imported but unused" — used as a fallback for serialization
-# of unstructured flow output in ``_register_flow``.
-_ = json

@@ -13,7 +13,8 @@ Scope (kept deliberately small for the v0.1 MCP adapter):
   ``boolean`` / ``null``.
 * ``array`` of any of the above (item shape is type-checked when
   available; falls back to ``list[Any]`` otherwise).
-* Nested ``"type": "object"`` schemas (recursed into nested models).
+* Nested ``"type": "object"`` schemas (mapped to ``dict[str, Any]``;
+  full nested-model recursion is intentionally out of scope for v0.1).
 * ``required`` keyword controls optional-vs-required fields.
 * ``description`` carries through as the Pydantic ``Field`` description.
 

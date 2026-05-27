@@ -76,9 +76,9 @@ Policy choices baked in (issue #150):
 from chainweaver import FlowRegistry, FlowExecutor
 from chainweaver.mcp import FlowServer
 
-server = FlowServer(executor, name="my-pipelines")  # all ACTIVE flows
+server = FlowServer(executor, name="my-flows")  # all ACTIVE flows
 # or:
-server = FlowServer(executor, flow_names=["pipeline_a"], server_prefix="cw")
+server = FlowServer(executor, flow_names=["flow_a"], server_prefix="cw")
 server.serve()  # blocks; stdio transport by default
 # or, inside an async context:
 await server.serve_async(transport="streamable-http")
@@ -93,7 +93,7 @@ Schema resolution (mirrors `Tool.from_flow`):
   resulting MCP tool returns text-only content).
 
 The MCP-side tool exposes the input model's **top-level fields**
-directly (e.g. `client.call_tool("pipeline", {"n": 5})`), not nested
+directly (e.g. `client.call_tool("my_flow", {"n": 5})`), not nested
 under a `payload` parameter. This is achieved by synthesising the
 dispatcher function's signature from `input_schema.model_fields`.
 

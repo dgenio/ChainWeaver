@@ -77,7 +77,7 @@ def linear_async_flow() -> tuple[FlowExecutor, str]:
 
 
 class TestExecuteFlowAsyncLinear:
-    async def test_pure_async_chain(self, linear_async_flow: tuple[FlowExecutor, str]) -> None:
+    async def test_pure_async_flow(self, linear_async_flow: tuple[FlowExecutor, str]) -> None:
         executor, flow_name = linear_async_flow
         result = await executor.execute_flow_async(flow_name, {"n": 3})
         assert result.success
@@ -85,7 +85,7 @@ class TestExecuteFlowAsyncLinear:
         assert result.final_output is not None
         assert result.final_output["value"] == 8
 
-    async def test_mixed_sync_and_async_chain(self) -> None:
+    async def test_mixed_sync_and_async_flow(self) -> None:
         registry = FlowRegistry()
         flow = Flow(
             name="mixed",
@@ -203,7 +203,7 @@ class TestExecuteFlowAsyncEventLoopUnblocked:
         thread so the calling event loop can still run other tasks."""
         registry = FlowRegistry()
         flow = Flow(
-            name="slow_chain",
+            name="slow_flow",
             version="1.0.0",
             description="",
             steps=[FlowStep(tool_name="slow_double", input_mapping={"n": "n"})],
@@ -236,7 +236,7 @@ class TestExecuteFlowAsyncEventLoopUnblocked:
                 tick_counter[0] += 1
 
         result, _ = await asyncio.gather(
-            executor.execute_flow_async("slow_chain", {"n": 4}),
+            executor.execute_flow_async("slow_flow", {"n": 4}),
             _ticker(),
         )
         assert result.success

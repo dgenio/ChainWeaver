@@ -90,6 +90,7 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow
 - `FlowRegistry.get_flow(name, *, version=None)` → latest or specific version
 - `FlowExecutor.register_tool(tool)` → register a tool; triggers drift detection on schema change
+- `FlowExecutor.registry` → read-only accessor for the backing `FlowRegistry` (used by `chainweaver.mcp.FlowServer` to enumerate exposable flows without touching executor internals)
 - `FlowExecutor.get_drift_report()` → `list[DriftInfo]`
 - `FlowExecutor.accept_drift(flow_name)` → re-snapshot hashes, restore ACTIVE status
 - `compile_flow(flow, tools)` → `CompilationResult`

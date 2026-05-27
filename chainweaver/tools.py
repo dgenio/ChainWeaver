@@ -58,9 +58,10 @@ def _is_async_callable(fn: Callable[..., Any]) -> bool:
     ``inspect.iscoroutinefunction`` only recognises plain async ``def``
     functions; callables whose call shape is async (e.g. class-based
     tool wrappers used by the MCP adapter) still need to be treated
-    as async.  We probe the bound call by invoking ``inspect.unwrap``
-    and re-checking, which covers both shapes without referencing the
-    dunder name directly.
+    as async.  We probe the call shape statically via the instance
+    ``__dict__`` and ``inspect.getattr_static`` to locate the
+    ``__call__`` attribute and re-check it, which covers both shapes
+    without invoking the callable.
     """
     if inspect.iscoroutinefunction(fn):
         return True
