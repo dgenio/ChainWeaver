@@ -2,6 +2,7 @@
   "__all__": [
     "AttestationInputError",
     "AttestationReport",
+    "BaseDecisionCallback",
     "BaseMiddleware",
     "ChainAnalyzer",
     "ChainWeaverError",
@@ -19,6 +20,10 @@
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionCallable",
+    "DecisionCallback",
+    "DecisionCallbackError",
+    "DecisionContext",
     "DeterminismLevel",
     "DriftInfo",
     "ExecutionPlan",
@@ -48,6 +53,7 @@
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
+    "KernelInvocationError",
     "ObservedStep",
     "ObservedTrace",
     "PredicateSyntaxError",
@@ -78,6 +84,7 @@
     "attest_flow",
     "check_flow_compatibility",
     "cli",
+    "coerce_decision_callback",
     "compile_flow",
     "evaluate_predicate",
     "flow_from_dict",
@@ -129,6 +136,12 @@
       },
       "module": "chainweaver.attest",
       "qualname": "AttestationReport"
+    },
+    "BaseDecisionCallback": {
+      "kind": "class",
+      "module": "chainweaver.decisions",
+      "qualname": "BaseDecisionCallback",
+      "signature": "()"
     },
     "BaseMiddleware": {
       "kind": "class",
@@ -237,6 +250,7 @@
     "DAGFlow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "capability_id": "str | NoneType",
         "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
@@ -257,6 +271,7 @@
       "model_fields": {
         "branches": "list[chainweaver.flow.ConditionalEdge]",
         "capability_id": "str | NoneType",
+        "decision_candidates": "list[str] | NoneType",
         "default_next": "str | NoneType",
         "depends_on": "list[str]",
         "input_contract": "str | NoneType",
@@ -270,6 +285,37 @@
       },
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
+    },
+    "DecisionCallable": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
+    },
+    "DecisionCallback": {
+      "kind": "class",
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionCallback",
+      "signature": "(*args, **kwargs)"
+    },
+    "DecisionCallbackError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "DecisionCallbackError",
+      "signature": "(tool_name: str, step_index: int, detail: str) -> None"
+    },
+    "DecisionContext": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "candidates": "list[str]",
+        "context": "dict[str, Any]",
+        "default_tool_name": "str",
+        "flow_name": "str",
+        "step_id": "str | NoneType",
+        "step_index": "int",
+        "trace_id": "str"
+      },
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionContext"
     },
     "DeterminismLevel": {
       "kind": "enum",
@@ -349,6 +395,7 @@
     "Flow": {
       "kind": "pydantic-model",
       "model_fields": {
+        "capability_id": "str | NoneType",
         "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
@@ -421,7 +468,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -474,6 +521,7 @@
     "FlowStep": {
       "kind": "pydantic-model",
       "model_fields": {
+        "decision_candidates": "list[str] | NoneType",
         "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
@@ -513,6 +561,12 @@
       "module": "chainweaver.exceptions",
       "qualname": "InvalidFlowVersionError",
       "signature": "(flow_name: str, version: str, detail: str) -> None"
+    },
+    "KernelInvocationError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "KernelInvocationError",
+      "signature": "(capability_id: str, step_index: int, detail: str) -> None"
     },
     "ObservedStep": {
       "kind": "pydantic-model",
@@ -775,6 +829,12 @@
       "kind": "module",
       "module": null,
       "qualname": "chainweaver.cli"
+    },
+    "coerce_decision_callback": {
+      "kind": "function",
+      "module": "chainweaver.decisions",
+      "qualname": "coerce_decision_callback",
+      "signature": "(cb: DecisionCallback | DecisionCallable | None) -> DecisionCallback | None"
     },
     "compile_flow": {
       "kind": "function",

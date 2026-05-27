@@ -8,9 +8,15 @@ name: Bench
 # init step; see ``benchmarks/README.md``).
 #
 # Regression contract: a compiled metric that grows by more than 25%
-# vs. the recorded baseline fails the PR. ``customSmallerIsBetter``
+# vs. the recorded baseline fails the build. ``customSmallerIsBetter``
 # means smaller values are better; the action emits a PR comment when
 # the threshold trips.
+#
+# The gate is enforced (fails the build) only on pushes to ``main``,
+# where the baseline is captured on a consistent runner. On PRs it is
+# advisory (comment-only): the sub-millisecond ``compiled`` overhead
+# metrics swing 50-170us on shared CI runners, which trips the 25%
+# alert on runner noise rather than a real regression.
 
 on:
   push:
@@ -103,6 +109,9 @@ jobs:
           # Fail the PR if any compiled metric regresses > 25% vs. the
           # historical baseline on the same branch / gh-pages page.
           alert-threshold: "125%"
-          fail-on-alert: true
+          # Enforce the gate only on main; PR runs stay advisory so
+          # sub-millisecond microbenchmark variance on shared runners does
+          # not fail PRs. ``comment-on-alert`` still surfaces a heads-up.
+          fail-on-alert: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           comment-on-alert: true
           alert-comment-cc-users: "@dgenio"

@@ -40,6 +40,12 @@ yaml = [
 otel = [
     "opentelemetry-api>=1.20",
 ]
+weaver-stack = [
+    # Placeholder for the Weaver Stack sibling SDKs (issue #91 — weaver-spec
+    # conformance, #106 — contextweaver, #89 — agent-kernel).  ChainWeaver's
+    # mirror types are self-contained, so this extra is a no-op until the
+    # upstream packages ship on PyPI; pinning them here marks the seam.
+]
 # Property-based testing extra (issue #143).  Pulls the Hypothesis stack the
 # property suite needs — including hypothesis-jsonschema, which main's suite
 # uses to derive strategies from the Pydantic JSON schemas.  Enable via
@@ -83,6 +89,7 @@ python_functions = ["test_*"]
 pythonpath = ["tests", "tests/property"]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
 markers = [
+    "conformance: weaver-spec conformance gate (issue #91); run with -m conformance",
     "property: Hypothesis property-based determinism test (also run via `pytest -m property`)",
 ]
 

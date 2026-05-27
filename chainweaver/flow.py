@@ -238,6 +238,15 @@ class FlowStep(BaseModel):
 
             An empty mapping (the default) means the tool receives the full
             current context as-is.
+        decision_candidates: Optional list of tool names that an external
+            :class:`~chainweaver.decisions.DecisionCallback` may pick from
+            at execution time (issue #102).  When ``None`` (the default)
+            the step always invokes ``tool_name``.  When set, the executor
+            calls the registered ``decision_callback`` with the candidate
+            list and the current context, and runs whichever tool the
+            callback selects.  The callback's return value must be a
+            member of ``decision_candidates``; if no callback is
+            registered the executor falls back to ``tool_name``.
         retry: Optional :class:`RetryPolicy` driving the executor's retry
             behaviour for this step.
         on_error: How the executor reacts when all retry attempts are
@@ -274,6 +283,12 @@ class FlowStep(BaseModel):
             input_mapping={"number": "value", "factor": 3},
         )
 
+        # Hybrid execution: let an external callback pick a tool
+        step = FlowStep(
+            tool_name="summarize_short",   # default if no callback set
+            decision_candidates=["summarize_short", "summarize_long"],
+        )
+
         # Add typed step contracts (issue #172)
         step = FlowStep(
             tool_name="scale",
@@ -287,8 +302,20 @@ class FlowStep(BaseModel):
     input_mapping: dict[str, Any] = Field(default_factory=dict)
     retry: RetryPolicy | None = None
     on_error: str = "fail"
+    decision_candidates: list[str] | None = None
     input_contract: str | None = None
     output_contract: str | None = None
+
+    @field_validator("decision_candidates")
+    @classmethod
+    def _validate_decision_candidates(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if len(value) < 1:
+            raise ValueError("decision_candidates must contain at least one tool name.")
+        if len(set(value)) != len(value):
+            raise ValueError("decision_candidates must not contain duplicates.")
+        return value
 
     @field_validator("on_error")
     @classmethod
@@ -300,6 +327,23 @@ class FlowStep(BaseModel):
         raise ValueError(
             f"on_error must be 'fail', 'skip', or 'fallback:<tool_name>'; got '{value}'."
         )
+
+    @model_validator(mode="after")
+    def _check_tool_name_in_candidates(self) -> FlowStep:
+        """Ensure ``tool_name`` is itself one of the ``decision_candidates``.
+
+        ``DecisionContext`` documents ``default_tool_name`` (the step's
+        ``tool_name``) as always present in ``candidates``, and a callback that
+        returns the default must clear the executor's membership check.  Reject
+        configurations where the default is not a candidate so the gap fails at
+        construction rather than at execution time.
+        """
+        if self.decision_candidates is not None and self.tool_name not in self.decision_candidates:
+            raise ValueError(
+                f"tool_name '{self.tool_name}' must be a member of decision_candidates "
+                f"{self.decision_candidates!r}; it is the default a callback may return."
+            )
+        return self
 
     @staticmethod
     def contract_ref_from(cls: type[BaseModel]) -> str:
@@ -367,6 +411,13 @@ class Flow(BaseModel):
             :class:`~chainweaver.executor.FlowExecutor` validates the
             accumulated context against the resolved schema **after** the
             last step finishes.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90).  When set, this flow is exposed as a routable capability
+            via :func:`chainweaver.integrations.weaver_spec.flow_to_selectable_item`
+            and can be addressed by a ``RoutingDecision`` from
+            contextweaver.  Should be a stable, dotted identifier (e.g.
+            ``"data.ingest"``); ``None`` (the default) means the flow is
+            not exposed as a capability.
         context_schema_ref: An optional ``"module:qualname"`` reference to
             a :class:`~pydantic.BaseModel` subclass describing the shape
             of the *accumulated execution context* (issue #152).  The
@@ -407,6 +458,7 @@ class Flow(BaseModel):
     output_schema_ref: str | None = None
     context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -676,6 +728,26 @@ class DAGFlowStep(FlowStep):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _check_capability_has_no_branches(self) -> DAGFlowStep:
+        """Conditional branching is unsupported on capability steps.
+
+        The DAG runner dispatches ``step_type='capability'`` steps through the
+        ``_execute_capability_step`` hook, which returns before
+        ``FlowExecutor._select_branch`` runs, so ``branches`` / ``default_next``
+        would be silently ignored.  Reject the combination at construction
+        (fail-loud) rather than dropping the edges at runtime.
+        """
+        if self.step_type == "capability" and self.branches:
+            msg = (
+                f"Step '{self.step_id}' has step_type='capability' with "
+                f"conditional branches. Branching is only supported on "
+                f"step_type='tool' steps; capability steps cannot carry "
+                f"branches or default_next."
+            )
+            raise ValueError(msg)
+        return self
+
 
 class DAGFlow(BaseModel):
     """A deterministic, DAG-structured sequence of tool invocations.
@@ -703,6 +775,8 @@ class DAGFlow(BaseModel):
             :class:`~pydantic.BaseModel` subclass validated against the
             final merged context after all steps finish.  Resolved lazily
             via the :attr:`output_schema` property.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90); see :attr:`Flow.capability_id` for full semantics.
         context_schema_ref: Optional ``"module:qualname"`` ref to a
             :class:`~pydantic.BaseModel` subclass validated against the
             accumulated context at flow end, once every step has
@@ -743,6 +817,7 @@ class DAGFlow(BaseModel):
     output_schema_ref: str | None = None
     context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
