@@ -1,10 +1,9 @@
 """Tests for LlamaIndex ↔ ChainWeaver adapters (issue #82).
 
-``llama-index-core`` is *not* in the ``[dev]`` extra because of its
-heavier transitive dependency footprint (sqlalchemy, nltk, numpy).
-These tests are therefore skipped in the default CI matrix.  Local
-runs after ``pip install 'chainweaver[llamaindex]'`` exercise the
-full bidirectional adapter.
+Skipped when ``llama-index-core`` is not installed.  The ``[dev]`` extra
+pulls it in, so CI runs these on the canonical ubuntu/py3.10 leg.  A bare
+``pip install 'chainweaver[llamaindex]'`` exercises the same bidirectional
+adapter without the rest of the ``[dev]`` toolchain.
 """
 
 from __future__ import annotations

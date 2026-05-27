@@ -115,10 +115,12 @@ def derive_flow_output_schema(
 
 
 def model_input_schema_json(model: type[BaseModel]) -> dict[str, Any]:
-    """Return *model*'s JSON Schema, with ``$defs`` inlined when safe.
+    """Return *model*'s JSON Schema exactly as Pydantic v2 emits it.
 
-    Pydantic v2's ``model_json_schema()`` is the JSON Schema this
-    package emits everywhere downstream (see
+    Delegates to ``model.model_json_schema()`` and returns the result
+    verbatim — nested models stay under ``$defs`` / ``$ref`` rather than
+    being inlined.  That is deliberate: ``model_json_schema()`` is the
+    JSON Schema this package emits everywhere downstream (see
     :func:`chainweaver.compat.schema_fingerprint`), so re-using it here
     keeps the export schema byte-identical to the schema used for
     drift detection and compatibility checks.

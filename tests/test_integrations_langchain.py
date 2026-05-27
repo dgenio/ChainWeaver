@@ -11,18 +11,18 @@ from typing import Any
 import pytest
 
 # Skip the whole module if langchain-core isn't available.
-langchain_core = pytest.importorskip("langchain_core")
+pytest.importorskip("langchain_core")
 
-from helpers import NumberInput, ValueOutput, _double_fn  # noqa: E402
-from langchain_core.tools import BaseTool, StructuredTool  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from helpers import NumberInput, ValueOutput, _double_fn
+from langchain_core.tools import BaseTool, StructuredTool
+from pydantic import BaseModel, Field
 
-from chainweaver.integrations.langchain import (  # noqa: E402
+from chainweaver.integrations.langchain import (
     from_langchain_tool,
     from_langchain_toolkit,
     to_langchain_tool,
 )
-from chainweaver.tools import Tool  # noqa: E402
+from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
 # Shared LangChain mock tools

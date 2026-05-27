@@ -483,6 +483,8 @@ All errors are typed and traceable:
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 | `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field |
+| `PluginDiscoveryError` | Strict-mode plugin discovery (`discover_tools(strict=True)` / `discover_flows(strict=True)`) hits a misbehaving entry-point loader |
+| `ContribError` | A `chainweaver.contrib.tools` tool hits a contract violation (missing JSON-pointer key, wrong predicate shape, assertion mismatch) |
 
 All exceptions inherit from `ChainWeaverError`.
 

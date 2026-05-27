@@ -40,9 +40,12 @@ def flow_to_callable(
 
     Args:
         flow: The flow to wrap.  Must already be registered on
-            ``executor``'s registry — the returned callable resolves
+            ``executor``'s registry — the returned callable re-resolves
             it by name on every invocation, so the latest registered
-            version applies.
+            *implementation* runs.  The input schema, however, is derived
+            once at wrap time (see ``input_schema`` below): if the flow is
+            later re-registered with a different input schema, the callable
+            keeps validating against the schema captured here.
         executor: Executor used to dispatch the flow.  Captured by
             reference; later changes to its registry are visible
             through the returned callable.
