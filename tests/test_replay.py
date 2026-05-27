@@ -146,6 +146,10 @@ class TestExecuteMode:
         assert replay.all_steps_match is True
         assert replay.new_result.success is True
 
+    def test_legacy_mode_aliases(self) -> None:
+        assert ReplayMode.__members__["STRICT"] is ReplayMode.VERIFY
+        assert ReplayMode.__members__["SKIP_VALIDATION"] is ReplayMode.EXECUTE
+
 
 # ---------------------------------------------------------------------------
 # resume_from_step

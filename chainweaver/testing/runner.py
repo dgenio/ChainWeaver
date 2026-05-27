@@ -43,9 +43,9 @@ left exactly as it was found.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -219,16 +219,32 @@ class FlowTestRunner:
         tool_name = tool.name
         calls = self._calls
 
-        def _logging_fn(validated_input: BaseModel) -> dict[str, Any]:
-            calls.setdefault(tool_name, []).append(validated_input.model_dump())
-            return original_fn(validated_input)
+        # ``Tool.fn`` may be sync or async (#80). Mirror the original's
+        # call style so the rebuilt tool reports the same ``is_async`` and
+        # the invocation is recorded exactly once, before the real callable
+        # runs, on both lanes.
+        fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]]
+        if tool.is_async:
+
+            async def _logging_fn_async(validated_input: BaseModel) -> dict[str, Any]:
+                calls.setdefault(tool_name, []).append(validated_input.model_dump())
+                return await cast("Awaitable[dict[str, Any]]", original_fn(validated_input))
+
+            fn = _logging_fn_async
+        else:
+
+            def _logging_fn(validated_input: BaseModel) -> dict[str, Any]:
+                calls.setdefault(tool_name, []).append(validated_input.model_dump())
+                return cast("dict[str, Any]", original_fn(validated_input))
+
+            fn = _logging_fn
 
         return Tool(
             name=tool.name,
             description=tool.description,
             input_schema=tool.input_schema,
             output_schema=tool.output_schema,
-            fn=_logging_fn,
+            fn=fn,
             timeout_seconds=tool.timeout_seconds,
             max_output_size=tool.max_output_size,
             schema_version=tool.schema_version,

@@ -1,6 +1,6 @@
 # ChainWeaver
 
-**Compile deterministic MCP tool chains into LLM-free executable flows.**
+**Compile deterministic tool flows into LLM-free executable runs.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
 [![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph before ["❌ Naive Agent Chaining · N LLM calls"]
+    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
         R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
     end
     subgraph after ["✅ ChainWeaver · 0 LLM calls"]
@@ -38,13 +38,13 @@ result = executor.execute_flow("calc", {"number": 5})
 
 > See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
 
-**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Roadmap](#roadmap)**
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
 
 ---
 
 ## Why ChainWeaver?
 
-When an LLM-powered agent chains tools together — `fetch_data → transform → store` — a
+When an LLM-powered agent routes tools together — `fetch_data → transform → store` — a
 common pattern is to insert an LLM call between *every* step so the model can "decide"
 what to do next.
 
@@ -64,14 +64,14 @@ LLM call ──► Tool C
 Response
 ```
 
-For chains that are **fully deterministic** (the next step is always the same given the
+For flows that are **fully deterministic** (the next step is always the same given the
 previous output) these intermediate LLM calls add:
 
 - **Latency** — each round-trip costs hundreds of milliseconds.
 - **Cost** — every call consumes tokens and credits.
 - **Unpredictability** — a language model might route differently on each invocation.
 
-ChainWeaver compiles deterministic multi-tool chains into **executable flows** that run
+ChainWeaver compiles deterministic multi-tool flows into **executable flows** that run
 without any LLM involvement between steps:
 
 ```
@@ -86,7 +86,7 @@ Response
 
 Think of it as the difference between an **interpreter** and a **compiler**:
 
-| Criterion | Naive LLM chaining | ChainWeaver |
+| Criterion | Naive LLM loop | ChainWeaver |
 |---|---|---|
 | LLM calls per step | 1 per step | 0 |
 | Latency | O(n × LLM RTT) | O(n × tool RTT) |
@@ -96,6 +96,71 @@ Think of it as the difference between an **interpreter** and a **compiler**:
 | Observability | Prompt logs only | Structured step logs |
 | Reusability | Prompt templates | Registered, versioned flows |
 
+### How is this different from LangChain / LangGraph / Prefect / Dagster / Temporal?
+
+Short answer: those frameworks each make a different design choice that's
+right for their own audience. ChainWeaver makes one specific trade-off —
+**no LLM calls between steps, enforced at the framework level** — and
+aligns the rest of the design (Pydantic-validated I/O, file-serializable
+flows, no server) around it.
+
+| | ChainWeaver | LangChain LCEL | LangGraph | Prefect 3 | Dagster | Temporal |
+|---|---|---|---|---|---|---|
+| LLM-free between steps | ✅ hard invariant | ⚠️ possible, not enforced | ⚠️ possible, not enforced | ✅ N/A | ✅ N/A | ✅ N/A |
+| Pydantic-validated I/O | ✅ required | ⚠️ optional | ✅ | ✅ Pydantic 2 native | ⚠️ Dagster `Config` | ⚠️ optional |
+| Lean dep set | ✅ 5 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
+| File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
+
+See [docs/comparisons.md](docs/comparisons.md) for the full matrix —
+including version pins, citations to each alternative's own docs, and a
+"when to pick which" guide.
+
+---
+
+## Is this for me?
+
+ChainWeaver is built for one specific shape of problem. The
+[full fit/non-fit page](https://chainweaver.readthedocs.io/en/latest/boundaries/) covers
+the nuances; the short version:
+
+**Use ChainWeaver when**
+
+- The flow is predictable — you can name the next tool from the previous output
+  without asking a model to decide.
+- Determinism matters — same input must produce the same output, same execution path,
+  same trace.
+- You want strict schemas, audit-grade traces, and zero LLM calls between deterministic
+  steps.
+
+**Don't use ChainWeaver when**
+
+- Every step requires open-ended reasoning to pick the next one (use an agent
+  framework: LangGraph, the OpenAI / Anthropic SDK tool-use loops).
+- You need a general workflow engine for scheduled / durable jobs across time
+  (use Prefect, Dagster, or Temporal).
+- You expect the executor to call an LLM. It deliberately doesn't.
+
+### How ChainWeaver relates to neighbours
+
+| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
+|---|---|---|---|---|---|---|
+| LLM-free between steps (by design) | **Yes** | No | N/A | N/A | N/A | No |
+| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
+| Small runtime dependency set | **Yes** (5 packages) | No | No | No | No | No |
+| File-serializable flow definitions | **Yes** (JSON / YAML) | No | Python | Python | Python | No |
+| Standalone (no server / scheduler) | **Yes** | Yes | No | No | No | Yes |
+| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
+| Graph branches on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
+
+The full one-paragraph-per-tool comparison lives at
+[docs/comparisons.md](docs/comparisons.md) and on the
+[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/). Re-evaluated
+on each minor release of any of the projects above.
+
+For the correctness argument behind the design, see
+[docs/data-integrity.md](docs/data-integrity.md).
+
 ---
 
 ## Installation
@@ -103,6 +168,16 @@ Think of it as the difference between an **interpreter** and a **compiler**:
 ```bash
 pip install chainweaver
 ```
+
+Optional extras:
+
+| Extra | Use when |
+|-------|----------|
+| `chainweaver[yaml]` | Reading / writing `.flow.yaml` files |
+| `chainweaver[otel]` | Emitting OpenTelemetry spans for every flow run |
+| `chainweaver[contrib]` | Importing the curated standard tool library (see [Standard tool library](#standard-tool-library)) |
+| `chainweaver[langchain]` | Bidirectional adapters between ChainWeaver and LangChain `BaseTool` |
+| `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` |
 
 ---
 
@@ -206,7 +281,13 @@ python examples/simple_linear_flow.py   # simple arithmetic flow
 python examples/etl_flow.py             # ETL flow: fetch → validate → normalize → enrich → store
 python examples/mcp_search_flow.py      # MCP-style search → extract → format flow
 python examples/naive_vs_compiled.py    # timing comparison: naive LLM calls vs ChainWeaver flow
+python examples/coding_agent_pr_review.py    # deterministic PR-review checklist
+python examples/coding_agent_changelog.py    # changelog generation workflow template
+python examples/coding_agent_debug_log.py    # debug-log triage workflow template
 ```
+
+The hosted docs also include a [cookbook](docs/cookbook/index.md) with six paired
+scripts under `examples/cookbook/`.
 
 ### With the `@tool` decorator
 
@@ -447,7 +528,7 @@ In practice:
 1. An agent calls `tool_a`, then `tool_b`, then `tool_c` several times with
    the same routing logic.
 2. A higher-level observer detects the pattern and registers a named `Flow`.
-3. On subsequent invocations the executor runs the entire chain in a single
+3. On subsequent invocations the executor runs the entire flow in a single
    call — no intermediate LLM calls required.
 
 ---
@@ -473,8 +554,136 @@ All errors are typed and traceable:
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 | `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field |
+| `PluginDiscoveryError` | Strict-mode plugin discovery (`discover_tools(strict=True)` / `discover_flows(strict=True)`) hits a misbehaving entry-point loader |
+| `ContribError` | A `chainweaver.contrib.tools` tool hits a contract violation (missing JSON-pointer key, wrong predicate shape, assertion mismatch) |
 
 All exceptions inherit from `ChainWeaverError`.
+
+---
+
+## Standard tool library
+
+`chainweaver.contrib.tools` ships a curated set of deterministic
+utility tools so that a new user can compose a meaningful flow on the
+first afternoon without writing any `Tool` boilerplate.
+
+```python
+from chainweaver.contrib.tools import (
+    assert_equal,
+    filter_list,
+    json_pluck,
+    json_set,
+    map_list,
+    passthrough,
+)
+```
+
+| Tool | Purpose |
+|------|---------|
+| `passthrough` | Identity — return the context unchanged. |
+| `json_pluck` | Extract one value by RFC-6901 JSON pointer. |
+| `json_set` | Set one value by RFC-6901 JSON pointer; returns a new dict. |
+| `assert_equal` | Raise `ContribError` when two context keys differ. |
+| `map_list` | Apply a registered sub-flow to each element of a list. |
+| `filter_list` | Drop elements whose predicate sub-flow returns falsy. |
+
+The library is **deterministic-only**: no HTTP, file I/O, database
+access, RNG, or clocks.  Anything stateful belongs in user code.
+Install with `pip install 'chainweaver[contrib]'`.
+
+Runnable examples: [`examples/contrib_pluck_and_set.py`](examples/contrib_pluck_and_set.py),
+[`examples/contrib_map_filter.py`](examples/contrib_map_filter.py).
+
+---
+
+## Export adapters
+
+Hand a compiled flow off to any external agent framework via
+`chainweaver.export`:
+
+```python
+from chainweaver.export import (
+    flow_to_anthropic_tool,
+    flow_to_callable,
+    flow_to_openai_function,
+)
+
+openai_spec = flow_to_openai_function(flow, executor)
+anthropic_spec = flow_to_anthropic_tool(flow, executor)
+run = flow_to_callable(flow, executor)  # plain dict → dict callable
+```
+
+`flow_to_openai_function` emits the
+`{"type": "function", "function": {…}}` shape OpenAI's chat / responses
+APIs expect.  `flow_to_anthropic_tool` emits Anthropic's `tool_use`
+shape.  `flow_to_callable` wraps the flow as a `Callable[[dict], dict]`
+suitable for any framework that accepts arbitrary Python callables.
+
+None of these adapters imports `openai` or `anthropic` — they emit
+dicts and callables only.  Runtime integration with those clients is
+the caller's job.
+
+Runnable example: [`examples/export_openai_anthropic.py`](examples/export_openai_anthropic.py).
+
+---
+
+## Ecosystem bridges (LangChain, LlamaIndex)
+
+`chainweaver.integrations.langchain` and
+`chainweaver.integrations.llamaindex` ship thin bidirectional adapters
+so existing LangChain `BaseTool` / LlamaIndex `FunctionTool`
+instances can be pulled into ChainWeaver, and ChainWeaver `Tool`
+instances can be pushed back out.
+
+```python
+from chainweaver.integrations.langchain import (
+    from_langchain_tool,
+    to_langchain_tool,
+)
+
+cw_tool = from_langchain_tool(my_langchain_tool)
+lc_tool = to_langchain_tool(my_cw_tool)
+```
+
+Install with `pip install 'chainweaver[langchain]'` /
+`'chainweaver[llamaindex]'`.  Importing either module without the
+relevant extra raises a clear `ImportError`.
+
+---
+
+## Plugin discovery
+
+For third-party packages — `chainweaver-aws`, `chainweaver-stripe`,
+… — ChainWeaver follows the same entry-point convention used by
+pytest, Sphinx, MkDocs, and friends.
+
+Publisher (`pyproject.toml`):
+
+```toml
+[project.entry-points."chainweaver.tools"]
+aws = "chainweaver_aws:get_tools"
+
+[project.entry-points."chainweaver.flows"]
+aws = "chainweaver_aws:get_flows"
+```
+
+Consumer:
+
+```python
+from chainweaver import FlowExecutor, FlowRegistry
+
+# Auto-register every tool / flow advertised by an installed plugin.
+registry = FlowRegistry(discover_plugins=True)
+executor = FlowExecutor(registry=registry, discover_plugins=True)
+```
+
+Discovery is **opt-in** — importing `chainweaver` does not trigger
+plugin imports.  Misbehaving plugins (raise on import, return the
+wrong type) are logged at `WARNING` and skipped; pass
+`strict=True` to `discover_tools()` / `discover_flows()` for the loud
+form.
+
+Runnable example: [`examples/plugin_discovery.py`](examples/plugin_discovery.py).
 
 ---
 
@@ -487,18 +696,21 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 |-----------|-------|--------|
 | **v0.1.0** — Harden Foundation & Streamline DX | Infra, docs, DX APIs, CI | shipped |
 | **v0.2.0** — Build Core Execution & MCP Bridge | DAG execution, MCP adapter/server, guardrails | shipped |
-| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance pipeline | shipped |
+| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance workflow | shipped |
 | **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | **shipped (current)** |
 | **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | planned |
 | **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | planned |
 | **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, offline LLM compiler | planned |
 | **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
 
+Curious how ChainWeaver compares to LangChain, LangGraph, Prefect,
+Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
+
 ---
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with eight subcommands:
+ChainWeaver ships a `chainweaver` console script with the following subcommands:
 
 ```bash
 # Run a flow from disk — no Python required.
@@ -516,14 +728,21 @@ chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 # Inspect a registered flow's structure (table or JSON).
 chainweaver inspect my_flow --format json
 
-# Analyze execution traces for bottlenecks.
-chainweaver profile trace1.json trace2.json
+# Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
+# and per-step / per-tool retry / skip / fallback / failure aggregates.
+chainweaver profile trace_a.json trace_b.json --format json
 
-# Compare two execution results step-by-step.
-chainweaver diff a.json b.json
+# Compare two ExecutionResult JSON files step-by-step.
+chainweaver diff baseline.json current.json --perf-tolerance 25
 
 # Observed-determinism attestation: run N inputs × M repeats.
 chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 3
+
+# Advisory optimization suggestions for a saved flow.
+chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.json
+
+# Check saved flows for tool schema drift against the live registry.
+chainweaver doctor flows/ --check-drift --tools my_pkg.tools
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:
@@ -550,6 +769,9 @@ python examples/simple_linear_flow.py   # simple arithmetic flow
 python examples/etl_flow.py             # ETL flow
 python examples/mcp_search_flow.py      # MCP-style search & summarize flow
 python examples/naive_vs_compiled.py    # naive vs compiled timing comparison
+python examples/coding_agent_pr_review.py
+python examples/coding_agent_changelog.py
+python examples/coding_agent_debug_log.py
 ```
 
 ---

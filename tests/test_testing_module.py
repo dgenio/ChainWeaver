@@ -7,6 +7,8 @@ acceptance-criterion bullet from the issue body.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from helpers import (
     NumberInput,
@@ -38,6 +40,15 @@ def _two_step_flow() -> Flow:
             FlowStep(tool_name="double", input_mapping={"number": "number"}),
             FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
         ],
+    )
+
+
+def _one_step_double_flow() -> Flow:
+    return Flow(
+        name="testing_one_step",
+        version="0.1.0",
+        description="Single-step flow used for async-passthrough tests.",
+        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
     )
 
 
@@ -140,6 +151,32 @@ def test_runner_passthrough_tool_preserves_real_schemas() -> None:
     assert result.success is True
     assert result.final_output is not None
     assert result.final_output["value"] == 18  # (4*2) + 10
+
+
+def test_runner_passthrough_async_tool_is_logged_and_executed() -> None:
+    # An async Tool (#80) wrapped for logging must stay async so the sync
+    # executor bridges it via asyncio.run, the real coroutine runs, and the
+    # invocation is still recorded.
+    async def _async_double(inp: NumberInput) -> dict[str, Any]:
+        return {"value": inp.number * 2}
+
+    async_tool = Tool(
+        name="double",
+        description="async double",
+        input_schema=NumberInput,
+        output_schema=ValueOutput,
+        fn=_async_double,
+    )
+    runner = FlowTestRunner(_one_step_double_flow())
+    wrapped = runner.passthrough_tool(async_tool)
+
+    result = runner.execute("testing_one_step", {"number": 4})
+
+    assert wrapped.is_async is True
+    assert result.success is True
+    assert result.final_output is not None
+    assert result.final_output["value"] == 8
+    assert runner.calls_to("double") == 1
 
 
 # ---------------------------------------------------------------------------

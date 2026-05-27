@@ -57,7 +57,22 @@ from chainweaver.compiler import (
     CompilationWarning,
     compile_flow,
 )
+from chainweaver.contracts import (
+    DeterminismLevel,
+    SideEffectLevel,
+    StabilityLevel,
+    ToolSafetyContract,
+    evaluate_predicate,
+    merge_safety,
+)
 from chainweaver.cost import CostProfile, CostReport
+from chainweaver.decisions import (
+    BaseDecisionCallback,
+    DecisionCallable,
+    DecisionCallback,
+    DecisionContext,
+    coerce_decision_callback,
+)
 from chainweaver.decorators import tool
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
@@ -65,7 +80,9 @@ from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    ContribError,
     DAGDefinitionError,
+    DecisionCallbackError,
     FlowAlreadyExistsError,
     FlowExecutionError,
     FlowNotFoundError,
@@ -73,6 +90,12 @@ from chainweaver.exceptions import (
     FlowStatusError,
     InputMappingError,
     InvalidFlowVersionError,
+    KernelInvocationError,
+    MCPError,
+    MCPSchemaConversionError,
+    MCPToolInvocationError,
+    PluginDiscoveryError,
+    PredicateSyntaxError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -90,6 +113,7 @@ from chainweaver.executor import (
     StepRecord,
 )
 from chainweaver.flow import (
+    ConditionalEdge,
     DAGFlow,
     DAGFlowStep,
     DriftInfo,
@@ -109,7 +133,9 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.plugins import discover_flows, discover_tools
 from chainweaver.registry import FlowRegistry
+from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
     flow_from_dict,
     flow_from_json,
@@ -137,11 +163,12 @@ ExecutionSnapshot.model_rebuild(_types_namespace=_forward_namespace)
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 
-__version__ = "0.4.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "AttestationInputError",
     "AttestationReport",
+    "BaseDecisionCallback",
     "BaseMiddleware",
     "ChainAnalyzer",
     "ChainWeaverError",
@@ -153,11 +180,18 @@ __all__ = [
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "ConditionalEdge",
+    "ContribError",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionCallable",
+    "DecisionCallback",
+    "DecisionCallbackError",
+    "DecisionContext",
+    "DeterminismLevel",
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
@@ -186,14 +220,22 @@ __all__ = [
     "InMemoryStore",
     "InputMappingError",
     "InvalidFlowVersionError",
+    "KernelInvocationError",
+    "MCPError",
+    "MCPSchemaConversionError",
+    "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "PluginDiscoveryError",
+    "PredicateSyntaxError",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "SideEffectLevel",
+    "StabilityLevel",
     "StepCache",
     "StepCacheKey",
     "StepDiff",
@@ -207,21 +249,28 @@ __all__ = [
     "ToolDefinitionError",
     "ToolNotFoundError",
     "ToolOutputSizeError",
+    "ToolSafetyContract",
     "ToolTimeoutError",
     "TraceRecorder",
     "attest_flow",
     "check_flow_compatibility",
     "cli",
+    "coerce_decision_callback",
     "compile_flow",
+    "discover_flows",
+    "discover_tools",
+    "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "merge_safety",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",

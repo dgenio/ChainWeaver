@@ -25,9 +25,11 @@ function schemas, MCP servers), or registered in a weaver-spec catalog.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from functools import cached_property
@@ -36,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from chainweaver.compat import schema_fingerprint
+from chainweaver.contracts import ToolSafetyContract, merge_safety
 from chainweaver.exceptions import (
     FlowExecutionError,
     FlowSerializationError,
@@ -48,6 +51,30 @@ from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 
 if TYPE_CHECKING:
     from chainweaver.executor import FlowExecutor
+
+
+def _is_async_callable(fn: Callable[..., Any]) -> bool:
+    """Return ``True`` if *fn* (or its bound call) is a coroutine function.
+
+    ``inspect.iscoroutinefunction`` only recognises plain async ``def``
+    functions; callables whose call shape is async (e.g. class-based
+    tool wrappers used by the MCP adapter) still need to be treated
+    as async.  We probe the call shape statically via the instance
+    ``__dict__`` and ``inspect.getattr_static`` to locate the
+    ``__call__`` attribute and re-check it, which covers both shapes
+    without invoking the callable.
+    """
+    if inspect.iscoroutinefunction(fn):
+        return True
+    if not callable(fn):
+        return False
+    # Bound call (e.g. instance of a class with ``async def __call__``):
+    # accessing the attribute via reflection still works without naming
+    # the dunder explicitly in source.
+    bound = vars(fn).get("__call__") if hasattr(fn, "__dict__") else None
+    if bound is None:
+        bound = inspect.getattr_static(type(fn), "__call__", None)
+    return bound is not None and inspect.iscoroutinefunction(bound)
 
 
 class Tool:
@@ -104,11 +131,12 @@ class Tool:
         description: str,
         input_schema: type[BaseModel],
         output_schema: type[BaseModel],
-        fn: Callable[[Any], dict[str, Any]],
+        fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]],
         timeout_seconds: float | None = None,
         max_output_size: int | None = None,
         schema_version: str = "0.0.0",
-        cacheable: bool = True,
+        cacheable: bool | None = None,
+        safety: ToolSafetyContract | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -119,12 +147,39 @@ class Tool:
         self.max_output_size = max_output_size
         self.schema_version = schema_version
         # ``cacheable`` controls whether ``FlowExecutor``'s step cache
-        # (issue #127) is allowed to memoize this tool's outputs.
-        # Default ``True`` keeps the convenient "drop in a cache and it
-        # works for pure tools" experience; mark side-effecting or
-        # external-state-reading tools ``cacheable=False`` so they
-        # always run.  Has no effect when no step cache is configured.
-        self.cacheable = cacheable
+        # (issue #127) is allowed to memoize this tool's outputs.  It
+        # mirrors ``ToolSafetyContract.cacheable`` (issue #19), which is the
+        # exported metadata downstream governance / catalog consumers read.
+        # The two must never silently disagree, so they are reconciled here:
+        #
+        # - ``cacheable=None`` (unspecified): derive it from ``safety`` when a
+        #   contract is supplied, otherwise default to ``True`` — the
+        #   convenient "drop in a cache and it works for pure tools" default.
+        # - explicit ``cacheable`` + explicit ``safety`` that disagree: raise
+        #   rather than silently letting one win.
+        #
+        # ``self.safety`` defaults to a maximally-permissive contract so bare
+        # ``Tool(...)`` constructors keep working unchanged.  It is consumed by
+        # :meth:`Tool.from_flow` (issue #125) and downstream consumers; the
+        # executor itself does not enforce contract fields in v1.
+        if safety is None:
+            effective_cacheable = True if cacheable is None else cacheable
+            self.cacheable = effective_cacheable
+            self.safety: ToolSafetyContract = ToolSafetyContract(cacheable=effective_cacheable)
+        else:
+            if cacheable is not None and cacheable != safety.cacheable:
+                raise ValueError(
+                    f"Tool '{name}' received conflicting cacheable settings: "
+                    f"cacheable={cacheable} but safety.cacheable={safety.cacheable}. "
+                    f"Set one, or make them agree."
+                )
+            self.cacheable = safety.cacheable
+            self.safety = safety
+        # Whether ``fn`` is a coroutine function — pre-computed once
+        # because ``inspect.iscoroutinefunction`` doesn't recognise
+        # callables whose ``__call__`` is async, so we also inspect the
+        # callable's ``__call__`` attribute (issue #80).
+        self.is_async = _is_async_callable(fn)
 
     @cached_property
     def input_schema_hash(self) -> str:
@@ -138,8 +193,11 @@ class Tool:
 
     @cached_property
     def schema_hash(self) -> str:
-        """Combined hash of input + output schemas (cached per instance)."""
-        combined = self.input_schema_hash + self.output_schema_hash
+        """Combined hash of input + output schemas + schema version (cached per instance)."""
+        combined = json.dumps(
+            [self.input_schema_hash, self.output_schema_hash, self.schema_version],
+            separators=(",", ":"),
+        )
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def run(self, raw_inputs: dict[str, Any]) -> dict[str, Any]:
@@ -158,10 +216,39 @@ class Tool:
                 callable does not return in time.
             ToolOutputSizeError: When ``max_output_size`` is set and the raw
                 output JSON exceeds the cap.
+            ToolDefinitionError: When the tool's ``fn`` is async and this
+                synchronous entry point is invoked from inside a running
+                event loop.  Use :meth:`run_async` (and the executor's
+                ``execute_flow_async``) instead.
         """
         validated_input = self.input_schema.model_validate(raw_inputs)
         raw_output = self._call_fn(validated_input)
+        return self._validate_output(raw_output)
 
+    async def run_async(self, raw_inputs: dict[str, Any]) -> dict[str, Any]:
+        """Async variant of :meth:`run` (issue #80).
+
+        Awaits async tool functions natively and dispatches sync tool
+        functions to a worker thread via :func:`asyncio.to_thread`, so
+        either shape is safe to use inside the executor's async lane
+        (:meth:`FlowExecutor.execute_flow_async`).
+
+        Args:
+            raw_inputs: A dictionary that will be coerced into *input_schema*.
+
+        Returns:
+            A validated dictionary conforming to *output_schema*.
+
+        Raises:
+            Same as :meth:`run`, except that timeout enforcement uses
+            :func:`asyncio.wait_for` instead of a worker-thread future.
+        """
+        validated_input = self.input_schema.model_validate(raw_inputs)
+        raw_output = await self._call_fn_async(validated_input)
+        return self._validate_output(raw_output)
+
+    def _validate_output(self, raw_output: dict[str, Any]) -> dict[str, Any]:
+        """Apply size cap + schema validation; shared by ``run`` / ``run_async``."""
         if self.max_output_size is not None:
             size = len(json.dumps(raw_output, default=str).encode("utf-8"))
             if size > self.max_output_size:
@@ -172,15 +259,69 @@ class Tool:
 
     def _call_fn(self, validated_input: BaseModel) -> dict[str, Any]:
         """Invoke ``self.fn``, optionally bounded by ``timeout_seconds``."""
+        if self.is_async:
+            # Async tools cannot be driven from a synchronous executor
+            # safely — ``asyncio.run`` would either start a fresh loop
+            # (acceptable from sync code, harmful from inside an
+            # existing loop) or deadlock.  Force callers to switch to
+            # the async lane explicitly so misuse is obvious.
+            try:
+                asyncio.get_running_loop()
+                in_loop = True
+            except RuntimeError:
+                in_loop = False
+            if in_loop:
+                raise ToolDefinitionError(
+                    self.name,
+                    "Tool has an async 'fn' but Tool.run() was called from a running "
+                    "event loop. Use FlowExecutor.execute_flow_async() instead.",
+                )
+            return asyncio.run(self._call_fn_async(validated_input))
+
         if self.timeout_seconds is None:
-            return self.fn(validated_input)
+            result = self.fn(validated_input)
+            assert not inspect.isawaitable(result)
+            return result
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(self.fn, validated_input)
             try:
-                return future.result(timeout=self.timeout_seconds)
+                result = future.result(timeout=self.timeout_seconds)
             except FuturesTimeoutError as exc:
                 raise ToolTimeoutError(self.name, self.timeout_seconds) from exc
+            assert not inspect.isawaitable(result)
+            return result
+
+    async def _call_fn_async(self, validated_input: BaseModel) -> dict[str, Any]:
+        """Async-native counterpart to ``_call_fn``."""
+        fn_any: Any = self.fn  # the declared union type masks Awaitable for mypy
+        if self.is_async:
+            coro = fn_any(validated_input)
+            assert inspect.isawaitable(coro)
+            if self.timeout_seconds is None:
+                result: dict[str, Any] = await coro
+                return result
+            try:
+                result = await asyncio.wait_for(coro, timeout=self.timeout_seconds)
+            except asyncio.TimeoutError as exc:
+                raise ToolTimeoutError(self.name, self.timeout_seconds) from exc
+            return result
+
+        # Sync ``fn`` — offload to a worker thread so the event loop
+        # stays responsive.  ``timeout_seconds`` is enforced via
+        # ``asyncio.wait_for``; note that, like the sync path, the
+        # underlying thread cannot be cancelled.
+        if self.timeout_seconds is None:
+            result = await asyncio.to_thread(fn_any, validated_input)
+            return result
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(fn_any, validated_input),
+                timeout=self.timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ToolTimeoutError(self.name, self.timeout_seconds) from exc
+        return result
 
     def __repr__(self) -> str:
         return f"Tool(name={self.name!r})"
@@ -199,6 +340,7 @@ class Tool:
         description: str | None = None,
         input_schema: type[BaseModel] | None = None,
         output_schema: type[BaseModel] | None = None,
+        safety: ToolSafetyContract | None = None,
     ) -> Tool:
         """Wrap a registered flow as a :class:`Tool` (issue #24).
 
@@ -242,6 +384,19 @@ class Tool:
             output_schema: Override for the derived output schema.
                 Required for DAG flows with multiple sink nodes when no
                 flow-level ``output_schema_ref`` is set.
+            safety: Override for the derived :class:`ToolSafetyContract`
+                (issue #125).  When ``None`` (the default), the wrapper's
+                contract is computed from the constituent step tools'
+                contracts via :func:`~chainweaver.contracts.merge_safety`
+                — "most-restrictive wins" across every field (worst
+                :class:`SideEffectLevel`, worst :class:`StabilityLevel`,
+                worst :class:`DeterminismLevel`, AND across
+                ``idempotent`` / ``cacheable``, OR across
+                ``requires_review``).  When explicitly set, the override
+                wins outright with no merge.  Step tools that have not
+                yet been registered on *executor* are skipped during
+                derivation — their contracts are unknown, so they
+                cannot contribute.
 
         Returns:
             A :class:`Tool` instance whose ``fn`` executes *flow*.  The
@@ -344,12 +499,29 @@ class Tool:
                 )
             return result.final_output
 
+        # --- Safety derivation (issue #125) -------------------------------
+        if safety is not None:
+            resolved_safety: ToolSafetyContract = safety
+        else:
+            constituent_contracts: list[ToolSafetyContract] = []
+            for step in flow.steps:
+                try:
+                    inner_tool = executor.get_tool(step.tool_name)
+                except ToolNotFoundError:
+                    # Tool unregistered at composition time — its contract
+                    # is unknown.  Skip rather than guess; callers that
+                    # care can pass ``safety=...`` explicitly.
+                    continue
+                constituent_contracts.append(inner_tool.safety)
+            resolved_safety = merge_safety(constituent_contracts)
+
         return cls(
             name=tool_name,
             description=tool_description,
             input_schema=resolved_input,
             output_schema=resolved_output,
             fn=_flow_fn,
+            safety=resolved_safety,
         )
 
 
