@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779828621345,
+  "lastUpdate": 1779877872940,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -432,6 +432,78 @@ window.BENCHMARK_DATA = {
             "value": 0.2985749999879772,
             "unit": "ms",
             "extra": "min=0.26ms max=0.36ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b252d59a9821eb4c76e2893c9f7b0871a8b7ab9",
+          "message": "Merge pull request #183 from dgenio/claude/triage-issues-pNfax\n\nfeat: Weaver Stack boundary alignment — capability identity, decisions, kernel backend (#89, #90, #91, #102, #106, #107)",
+          "timestamp": "2026-05-27T11:30:17+01:00",
+          "tree_id": "c56df6c0ccccafae636fc9c17ebf2af9b5458910",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/1b252d59a9821eb4c76e2893c9f7b0871a8b7ab9"
+        },
+        "date": 1779877872005,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.1718999999980042,
+            "unit": "ms",
+            "extra": "min=0.17ms max=0.22ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.11757699999748183,
+            "unit": "ms",
+            "extra": "min=0.11ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.2512410000008458,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.29ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.1587999999941303,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.93035700000053,
+            "unit": "ms",
+            "extra": "min=101.40ms max=102.00ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.37679600001183644,
+            "unit": "ms",
+            "extra": "min=0.33ms max=0.38ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.33547000000078,
+            "unit": "ms",
+            "extra": "min=251.31ms max=251.55ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.3301149999970221,
+            "unit": "ms",
+            "extra": "min=0.30ms max=0.36ms repeats=5"
           }
         ]
       }
