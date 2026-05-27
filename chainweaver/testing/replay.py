@@ -206,10 +206,13 @@ def _recording_session(
     original_call_fn = Tool._call_fn
 
     def patched_call_fn(self: Tool, validated_input: BaseModel) -> dict[str, Any]:
-        # Canonical input form — Pydantic's model_dump() applies the
-        # same coercions every call, so equal inputs always produce
-        # equal dicts (and therefore equal JSON keys).
-        canonical_input = validated_input.model_dump()
+        # Canonical input form — Pydantic's model_dump() applies the same
+        # coercions every call, and ``_json_safe`` then projects the dict
+        # onto JSON-native types so the in-memory form matches what a
+        # round-trip through the fixture file produces.  This keeps record
+        # and replay symmetric: the stored ``input`` equals the value the
+        # replay matcher compares against (#186 review).
+        canonical_input = _json_safe(validated_input.model_dump())
 
         if mode is RecordReplayMode.REPLAY:
             return _consume_recording(
@@ -226,23 +229,44 @@ def _recording_session(
             {
                 "tool_name": self.name,
                 "input": canonical_input,
-                "output": dict(output),
+                "output": _json_safe(dict(output)),
             }
         )
         return output
 
     Tool._call_fn = patched_call_fn  # type: ignore[method-assign]
+    completed = False
     try:
         yield
+        completed = True
     finally:
         Tool._call_fn = original_call_fn  # type: ignore[method-assign]
-        if mode is RecordReplayMode.RECORD:
+        # Persist only when the wrapped body completed without raising: a
+        # failing or interrupted test must not overwrite a good fixture
+        # with a partial recording (#186 review).
+        if mode is RecordReplayMode.RECORD and completed:
             _save_fixture(fixture_path, interactions, redaction)
 
 
 # ---------------------------------------------------------------------------
 # Internal: fixture I/O
 # ---------------------------------------------------------------------------
+
+
+def _json_safe(value: dict[str, Any]) -> dict[str, Any]:
+    """Project *value* onto JSON-native types via a deterministic round-trip.
+
+    Tool inputs and outputs can carry values Pydantic accepts but ``json``
+    does not serialize natively (``datetime``, ``UUID``, ``Decimal``, …).
+    Recording such a value and reading it back would otherwise yield a
+    string while the live ``model_dump()`` still holds the original object,
+    so replay matching would miss.  Round-tripping through
+    ``json.dumps(..., default=str)`` once — at both record and replay time —
+    gives a single canonical form shared by the stored fixture and the
+    in-memory comparison, mirroring the ``default=str`` persistence used by
+    ``cache.py`` and ``tools.py``.
+    """
+    return cast(dict[str, Any], json.loads(json.dumps(value, default=str)))
 
 
 def _load_fixture(fixture_path: Path) -> list[dict[str, Any]]:
@@ -271,7 +295,45 @@ def _load_fixture(fixture_path: Path) -> list[dict[str, Any]]:
         raise ValueError(
             f"Replay fixture '{fixture_path}' is malformed: 'interactions' must be a list."
         )
-    return [dict(item) for item in interactions]
+    return [
+        _validate_interaction(fixture_path, idx, item) for idx, item in enumerate(interactions)
+    ]
+
+
+def _validate_interaction(fixture_path: Path, idx: int, item: Any) -> dict[str, Any]:
+    """Return a normalized interaction dict or raise a clear ``ValueError``.
+
+    Validates structure at load time so a malformed or hand-edited fixture
+    fails with an actionable message naming the offending index, rather than
+    surfacing as an opaque ``KeyError`` / ``TypeError`` deep inside
+    :func:`_consume_recording` (#186 review).
+    """
+    if not isinstance(item, dict):
+        raise ValueError(
+            f"Replay fixture '{fixture_path}' is malformed: interaction {idx} "
+            f"must be an object, got '{type(item).__name__}'."
+        )
+    missing = {"tool_name", "input", "output"} - item.keys()
+    if missing:
+        raise ValueError(
+            f"Replay fixture '{fixture_path}' is malformed: interaction {idx} "
+            f"is missing key(s) {sorted(missing)}."
+        )
+    if not isinstance(item["tool_name"], str):
+        raise ValueError(
+            f"Replay fixture '{fixture_path}' is malformed: interaction {idx} "
+            f"'tool_name' must be a string."
+        )
+    if not isinstance(item["input"], dict) or not isinstance(item["output"], dict):
+        raise ValueError(
+            f"Replay fixture '{fixture_path}' is malformed: interaction {idx} "
+            f"'input' and 'output' must be objects."
+        )
+    return {
+        "tool_name": item["tool_name"],
+        "input": dict(item["input"]),
+        "output": dict(item["output"]),
+    }
 
 
 def _save_fixture(
@@ -299,7 +361,7 @@ def _save_fixture(
         "interactions": redacted,
     }
     fixture_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
 

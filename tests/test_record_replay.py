@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +22,14 @@ from chainweaver.registry import FlowRegistry
 from chainweaver.testing import (
     FixtureStaleError,
     RecordReplayMode,
+    fake_tool,
     record_then_replay,
 )
 from chainweaver.testing.replay import (
     RECORD_ENV_VAR,
     _canonical_key,
     _consume_recording,
+    _json_safe,
     _load_fixture,
     _save_fixture,
 )
@@ -453,3 +456,149 @@ def test_record_then_replay_preserves_wrapped_signature(tmp_path: Path) -> None:
         return f"{arg1}-{arg2}"
 
     assert my_test.__name__ == "my_test"
+
+
+# ---------------------------------------------------------------------------
+# JSON-safe normalization (#186 review — comment 1)
+# ---------------------------------------------------------------------------
+
+
+def test_json_safe_projects_non_json_native_values_to_strings() -> None:
+    out = _json_safe({"ts": datetime(2026, 1, 2, 3, 4, 5), "n": 1})
+
+    assert out == {"ts": "2026-01-02 03:04:05", "n": 1}
+    # The result must itself serialize without a custom ``default``.
+    json.dumps(out)
+
+
+def test_save_fixture_serializes_non_json_native_values(tmp_path: Path) -> None:
+    fixture = tmp_path / "dt_save.json"
+    interactions = [
+        {"tool_name": "t", "input": {}, "output": {"ts": datetime(2026, 1, 2)}},
+    ]
+
+    # Must not raise despite the datetime value — ``default=str`` on write.
+    _save_fixture(fixture, interactions, RedactionPolicy(redact_keys=frozenset()))
+    loaded = _load_fixture(fixture)
+
+    assert loaded[0]["output"]["ts"] == "2026-01-02 00:00:00"
+
+
+def test_record_replay_round_trips_non_json_native_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A datetime in the tool input must survive the record→replay round trip.
+
+    ``model_dump()`` yields a live ``datetime`` while the fixture stores its
+    string form; ``_json_safe`` projects both onto the same JSON-native value
+    so replay matching does not spuriously raise ``FixtureStaleError``.
+    """
+    fixture = tmp_path / "dt_e2e.json"
+    echo_flow = Flow(
+        name="record_replay_echo",
+        version="0.1.0",
+        description="One-step echo flow for the datetime round-trip test.",
+        steps=[FlowStep(tool_name="echo", input_mapping={"when": "when"})],
+    )
+
+    def _build() -> FlowExecutor:
+        registry = FlowRegistry()
+        registry.register_flow(echo_flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(fake_tool("echo", lambda inp: {"echoed": inp["when"]}))
+        return ex
+
+    when = datetime(2026, 5, 27, 12, 0, 0)
+
+    monkeypatch.setenv(RECORD_ENV_VAR, "1")
+    ex_record = _build()
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _record() -> None:
+        assert ex_record.execute_flow("record_replay_echo", {"when": when}).success
+
+    _record()
+    monkeypatch.delenv(RECORD_ENV_VAR)
+
+    # The fixture stored the datetime as its string form.
+    loaded = _load_fixture(fixture)
+    assert loaded[0]["input"]["when"] == str(when)
+
+    # Replay with the *same live datetime* must match the recording rather
+    # than raising FixtureStaleError on a string-vs-datetime mismatch.
+    ex_replay = _build()
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _replay() -> None:
+        result = ex_replay.execute_flow("record_replay_echo", {"when": when})
+        assert result.success
+        assert result.final_output is not None
+        assert result.final_output["echoed"] == str(when)
+
+    _replay()
+
+
+# ---------------------------------------------------------------------------
+# Save-on-success only (#186 review — comment 2)
+# ---------------------------------------------------------------------------
+
+
+def test_record_does_not_save_fixture_when_body_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failing test body must not persist a partial recording."""
+    fixture = tmp_path / "partial.json"
+    monkeypatch.setenv(RECORD_ENV_VAR, "1")
+    ex = _build_executor()
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _run() -> None:
+        ex.execute_flow("record_replay_two_step", {"number": 3})
+        raise AssertionError("boom")
+
+    with pytest.raises(AssertionError, match="boom"):
+        _run()
+
+    assert not fixture.exists()
+
+
+# ---------------------------------------------------------------------------
+# Load-time interaction validation (#186 review — comment 5)
+# ---------------------------------------------------------------------------
+
+
+def test_load_fixture_rejects_non_dict_interaction(tmp_path: Path) -> None:
+    fixture = tmp_path / "bad_item.json"
+    fixture.write_text(
+        json.dumps({"version": 1, "interactions": ["not-a-dict"]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be an object"):
+        _load_fixture(fixture)
+
+
+def test_load_fixture_rejects_interaction_missing_keys(tmp_path: Path) -> None:
+    fixture = tmp_path / "missing_keys.json"
+    fixture.write_text(
+        json.dumps({"version": 1, "interactions": [{"tool_name": "t", "input": {}}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing key"):
+        _load_fixture(fixture)
+
+
+def test_load_fixture_rejects_non_dict_input_or_output(tmp_path: Path) -> None:
+    fixture = tmp_path / "bad_io.json"
+    fixture.write_text(
+        json.dumps(
+            {"version": 1, "interactions": [{"tool_name": "t", "input": "x", "output": {}}]}
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be objects"):
+        _load_fixture(fixture)

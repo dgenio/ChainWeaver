@@ -44,7 +44,7 @@ left exactly as it was found.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from typing import Any
 
 from pydantic import BaseModel
@@ -286,16 +286,13 @@ def capture_steps(
     try:
         yield sink
     finally:
-        # ``add_middleware`` appends; we remove our specific instance
-        # so a concurrent middleware registered between the yield and
-        # this finally clause survives.  ``list.remove`` is identity
-        # by ``==`` — collector is a unique instance, so this is safe.
-        # Someone else removing our middleware mid-flight is benign — the
-        # contract is "do not leak a registered middleware on exit",
-        # which is satisfied either way.
-        _executor_middleware: list[FlowExecutorMiddleware] = executor._middleware
-        with suppress(ValueError):
-            _executor_middleware.remove(collector)
+        # Remove our specific collector instance via the public unregister
+        # API.  ``remove_middleware`` matches by ``==`` (identity for this
+        # unique instance) and swallows a missing entry, so a middleware
+        # registered between the yield and this finally clause survives and
+        # someone else removing our collector mid-flight is benign — the
+        # contract is "do not leak a registered middleware on exit".
+        executor.remove_middleware(collector)
 
 
 __all__ = [

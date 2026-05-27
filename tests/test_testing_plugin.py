@@ -64,11 +64,13 @@ def test_flow_runner_session_is_shared_across_call(
 
 
 @pytest.mark.flow("plugin_two_step")
-def test_flow_marker_is_registered() -> None:
-    # No assertion is needed — pytest would emit a
-    # ``PytestUnknownMarkWarning`` if the marker were unregistered.
-    # The test passing without that warning IS the assertion.
-    pass
+def test_flow_marker_is_registered(pytestconfig: pytest.Config) -> None:
+    # A bare ``PytestUnknownMarkWarning`` would not fail the suite under the
+    # current config, so inspect the registered marker lines directly. The
+    # plugin registers ``flow(name): ...`` in ``pytest_configure``; assert
+    # it is present so the test fails if registration regresses.
+    registered = pytestconfig.getini("markers")
+    assert any(line.startswith("flow(") for line in registered)
 
 
 def test_flow_marker_carries_flow_name(request: pytest.FixtureRequest) -> None:

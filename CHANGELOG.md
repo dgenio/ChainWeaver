@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via the standard entry-point mechanism so installing ChainWeaver
   makes `flow_runner` available in any pytest run without conftest
   edits.
+- **`FlowExecutor.remove_middleware(middleware)`**: public counterpart
+  to `add_middleware` that unregisters a middleware instance, silently
+  ignoring one that is not currently registered.  Lets test helpers
+  such as `capture_steps` tear down their collector through a stable
+  API instead of reaching into the private `_middleware` list.
 
 ### Notes
 
