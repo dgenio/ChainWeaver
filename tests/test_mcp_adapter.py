@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
+from pydantic import BaseModel
 
 from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep
 from chainweaver.exceptions import MCPToolInvocationError
@@ -163,6 +164,48 @@ class TestMCPToolAdapterDiscover:
 
         names = _run(go())
         assert names == ["echo"]
+
+    def test_exclude_filter(self) -> None:
+        async def go() -> list[str]:
+            server = _build_demo_server()
+            async with create_connected_server_and_client_session(server._mcp_server) as session:
+                adapter = MCPToolAdapter(session)
+                tools = await adapter.discover_tools(exclude=["echo"])
+                return [t.name for t in tools]
+
+        names = _run(go())
+        assert "echo" not in names
+        assert {"add", "error_tool"} <= set(names)
+
+    def test_exclude_wins_over_include(self) -> None:
+        async def go() -> list[str]:
+            server = _build_demo_server()
+            async with create_connected_server_and_client_session(server._mcp_server) as session:
+                adapter = MCPToolAdapter(session)
+                tools = await adapter.discover_tools(include=["echo", "add"], exclude=["echo"])
+                return [t.name for t in tools]
+
+        names = _run(go())
+        assert names == ["add"]
+
+    def test_schema_override_replaces_input_model(self) -> None:
+        class EchoOverride(BaseModel):
+            text: str = "fallback-default"
+
+        async def go() -> Any:
+            server = _build_demo_server()
+            async with create_connected_server_and_client_session(server._mcp_server) as session:
+                adapter = MCPToolAdapter(session)
+                tools = await adapter.discover_tools(schema_overrides={"echo": EchoOverride})
+                echo = next(t for t in tools if t.name == "echo")
+                # The override model carries a default the auto-generated
+                # schema would not have, so instantiating with no args proves
+                # the override (not the server's inputSchema) is in force.
+                return echo.input_schema, echo.input_schema().model_dump()
+
+        schema, dumped = _run(go())
+        assert schema is EchoOverride
+        assert dumped == {"text": "fallback-default"}
 
     def test_input_schema_carries_descriptions(self) -> None:
         async def go() -> tuple[str, Any]:

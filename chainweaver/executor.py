@@ -1238,6 +1238,14 @@ class FlowExecutor:
         features are async-unaware today and will be folded into the
         async lane in a follow-up.
 
+        The async lane does **not** yet honour conditional branching
+        (``branches`` / ``default_next``, #9) or decision callbacks
+        (``decision_candidates``, #102).  Flows declaring those features
+        raise :class:`FlowExecutionError` up front rather than executing
+        with the directives silently dropped — use the synchronous
+        :meth:`execute_flow` for such flows until the async lane reaches
+        parity.
+
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
@@ -1252,9 +1260,52 @@ class FlowExecutor:
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
 
+        self._assert_async_lane_supported(flow)
+
         if isinstance(flow, DAGFlow):
             return await self._execute_dag_flow_async(flow, initial_input)
         return await self._execute_linear_flow_async(flow, initial_input)
+
+    @staticmethod
+    def _assert_async_lane_supported(flow: Any) -> None:
+        """Reject flows using execution features the async lane can't honour.
+
+        ``execute_flow_async`` is a v0.1 lane (issue #80).  It does not
+        yet implement the conditional-branching (#9) or decision-callback
+        (#102) semantics the synchronous :meth:`execute_flow` supports.
+        The async DAG path also builds a plain tool proxy per step, so
+        those directives would be **silently dropped** — producing a
+        different result than the sync lane for the same flow.  Fail fast
+        with a clear error (rather than diverge silently) so callers route
+        such flows through :meth:`execute_flow` until the async lane gains
+        parity.  ``step_type='capability'`` is handled separately by the
+        DAG path, which already errors loudly on it.
+        """
+        for idx, step in enumerate(flow.steps):
+            if getattr(step, "decision_candidates", None):
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support decision_candidates "
+                    "(issue #102) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
+            if getattr(step, "branches", None):
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support conditional branches "
+                    "(issue #9) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
+            if getattr(step, "default_next", None) is not None:
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support default_next routing "
+                    "(issue #9) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
 
     async def _execute_linear_flow_async(
         self,
@@ -1566,6 +1617,7 @@ class FlowExecutor:
             success: bool,
             skipped: bool,
             retry_errors: list[str],
+            fallback_used: bool = False,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             retry_count = max(0, tool_attempts[0] - 1)
@@ -1584,6 +1636,7 @@ class FlowExecutor:
                 retry_errors=list(retry_errors),
                 skipped=skipped,
                 cached=False,
+                fallback_used=fallback_used,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -1776,6 +1829,7 @@ class FlowExecutor:
                     success=False,
                     skipped=False,
                     retry_errors=retry_errors,
+                    fallback_used=True,
                 )
             try:
                 outputs = await fb_tool.run_async(inputs)
@@ -1789,6 +1843,7 @@ class FlowExecutor:
                     success=False,
                     skipped=False,
                     retry_errors=retry_errors,
+                    fallback_used=True,
                 )
             return make_record(
                 inputs=inputs,
@@ -1797,6 +1852,7 @@ class FlowExecutor:
                 success=True,
                 skipped=False,
                 retry_errors=retry_errors,
+                fallback_used=True,
             )
         # Unrecognised on_error → treat as fail.
         return make_record(

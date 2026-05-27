@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from chainweaver import (
+    ConditionalEdge,
     DAGFlow,
     DAGFlowStep,
     Flow,
@@ -17,6 +18,7 @@ from chainweaver import (
     FlowStep,
     Tool,
 )
+from chainweaver.exceptions import FlowExecutionError
 
 
 class _Inp(BaseModel):
@@ -195,6 +197,106 @@ class TestExecuteFlowAsyncDAG:
         assert result.final_output is not None
         # (2 + 1) * 2 == 6
         assert result.final_output["value"] == 6
+
+
+class TestExecuteFlowAsyncUnsupportedFeatures:
+    """The async lane (v0.1) must fail fast — not silently diverge — on
+    execution features it does not yet honour (issues #9, #102)."""
+
+    async def test_decision_candidates_rejected(self) -> None:
+        registry = FlowRegistry()
+        flow = Flow(
+            name="decide",
+            version="1.0.0",
+            description="",
+            steps=[
+                FlowStep(
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    decision_candidates=["async_increment", "async_double_value"],
+                ),
+            ],
+        )
+        registry.register_flow(flow)
+        executor = FlowExecutor(registry=registry)
+        with pytest.raises(FlowExecutionError, match="decision_candidates"):
+            await executor.execute_flow_async("decide", {"n": 1})
+
+    async def test_conditional_branches_rejected(self) -> None:
+        registry = FlowRegistry()
+        dag = DAGFlow(
+            name="branchy",
+            version="1.0.0",
+            description="",
+            steps=[
+                DAGFlowStep(
+                    step_id="a",
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    branches=[ConditionalEdge(target_step_id="b", predicate="n > 0")],
+                ),
+                DAGFlowStep(
+                    step_id="b",
+                    tool_name="async_double_value",
+                    input_mapping={"value": "value"},
+                    depends_on=["a"],
+                ),
+            ],
+        )
+        registry.register_flow(dag)
+        executor = FlowExecutor(registry=registry)
+        with pytest.raises(FlowExecutionError, match="conditional branches"):
+            await executor.execute_flow_async("branchy", {"n": 1})
+
+
+class TestExecuteFlowAsyncFallback:
+    async def test_fallback_marks_record(self) -> None:
+        """An async ``on_error='fallback:...'`` recovery must set
+        ``StepRecord.fallback_used`` (#176), as the sync path does."""
+
+        async def _fail(inp: _Inp) -> dict[str, Any]:
+            raise RuntimeError("primary down")
+
+        registry = FlowRegistry()
+        flow = Flow(
+            name="fb",
+            version="1.0.0",
+            description="",
+            steps=[
+                FlowStep(
+                    tool_name="primary",
+                    input_mapping={"n": "n"},
+                    on_error="fallback:backup",
+                ),
+            ],
+        )
+        registry.register_flow(flow)
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="primary",
+                description="",
+                input_schema=_Inp,
+                output_schema=_Out,
+                fn=_fail,
+            )
+        )
+        executor.register_tool(
+            Tool(
+                name="backup",
+                description="",
+                input_schema=_Inp,
+                output_schema=_Out,
+                fn=_async_increment,
+            )
+        )
+        result = await executor.execute_flow_async("fb", {"n": 7})
+        assert result.success
+        assert result.final_output is not None
+        assert result.final_output["value"] == 8  # backup: 7 + 1
+        assert len(result.execution_log) == 1
+        assert result.execution_log[0].fallback_used is True
+        assert result.execution_log[0].success is True
 
 
 class TestExecuteFlowAsyncEventLoopUnblocked:

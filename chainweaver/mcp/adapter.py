@@ -55,7 +55,7 @@ except ImportError as exc:  # pragma: no cover — depends on install layout
     ) from exc
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
 
 DEFAULT_SERVER_PREFIX_SEP = "__"
@@ -133,6 +133,8 @@ class MCPToolAdapter:
         server_prefix: str = "",
         prefix_separator: str = DEFAULT_SERVER_PREFIX_SEP,
         include: Iterable[str] | None = None,
+        exclude: Iterable[str] | None = None,
+        schema_overrides: Mapping[str, type[BaseModel]] | None = None,
     ) -> list[Tool]:
         """List the MCP server's tools and project each into a ChainWeaver Tool.
 
@@ -147,6 +149,16 @@ class MCPToolAdapter:
             include: Optional iterable of MCP-side tool names to keep.
                 Tools not in this set are skipped.  ``None`` (the
                 default) imports the full catalogue.
+            exclude: Optional iterable of MCP-side tool names to drop.
+                Applied after ``include`` — a tool listed in both is
+                excluded.  ``None`` (the default) drops nothing.
+            schema_overrides: Optional map of MCP-side tool name to a
+                custom Pydantic ``BaseModel`` to use as that tool's input
+                schema instead of the one auto-generated from the
+                server's ``inputSchema``.  Use this when auto-generation
+                is insufficient (e.g. the server advertises a loose
+                schema you want to tighten).  Keyed by the MCP tool's own
+                name, not the (optionally prefixed) ChainWeaver name.
 
         Returns:
             A list of :class:`Tool` instances ready for
@@ -158,16 +170,21 @@ class MCPToolAdapter:
         """
         result = await self.session.list_tools()
         wanted: set[str] | None = set(include) if include is not None else None
+        unwanted: set[str] = set(exclude) if exclude is not None else set()
+        overrides: Mapping[str, type[BaseModel]] = schema_overrides or {}
 
         tools: list[Tool] = []
         for mcp_tool in result.tools:
             if wanted is not None and mcp_tool.name not in wanted:
+                continue
+            if mcp_tool.name in unwanted:
                 continue
             tools.append(
                 self._build_tool(
                     mcp_tool,
                     server_prefix=server_prefix,
                     prefix_separator=prefix_separator,
+                    input_override=overrides.get(mcp_tool.name),
                 )
             )
         return tools
@@ -178,6 +195,7 @@ class MCPToolAdapter:
         *,
         server_prefix: str,
         prefix_separator: str,
+        input_override: type[BaseModel] | None = None,
     ) -> Tool:
         """Project a single MCP tool descriptor into a ChainWeaver ``Tool``."""
         if server_prefix:
@@ -185,11 +203,14 @@ class MCPToolAdapter:
         else:
             cw_name = mcp_tool.name
 
-        input_schema = jsonschema_to_pydantic(
-            mcp_tool.inputSchema,
-            name=f"{cw_name}_Input",
-            tool_name=mcp_tool.name,
-        )
+        if input_override is not None:
+            input_schema: type[BaseModel] = input_override
+        else:
+            input_schema = jsonschema_to_pydantic(
+                mcp_tool.inputSchema,
+                name=f"{cw_name}_Input",
+                tool_name=mcp_tool.name,
+            )
 
         if mcp_tool.outputSchema is not None:
             output_schema: type[BaseModel] = jsonschema_to_pydantic(

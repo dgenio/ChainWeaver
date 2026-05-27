@@ -122,6 +122,13 @@ FastMCP wraps as `CallToolResult(isError=True)` for the client.
 - **Step cache** (#127) on the async lane — uses sync helpers; will
   be re-enabled in a follow-up.
 - **Crash-resume checkpoint** (#128) on the async lane — same.
+- **Conditional branching** (`branches` / `default_next`, #9) and
+  **decision callbacks** (`decision_candidates`, #102) — the sync
+  `execute_flow` honours these, but the async lane does not yet.
+  Rather than drop the directives silently (which would diverge from
+  the sync result), `execute_flow_async` raises `FlowExecutionError`
+  up front when a flow declares them; route such flows through the
+  synchronous `execute_flow` until the async lane reaches parity.
 - **Parallel DAG execution within a level** — async lane preserves
   the sync executor's level-sequential semantics for now.
 - **`stream_flow`** async counterpart — sync stream still works

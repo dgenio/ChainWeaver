@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Tool`.  Server-prefixed naming policy (#150) keeps multi-server
     catalogues collision-free.  Wrapped tools default to
     `cacheable=False` since remote calls can touch external state.
+    `include` / `exclude` name filters select which tools to wrap, and
+    `schema_overrides={tool: Model}` substitutes a custom Pydantic input
+    model when the server's advertised `inputSchema` is insufficient
+    (#70).
   - `FlowServer(executor, *, name, flow_names=None, server_prefix="")`
     mounts registered flows on a FastMCP server.  Each flow is
     advertised as one MCP tool whose `inputSchema` is derived from the
@@ -35,8 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools (e.g. the MCP-wrapped ones) are awaited natively while sync
   tools are offloaded via `asyncio.to_thread`.  Retries use
   `asyncio.sleep` for backoff; middleware and `on_error` policies fire
-  on the same surface as the sync path.  Linear and DAG flows both
-  supported.  Step cache + crash-resume checkpoint will follow.
+  on the same surface as the sync path (including `fallback_used`
+  bookkeeping on recovered steps).  Linear and DAG flows both
+  supported.  Step cache + crash-resume checkpoint will follow.  Flows
+  using conditional branching (#9) or decision callbacks (#102) raise
+  `FlowExecutionError` up front on the async lane rather than silently
+  dropping those directives — use the sync `execute_flow` until the
+  async lane reaches parity.
 - **`Tool.run_async`** + **`Tool.is_async`** (#80): `Tool` now accepts
   a sync or async `fn`; the cached `is_async` flag is computed once
   during construction and exercised by both runners.  `Tool.run`
