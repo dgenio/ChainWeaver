@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.7.0"
+version = "0.9.0"
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -53,17 +53,45 @@ langchain = [
 llamaindex = [
     "llama-index-core>=0.10",
 ]
+mcp = [
+    "mcp>=1.0,<2",
+]
+weaver-stack = [
+    # Placeholder for the Weaver Stack sibling SDKs (issue #91 — weaver-spec
+    # conformance, #106 — contextweaver, #89 — agent-kernel).  ChainWeaver's
+    # mirror types are self-contained, so this extra is a no-op until the
+    # upstream packages ship on PyPI; pinning them here marks the seam.
+]
+# Property-based testing extra (issue #143).  Pulls the Hypothesis stack the
+# property suite needs — including hypothesis-jsonschema, which main's suite
+# uses to derive strategies from the Pydantic JSON schemas.  Enable via
+# ``pip install 'chainweaver[test]'``.
+test = [
+    "hypothesis>=6.150",
+    "hypothesis-jsonschema>=0.23",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "pymdown-extensions>=10.7",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.8",
     "mypy>=1.0",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
+    "griffe>=2.0",
+    "hypothesis>=6.150",
+    "hypothesis-jsonschema>=0.23",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
     "langchain-core>=0.3",
     "llama-index-core>=0.10",
+    "mcp>=1.0,<2",
 ]
 
 [project.urls]
@@ -75,7 +103,16 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Bare-name imports inside tests/ (e.g. `from helpers import ...`,
+# `from strategies import ...`) resolve because pytest prepends these
+# directories to `sys.path` before collection.
+pythonpath = ["tests", "tests/property"]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
+asyncio_mode = "auto"
+markers = [
+    "conformance: weaver-spec conformance gate (issue #91); run with -m conformance",
+    "property: Hypothesis property-based determinism test (also run via `pytest -m property`)",
+]
 
 [tool.ruff]
 target-version = "py310"

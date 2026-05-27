@@ -44,12 +44,9 @@ def _make_flow(name: str = "versioned", version: str = "0.0.0") -> Flow:
 
 
 class TestFlowVersion:
-    def test_version_is_required(self) -> None:
-        """Flow now requires an explicit version (breaking change in 0.4.0)."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])  # type: ignore[call-arg]
+    def test_default_version(self) -> None:
+        flow = Flow(name="f", description="D.", steps=[FlowStep(tool_name="x")])
+        assert flow.version == "0.1.0"
 
     def test_custom_version(self) -> None:
         flow = _make_flow(version="1.2.3")
@@ -82,6 +79,25 @@ class TestToolSchemaVersion:
             schema_version="2.0.0",
         )
         assert tool.schema_version == "2.0.0"
+
+    def test_schema_version_participates_in_schema_hash(self) -> None:
+        tool_v1 = Tool(
+            name="t",
+            description="T.",
+            input_schema=DummyInput,
+            output_schema=DummyOutput,
+            fn=_dummy_fn,
+            schema_version="1.0.0",
+        )
+        tool_v2 = Tool(
+            name="t",
+            description="T.",
+            input_schema=DummyInput,
+            output_schema=DummyOutput,
+            fn=_dummy_fn,
+            schema_version="2.0.0",
+        )
+        assert tool_v1.schema_hash != tool_v2.schema_hash
 
 
 # ---------------------------------------------------------------------------

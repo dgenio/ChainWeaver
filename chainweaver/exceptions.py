@@ -272,3 +272,108 @@ class ContribError(ChainWeaverError):
         self.tool_name = tool_name
         self.detail = detail
         super().__init__(f"Contrib tool '{tool_name}' failed: {detail}.")
+
+
+class MCPError(ChainWeaverError):
+    """Base class for errors raised by the ``chainweaver.mcp`` package
+    (issues #70, #72, #150).
+
+    All MCP-adapter / MCP-server failures inherit from this class so
+    callers can catch the whole family with a single ``except MCPError``.
+    """
+
+
+class MCPSchemaConversionError(MCPError):
+    """Raised when an MCP tool's JSON Schema cannot be projected to Pydantic.
+
+    Attributes:
+        tool_name: Name of the MCP tool whose schema could not be converted.
+        detail: Human-readable explanation of which JSON Schema construct
+            tripped the converter.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"Failed to convert JSON Schema for MCP tool '{tool_name}': {detail}.")
+
+
+class MCPToolInvocationError(MCPError):
+    """Raised when an MCP tool invocation returns ``isError=True``
+    or the SDK call itself raises.
+
+    Attributes:
+        tool_name: Name of the MCP tool that failed (server-prefixed).
+        detail: Human-readable explanation of the failure, including any
+            ``content`` text returned by the server when available.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"MCP tool '{tool_name}' invocation failed: {detail}.")
+
+
+class DecisionCallbackError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.decisions.DecisionCallback` fails (issue #102).
+
+    Wraps both failure modes of the callback path: the callback raised, or
+    it returned a tool name outside the step's ``decision_candidates``
+    list.  The original exception (if any) is preserved on the
+    ``__cause__`` chain for debugging.
+
+    Attributes:
+        tool_name: Name of the step's static ``tool_name`` at the
+            decision point.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of the failure.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, detail: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.detail = detail
+        super().__init__(
+            f"Decision callback for step {step_index} (default tool '{tool_name}') failed: "
+            f"{detail}"
+        )
+
+
+class KernelInvocationError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`
+    cannot dispatch a capability step (issue #89).
+
+    Attributes:
+        capability_id: The capability identifier the executor tried to invoke.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of the failure.
+    """
+
+    def __init__(self, capability_id: str, step_index: int, detail: str) -> None:
+        self.capability_id = capability_id
+        self.step_index = step_index
+        self.detail = detail
+        super().__init__(
+            f"Kernel invocation for capability '{capability_id}' at step {step_index} "
+            f"failed: {detail}"
+        )
+
+
+class PredicateSyntaxError(ChainWeaverError):
+    """Raised when a conditional-branch predicate cannot be parsed or evaluated.
+
+    Conditional branches (issue #9) use a restricted boolean grammar that
+    :func:`~chainweaver.contracts.evaluate_predicate` walks with :mod:`ast`
+    — never :func:`eval`.  Any syntax error, unsupported node, or
+    unresolved name raises this exception with a precise detail so the
+    operator can fix the flow definition.
+
+    Attributes:
+        predicate: The offending predicate string.
+        detail: Human-readable explanation of what failed.
+    """
+
+    def __init__(self, predicate: str, detail: str) -> None:
+        self.predicate = predicate
+        self.detail = detail
+        super().__init__(f"Invalid predicate '{predicate}': {detail}")

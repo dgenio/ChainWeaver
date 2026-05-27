@@ -44,3 +44,4 @@ randomness. These are non-negotiable. See
 | Hard rules, forbidden patterns | [invariants.md](/docs/agent-context/invariants.md) |
 | Recurring mistake patterns | [lessons-learned.md](/docs/agent-context/lessons-learned.md) |
 | Definition-of-done, review gates | [review-checklist.md](/docs/agent-context/review-checklist.md) |
+| Local pre-commit hook install + policy | [CONTRIBUTING.md § Pre-commit hooks](/CONTRIBUTING.md#pre-commit-hooks) |
