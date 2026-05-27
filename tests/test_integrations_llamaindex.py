@@ -74,3 +74,25 @@ class TestToLlamaIndexTool:
         assert isinstance(li, FunctionTool)
         assert li.metadata.name == "double"
         assert li.metadata.description == "Doubles."
+
+
+class TestFromLlamaIndexToolErrors:
+    def test_object_without_metadata_raises(self) -> None:
+        with pytest.raises(TypeError):
+            from_llamaindex_tool(object())  # type: ignore[arg-type]
+
+    def test_unmappable_output_raises(self) -> None:
+        class _TwoFieldOutput(BaseModel):
+            x: int
+            y: int
+
+        li = FunctionTool.from_defaults(
+            fn=_li_add,
+            name="li_add",
+            description="Adds.",
+            fn_schema=_LIAddArgs,
+        )
+        cw = from_llamaindex_tool(li, output_schema=_TwoFieldOutput)
+        # A scalar result cannot be mapped onto a two-field output schema.
+        with pytest.raises(TypeError):
+            cw.run({"a": 1, "b": 2})

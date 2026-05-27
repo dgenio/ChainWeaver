@@ -295,8 +295,9 @@ def json_set(data: dict[str, Any], pointer: str, value: Any) -> _SetOutput:
     """Return a new dict with *value* set at *pointer*; *data* is not mutated.
 
     Intermediate ``dict`` containers are created on demand.  Lists may
-    be addressed but not extended — writing to an out-of-range list
-    index raises :class:`ContribError`.
+    be addressed by existing index but not extended: the RFC-6901
+    ``"-"`` end-of-array (append) token is unsupported, and out-of-range
+    or non-integer list indices raise :class:`ContribError`.
 
     Raises:
         ContribError: For the same reasons as :func:`json_pluck`, plus
