@@ -33,6 +33,7 @@
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
+    "FixtureStaleError",
     "Flow",
     "FlowAlreadyExistsError",
     "FlowBuilder",
@@ -404,6 +405,12 @@
       "module": "chainweaver.storage",
       "qualname": "FileStore",
       "signature": "(base_dir: Path | str) -> None"
+    },
+    "FixtureStaleError": {
+      "kind": "class",
+      "module": "chainweaver.testing.replay",
+      "qualname": "FixtureStaleError",
+      "signature": "(*, tool_name: str, fixture_path: Path, attempted_input: dict[str, Any], detail: str) -> None"
     },
     "Flow": {
       "kind": "pydantic-model",

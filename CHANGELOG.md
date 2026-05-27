@@ -8,6 +8,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`chainweaver.testing` subpackage and pytest plugin** (#132): new
+  `chainweaver/testing/` subpackage exposing a public test harness for
+  ChainWeaver flows.  `FlowTestRunner` is a thin facade over
+  `FlowRegistry`+`FlowExecutor` that collapses the typical 10-line
+  test setup into 3 lines (`register`, `fake_tool`/`passthrough_tool`,
+  `execute`).  `fake_tool(name, output)` builds a permissive `Tool`
+  whose `input_schema` / `output_schema` accept any dict, removing the
+  Pydantic-schema boilerplate from unit tests; `output` may be a static
+  dict or a `Callable[[dict], dict]` for ergonomic dynamic responses.
+  `capture_steps(executor)` is a context manager that wires a
+  `FlowExecutorMiddleware` into the executor and yields a live list of
+  `StepRecord` events, removed cleanly on exit.
+  `assert_result_matches(actual, expected, ignore=...)` does deep
+  equality with `trace_id`, `started_at`, `ended_at`, `duration_ms`,
+  and `total_duration_ms` ignored by default (`DEFAULT_IGNORE_FIELDS`).
+  A pytest plugin shipped via the new `pytest11` entry-point at the
+  top-level `pytest_chainweaver` module exposes a function-scoped
+  `flow_runner` fixture, a session-scoped `flow_runner_session`
+  fixture, and registers `@pytest.mark.flow(name)` so the marker no
+  longer triggers `PytestUnknownMarkWarning`.  The plugin module
+  deliberately lives outside the `chainweaver` package so that
+  pytest's entry-point loader does not import the library before
+  `pytest-cov` can start coverage tracking.
+- **`record_then_replay` decorator** (#153): new
+  `chainweaver.testing.record_then_replay(fixture_path,
+  redaction=...)` decorator that captures every `Tool.fn` invocation
+  inside the wrapped function on first run (when
+  `CHAINWEAVER_RECORD=1` is set in the environment) and writes a
+  deterministic-JSON fixture; subsequent runs serve the recording back
+  to the executor without invoking the real callable, preserving full
+  Pydantic input/output validation.  Recordings are looked up by
+  `(tool_name, canonical(input_dict))` and consumed in FIFO order so
+  the same `(tool, input)` pair appearing multiple times is
+  disambiguated by occurrence order.  Unmatched invocations raise the
+  new `FixtureStaleError` (re-exported from the `chainweaver` top level
+  and listed in the README error table, like every other
+  `ChainWeaverError` subclass) with a message that includes the
+  re-record command and the fixture path.  The decorator hooks at the
+  `Tool._call_fn` **and** `Tool._call_fn_async` boundaries — never
+  inside `chainweaver/executor.py` — so both the synchronous
+  (`execute_flow`) and asynchronous (`execute_flow_async`) executor
+  lanes are recorded/replayed exactly once while the three hard executor
+  invariants remain intact.  PII redaction is applied to every captured `input`
+  and `output` dict before the fixture is written, defaulting to the
+  shared `RedactionPolicy()` (masks `password`, `token`, `api_key`,
+  `secret`, `authorization`); callers can disable it with
+  `RedactionPolicy(redact_keys=frozenset())` or extend it explicitly.
+- **`[project.entry-points.pytest11]`**: registered the pytest plugin
+  via the standard entry-point mechanism so installing ChainWeaver
+  makes `flow_runner` available in any pytest run without conftest
+  edits.
+- **`FlowExecutor.remove_middleware(middleware)`**: public counterpart
+  to `add_middleware` that unregisters a middleware instance, silently
+  ignoring one that is not currently registered.  Lets test helpers
+  such as `capture_steps` tear down their collector through a stable
+  API instead of reaching into the private `_middleware` list.
+
+### Notes
+
+- **#151 (`ResultStore` Protocol)** is closed as already satisfied by
+  the existing `chainweaver.cache.StepCache` + `InMemoryStepCache` +
+  `FileStepCache` (shipped in #127).  Every acceptance criterion in
+  #151 — keyed lookups, schema-change invalidation, atomic file
+  writes, public exports, no new runtime dependency — is met by the
+  current cache implementation.  Naming differs (`StepCache` vs
+  `ResultStore`), but functionally a parallel module would be pure
+  duplication.
+
 ## [0.9.0] - 2026-05-27
 
 ### Added

@@ -603,6 +603,21 @@ class FlowExecutor:
         """
         self._middleware.append(middleware)
 
+    def remove_middleware(self, middleware: FlowExecutorMiddleware) -> None:
+        """Unregister a previously added :class:`FlowExecutorMiddleware`.
+
+        Removes the first occurrence of *middleware* (matched by ``==``,
+        i.e. identity for the usual unique-instance case) from the
+        registration chain.  A middleware that is not currently registered
+        is silently ignored, so callers can unregister defensively from a
+        ``finally`` block without guarding against double-removal.
+
+        Args:
+            middleware: The middleware instance to remove.
+        """
+        with contextlib.suppress(ValueError):
+            self._middleware.remove(middleware)
+
     # ------------------------------------------------------------------
     # Middleware dispatch
     #
@@ -1982,10 +1997,9 @@ class FlowExecutor:
                 )
             thread.join()
             # Defensive cleanup — collector should always still be in
-            # the list, but suppress ValueError just in case a user
-            # called add_middleware/remove between start and finish.
-            with contextlib.suppress(ValueError):
-                self._middleware.remove(collector)
+            # the list, but remove_middleware swallows ValueError in case
+            # a user called add_middleware/remove between start and finish.
+            self.remove_middleware(collector)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -223,6 +223,27 @@ def test_add_middleware_appends_to_chain() -> None:
     assert [n for n, _ in rec_a.events] == [n for n, _ in rec_b.events]
 
 
+def test_remove_middleware_unregisters_instance() -> None:
+    rec_a = _RecordingMiddleware("a")
+    rec_b = _RecordingMiddleware("b")
+    ex = _build_two_step_executor(middleware=[rec_a, rec_b])
+
+    ex.remove_middleware(rec_a)
+    ex.execute_flow("middleware_two_step", {"number": 1})
+
+    # rec_a was unregistered before execution, so it saw nothing; rec_b stayed.
+    assert rec_a.events == []
+    assert [n for n, _ in rec_b.events]
+
+
+def test_remove_middleware_missing_instance_is_silent() -> None:
+    ex = _build_two_step_executor()
+
+    # Removing a middleware that was never registered must not raise, so a
+    # caller can unregister defensively from a finally block.
+    ex.remove_middleware(_RecordingMiddleware("never-added"))
+
+
 # ---------------------------------------------------------------------------
 # Failure isolation
 # ---------------------------------------------------------------------------

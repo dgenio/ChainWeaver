@@ -73,6 +73,12 @@ chainweaver/
 │   ├── openai.py      flow_to_openai_function + tool_to_openai_function
 │   ├── anthropic.py   flow_to_anthropic_tool + tool_to_anthropic_tool
 │   └── callable.py    flow_to_callable + tool_to_callable (plain dict → dict)
+├── testing/           Public test harness for flows (#132, #153)
+│   ├── __init__.py    Re-exports FlowTestRunner / fake_tool / capture_steps / assert_result_matches / record_then_replay / FixtureStaleError / RecordReplayMode / DEFAULT_IGNORE_FIELDS
+│   ├── fakes.py       fake_tool: permissive-schema Tool factory for tests
+│   ├── runner.py      FlowTestRunner facade + capture_steps context manager
+│   ├── assertions.py  assert_result_matches with volatile-field normalisation
+│   └── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
 ├── plugins.py         discover_tools() + discover_flows() over importlib.metadata entry points (#130)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
@@ -103,6 +109,7 @@ docs/
 └── agent-context/           Agent-specific deep-dive docs
 mkdocs.yml                   MkDocs Material site config (#133)
 .readthedocs.yaml            Read the Docs build config (#133)
+pytest_chainweaver.py        Top-level pytest plugin module (#132); registered via [project.entry-points.pytest11]. Deliberately outside the chainweaver/ package so pytest's entry-point loader does not transitively import chainweaver before pytest-cov starts coverage measurement.
 pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
 .github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), and publish (publish.yml) workflows
 ```
