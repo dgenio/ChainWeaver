@@ -23,9 +23,9 @@ deterministic, offline unit tests of :class:`~chainweaver.flow.Flow` and
   ``CHAINWEAVER_RECORD=1``) and serves the recording back on subsequent
   runs without invoking the real callable (#153).
 
-These helpers are intentionally **not** re-exported from
-``chainweaver`` top-level — users import from this subpackage explicitly,
-mirroring :mod:`chainweaver.integrations.opentelemetry`::
+These *helpers* are intentionally **not** re-exported from
+``chainweaver`` top-level — users import them from this subpackage
+explicitly, mirroring :mod:`chainweaver.integrations.opentelemetry`::
 
     from chainweaver.testing import (
         FlowTestRunner,
@@ -34,6 +34,13 @@ mirroring :mod:`chainweaver.integrations.opentelemetry`::
         fake_tool,
         record_then_replay,
     )
+
+The one carve-out is :class:`FixtureStaleError`: like every other
+:class:`~chainweaver.exceptions.ChainWeaverError` subclass in the package
+— including those defined outside ``exceptions.py`` — it *is* re-exported
+from ``chainweaver`` top-level (and listed in the README error table), so
+the exception catalog stays uniform and ``except
+chainweaver.FixtureStaleError`` works without importing this subpackage.
 
 A pytest plugin is shipped alongside (registered via the ``pytest11``
 entry-point in ``pyproject.toml``) that exposes a ``flow_runner``

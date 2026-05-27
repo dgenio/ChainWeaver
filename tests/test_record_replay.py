@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
@@ -70,6 +71,45 @@ def _build_executor(double_counter: list[int] | None = None) -> FlowExecutor:
             input_schema=NumberInput,
             output_schema=ValueOutput,
             fn=_counting_double,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="add_ten",
+            description="Adds 10.",
+            input_schema=ValueInput,
+            output_schema=ValueOutput,
+            fn=_add_ten_fn,
+        )
+    )
+    return ex
+
+
+def _build_async_executor(double_counter: list[int] | None = None) -> FlowExecutor:
+    """Build an executor whose ``double`` tool has an *async* ``fn``.
+
+    Used to exercise the async lane (``execute_flow_async`` →
+    ``Tool._call_fn_async``) and the sync-lane bridge for async tools
+    (``execute_flow`` → ``Tool._call_fn`` → ``asyncio.run`` →
+    ``_call_fn_async``).  *double_counter* counts real ``double``
+    invocations so tests can assert replay bypasses the backend.
+    """
+    counter = double_counter if double_counter is not None else [0]
+
+    async def _async_double(inp: NumberInput) -> dict[str, Any]:
+        counter[0] += 1
+        return {"value": inp.number * 2}
+
+    registry = FlowRegistry()
+    registry.register_flow(_two_step_flow())
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        Tool(
+            name="double",
+            description="Doubles (async).",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_async_double,
         )
     )
     ex.register_tool(
@@ -373,6 +413,78 @@ def test_replay_serves_recording_without_invoking_real_tool(
     _replay()
 
     assert counter[0] == 0  # real callable bypassed entirely on replay
+
+
+def test_record_replay_async_lane_records_and_replays(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The async executor lane (execute_flow_async → Tool._call_fn_async)
+    # must be recorded and replayed just like the sync lane.  The
+    # decorator's wrapper is synchronous, so drive the coroutine with
+    # asyncio.run *inside* the decorated body to keep the patch active.
+    fixture = tmp_path / "async_e2e.json"
+
+    monkeypatch.setenv(RECORD_ENV_VAR, "1")
+    counter = [0]
+    ex_record = _build_async_executor(double_counter=counter)
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _record() -> None:
+        result = asyncio.run(ex_record.execute_flow_async("record_replay_two_step", {"number": 3}))
+        assert result.success
+
+    _record()
+    monkeypatch.delenv(RECORD_ENV_VAR)
+
+    assert counter[0] == 1  # real async double ran once during record
+    loaded = _load_fixture(fixture)
+    # Recorded via _call_fn_async on the async lane — exactly one entry
+    # per tool, no duplication from the sync/async bridge.
+    assert [item["tool_name"] for item in loaded] == ["double", "add_ten"]
+    assert loaded[0]["output"] == {"value": 6}
+
+    # Replay on a fresh executor: the real async backend must not run.
+    counter[0] = 0
+    ex_replay = _build_async_executor(double_counter=counter)
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _replay() -> None:
+        result = asyncio.run(ex_replay.execute_flow_async("record_replay_two_step", {"number": 3}))
+        assert result.success
+        assert result.final_output is not None
+        assert result.final_output["value"] == 16
+
+    _replay()
+
+    assert counter[0] == 0  # async backend bypassed entirely on replay
+
+
+def test_record_async_tool_on_sync_lane_records_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An async tool reached through the *sync* executor bridges
+    # _call_fn → asyncio.run → _call_fn_async, so both patched methods sit
+    # in the call stack.  The interaction must still be recorded exactly
+    # once (the sync wrapper delegates async tools to the async wrapper).
+    fixture = tmp_path / "sync_lane_async_tool.json"
+
+    monkeypatch.setenv(RECORD_ENV_VAR, "1")
+    counter = [0]
+    ex = _build_async_executor(double_counter=counter)
+
+    @record_then_replay(fixture, redaction=RedactionPolicy(redact_keys=frozenset()))
+    def _record() -> None:
+        result = ex.execute_flow("record_replay_two_step", {"number": 4})
+        assert result.success
+
+    _record()
+
+    assert counter[0] == 1
+    loaded = _load_fixture(fixture)
+    assert [item["tool_name"] for item in loaded] == ["double", "add_ten"]  # no duplicate "double"
+    assert loaded[0]["output"] == {"value": 8}
 
 
 def test_replay_raises_on_stale_fixture(

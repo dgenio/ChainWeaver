@@ -145,6 +145,7 @@ from chainweaver.serialization import (
     flow_to_yaml,
 )
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
+from chainweaver.testing.replay import FixtureStaleError
 from chainweaver.tools import Tool
 from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
 
@@ -199,6 +200,7 @@ __all__ = [
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
+    "FixtureStaleError",
     "Flow",
     "FlowAlreadyExistsError",
     "FlowBuilder",

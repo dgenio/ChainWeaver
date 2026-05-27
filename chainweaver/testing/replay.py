@@ -21,13 +21,20 @@ mismatches surface as :class:`FixtureStaleError` with an actionable
 message pointing the developer at the re-record workflow.
 
 Hooking happens at the :class:`~chainweaver.tools.Tool` ``_call_fn``
-boundary (the layer between schema validation and the user-supplied
-callable) — **never inside** :mod:`chainweaver.executor`.  This keeps
-the three hard executor invariants intact: replay does not introduce
-network I/O, LLM calls, or randomness into the executor, because the
-executor itself is unchanged.  Output schema validation still runs
-during replay, so a stale schema on a recorded output fails loudly the
-same way a stale recording does.
+*and* ``_call_fn_async`` boundaries (the layer between schema validation
+and the user-supplied callable) — **never inside**
+:mod:`chainweaver.executor`.  Patching both covers the synchronous lane
+(:meth:`~chainweaver.executor.FlowExecutor.execute_flow`) and the async
+lane (:meth:`~chainweaver.executor.FlowExecutor.execute_flow_async`):
+every tool invocation is recorded or replayed exactly once on either
+lane, including async tools driven from the sync executor (which bridge
+through ``_call_fn`` into ``_call_fn_async`` — the sync patch delegates
+so only the async patch processes the interaction).  Keeping the hook
+out of the executor preserves the three hard invariants: replay does not
+introduce network I/O, LLM calls, or randomness into the executor,
+because the executor itself is unchanged.  Output schema validation
+still runs during replay, so a stale schema on a recorded output fails
+loudly the same way a stale recording does.
 
 The fixture format is deterministic JSON (sorted keys, 2-space indent):
 
@@ -52,7 +59,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from enum import Enum
 from functools import wraps
@@ -175,17 +182,26 @@ def record_then_replay(
 def _recording_session(
     fixture_path: Path,
     redaction: RedactionPolicy,
-) -> Any:
-    """Patch ``Tool._call_fn`` for the lifetime of the with-block.
+) -> Iterator[None]:
+    """Patch ``Tool._call_fn`` / ``_call_fn_async`` for the with-block.
 
-    On entry the current ``Tool._call_fn`` (the boundary between schema
-    validation and the user callable) is captured and replaced with a
-    wrapper that either records the call (when ``CHAINWEAVER_RECORD=1``)
-    or serves a recorded output (default replay mode).
+    On entry the current ``Tool._call_fn`` and ``Tool._call_fn_async``
+    (the boundary between schema validation and the user callable) are
+    captured and replaced with wrappers that either record the call (when
+    ``CHAINWEAVER_RECORD=1``) or serve a recorded output (default replay
+    mode).  Patching both boundaries covers the synchronous executor lane
+    (:meth:`FlowExecutor.execute_flow`) and the async lane
+    (:meth:`FlowExecutor.execute_flow_async`).
 
-    On exit the original ``Tool._call_fn`` is restored, and in record
-    mode the accumulated interactions are redacted and written to
-    *fixture_path*.
+    Each logical tool invocation is processed exactly once.  An async
+    tool reached through the sync lane enters ``_call_fn`` first, which
+    delegates to ``_call_fn_async``; to avoid double-counting, the sync
+    wrapper records/replays only for *sync* tools and passes async tools
+    straight through to the (also patched) async wrapper, which is the
+    single record/replay point for them.
+
+    On exit both originals are restored, and in record mode the
+    accumulated interactions are redacted and written to *fixture_path*.
     """
     mode = (
         RecordReplayMode.RECORD
@@ -204,43 +220,67 @@ def _recording_session(
         cursor_by_key = {}
 
     original_call_fn = Tool._call_fn
+    original_call_fn_async = Tool._call_fn_async
 
-    def patched_call_fn(self: Tool, validated_input: BaseModel) -> dict[str, Any]:
-        # Canonical input form — Pydantic's model_dump() applies the same
-        # coercions every call, and ``_json_safe`` then projects the dict
-        # onto JSON-native types so the in-memory form matches what a
-        # round-trip through the fixture file produces.  This keeps record
-        # and replay symmetric: the stored ``input`` equals the value the
-        # replay matcher compares against (#186 review).
-        canonical_input = _json_safe(validated_input.model_dump())
+    def _canonical_input(validated_input: BaseModel) -> dict[str, Any]:
+        # Pydantic's model_dump() applies the same coercions every call,
+        # and ``_json_safe`` projects the dict onto JSON-native types so
+        # the in-memory form matches what a round-trip through the fixture
+        # file produces.  This keeps record and replay symmetric: the
+        # stored ``input`` equals the value the replay matcher compares
+        # against (#186 review).
+        return _json_safe(validated_input.model_dump())
 
-        if mode is RecordReplayMode.REPLAY:
-            return _consume_recording(
-                interactions=interactions,
-                cursor_by_key=cursor_by_key,
-                tool_name=self.name,
-                attempted_input=canonical_input,
-                fixture_path=fixture_path,
-            )
+    def _replay(tool: Tool, canonical_input: dict[str, Any]) -> dict[str, Any]:
+        return _consume_recording(
+            interactions=interactions,
+            cursor_by_key=cursor_by_key,
+            tool_name=tool.name,
+            attempted_input=canonical_input,
+            fixture_path=fixture_path,
+        )
 
-        # Record mode: invoke the real callable, capture the result.
-        output = original_call_fn(self, validated_input)
+    def _record(tool: Tool, canonical_input: dict[str, Any], output: dict[str, Any]) -> None:
         interactions.append(
             {
-                "tool_name": self.name,
+                "tool_name": tool.name,
                 "input": canonical_input,
                 "output": _json_safe(dict(output)),
             }
         )
+
+    def patched_call_fn(self: Tool, validated_input: BaseModel) -> dict[str, Any]:
+        if self.is_async:
+            # Async tool on the sync lane: ``_call_fn`` only bridges to
+            # ``_call_fn_async`` (also patched), which is the single
+            # record/replay point.  Pass through so the interaction is
+            # not processed twice.
+            return original_call_fn(self, validated_input)
+
+        canonical_input = _canonical_input(validated_input)
+        if mode is RecordReplayMode.REPLAY:
+            return _replay(self, canonical_input)
+        output = original_call_fn(self, validated_input)
+        _record(self, canonical_input, output)
+        return output
+
+    async def patched_call_fn_async(self: Tool, validated_input: BaseModel) -> dict[str, Any]:
+        canonical_input = _canonical_input(validated_input)
+        if mode is RecordReplayMode.REPLAY:
+            return _replay(self, canonical_input)
+        output = await original_call_fn_async(self, validated_input)
+        _record(self, canonical_input, output)
         return output
 
     Tool._call_fn = patched_call_fn  # type: ignore[method-assign]
+    Tool._call_fn_async = patched_call_fn_async  # type: ignore[method-assign]
     completed = False
     try:
         yield
         completed = True
     finally:
         Tool._call_fn = original_call_fn  # type: ignore[method-assign]
+        Tool._call_fn_async = original_call_fn_async  # type: ignore[method-assign]
         # Persist only when the wrapped body completed without raising: a
         # failing or interrupted test must not overwrite a good fixture
         # with a partial recording (#186 review).

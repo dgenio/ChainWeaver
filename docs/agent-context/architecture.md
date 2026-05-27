@@ -44,7 +44,7 @@ and tools, the same flow produces the same output every time.
 | `viz.py` | `flow_to_ascii`, `flow_to_mermaid`, `result_to_mermaid` pure renderers | No external dependencies — string generation only |
 | `serialization.py` | YAML + JSON encode/decode for `Flow` and `DAGFlow` (`flow_to_json`, `flow_from_yaml`, etc.) | JSON path is dep-free; YAML requires `pyyaml` (optional extra `chainweaver[yaml]`); schema/exception refs round-trip as `"module:qualname"` strings |
 | `cli.py` | typer-based `chainweaver inspect` entry point | Reads from a process-scoped default registry installed via `cli.set_default_registry` |
-| `testing/` | Public test harness for flows (`FlowTestRunner`, `fake_tool`, `capture_steps`, `assert_result_matches`, `record_then_replay`) (#132, #153) | Hooks at the `Tool.fn` boundary — never edits `executor.py`. Helpers are imported as `from chainweaver.testing import ...`, mirroring the `integrations.opentelemetry` pattern; not re-exported from top-level `__all__` |
+| `testing/` | Public test harness for flows (`FlowTestRunner`, `fake_tool`, `capture_steps`, `assert_result_matches`, `record_then_replay`) (#132, #153) | Hooks at the `Tool.fn` boundary — never edits `executor.py`. Helpers are imported as `from chainweaver.testing import ...`, mirroring the `integrations.opentelemetry` pattern; not re-exported from top-level `__all__` (except `FixtureStaleError`, which follows the error-catalog convention) |
 | `pytest_chainweaver` (top-level) | Pytest plugin registered via `pytest11`: `flow_runner` / `flow_runner_session` fixtures + `@pytest.mark.flow(...)` marker | Lives outside the `chainweaver/` package so `pytest-cov` starts coverage **before** the library is imported (see Design traps below) |
 | `__init__.py` | Public API surface | Every public symbol must be in `__all__` |
 
@@ -131,7 +131,7 @@ Like `chainweaver.integrations.opentelemetry`, the test-harness symbols
 snapshot focused on runtime symbols and lets test helpers evolve
 without churning the snapshot fixture.
 
-### `record_then_replay` monkey-patches `Tool._call_fn`, not `Tool.run`
+### `record_then_replay` monkey-patches `Tool._call_fn` / `_call_fn_async`, not `Tool.run`
 
 The decorator swaps `Tool._call_fn` (the boundary between Pydantic
 validation and the user-supplied callable) — not `Tool.run` — so
@@ -140,7 +140,18 @@ stale fixture with a now-invalid output payload therefore fails the
 output validator loudly, the same way a real `Tool.fn` returning bad
 data would.
 
-`_call_fn` is class-level monkey-patched and restored in a `finally`
+Both `Tool._call_fn` and `Tool._call_fn_async` are patched so the
+synchronous lane (`FlowExecutor.execute_flow`) and the async lane
+(`FlowExecutor.execute_flow_async`) are covered. The two must record
+each logical call **exactly once**, but an async tool reached through
+the sync lane enters `_call_fn`, which bridges to `_call_fn_async` via
+`asyncio.run` — so both patched methods sit in the call stack for that
+one call. The sync patch therefore records/replays only *sync* tools
+and passes *async* tools straight through to the async patch, which is
+the single record/replay point for them. (Sync tools never reach
+`_call_fn_async`; async-lane calls never reach `_call_fn`.)
+
+Both methods are class-level monkey-patched and restored in a `finally`
 block. This is intentional: a context-local variable would require
 threading a session handle through every `Tool` invocation, which
 defeats the decorator's drop-in shape. The trade-off: concurrent

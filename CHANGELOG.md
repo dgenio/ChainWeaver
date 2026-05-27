@@ -44,11 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(tool_name, canonical(input_dict))` and consumed in FIFO order so
   the same `(tool, input)` pair appearing multiple times is
   disambiguated by occurrence order.  Unmatched invocations raise the
-  new `FixtureStaleError` (exported from `chainweaver.testing`) with a
-  message that includes the re-record command and the fixture path.
-  The decorator hooks at the `Tool._call_fn` boundary — never inside
-  `chainweaver/executor.py` — so the three hard executor invariants
-  remain intact.  PII redaction is applied to every captured `input`
+  new `FixtureStaleError` (re-exported from the `chainweaver` top level
+  and listed in the README error table, like every other
+  `ChainWeaverError` subclass) with a message that includes the
+  re-record command and the fixture path.  The decorator hooks at the
+  `Tool._call_fn` **and** `Tool._call_fn_async` boundaries — never
+  inside `chainweaver/executor.py` — so both the synchronous
+  (`execute_flow`) and asynchronous (`execute_flow_async`) executor
+  lanes are recorded/replayed exactly once while the three hard executor
+  invariants remain intact.  PII redaction is applied to every captured `input`
   and `output` dict before the fixture is written, defaulting to the
   shared `RedactionPolicy()` (masks `password`, `token`, `api_key`,
   `secret`, `authorization`); callers can disable it with
