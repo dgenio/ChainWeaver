@@ -1,0 +1,27 @@
+# Minimal ChainWeaver flow file for the CLI quick start.
+#
+# `type:` is the required discriminator that tells the loader whether this is
+# a linear `Flow` or a `DAGFlow`. Hand-authored flow files MUST include it.
+#
+# The tools referenced below (double, add_ten, format_result) ship in
+# examples/simple_linear_flow.py. Run this from the repository root with:
+#
+#     chainweaver run examples/double_add_format.flow.yaml \
+#         --tools examples.simple_linear_flow \
+#         --input '{"number": 5}'
+#
+# Reading `.flow.yaml` files requires the YAML extra: pip install 'chainweaver[yaml]'
+type: Flow
+name: double_add_format
+version: "0.1.0"
+description: Doubles a number, adds 10, and formats the result.
+steps:
+  - tool_name: double
+    input_mapping:
+      number: number
+  - tool_name: add_ten
+    input_mapping:
+      value: value
+  - tool_name: format_result
+    input_mapping:
+      value: value

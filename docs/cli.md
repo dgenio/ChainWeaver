@@ -20,6 +20,59 @@ All commands share the same top-level exit-code contract:
 
 ---
 
+## Flow file format
+
+The file-oriented commands (`run`, `validate`, `check`, `doctor`, `attest`,
+`suggest`) load a flow definition from disk. Accepted extensions are
+`.flow.yaml`, `.flow.yml`, and `.flow.json`.
+
+**Reading `.flow.yaml` / `.flow.yml` requires the YAML extra:**
+
+```bash
+pip install 'chainweaver[yaml]'
+```
+
+`.flow.json` works with no extra. Without `pyyaml`, the YAML commands fail
+with `FlowSerializationError: YAML support requires 'pyyaml' to be installed`.
+
+### The `type:` discriminator
+
+Every flow file **must** declare a top-level `type:` key — either `Flow`
+(linear) or `DAGFlow` (directed-acyclic). It tells the loader which model to
+build; without it you get:
+
+```
+chainweaver: Missing or invalid 'type' discriminator (got None); expected 'Flow' or 'DAGFlow'
+```
+
+A minimal hand-authored linear flow (`examples/double_add_format.flow.yaml`,
+shipped in the repo) looks like this:
+
+```yaml
+type: Flow
+name: double_add_format
+version: "0.1.0"
+description: Doubles a number, adds 10, and formats the result.
+steps:
+  - tool_name: double
+    input_mapping:
+      number: number
+  - tool_name: add_ten
+    input_mapping:
+      value: value
+  - tool_name: format_result
+    input_mapping:
+      value: value
+```
+
+The required fields are `type`, `name`, `description`, and `steps`; `version`
+defaults to `"0.1.0"` on `Flow` but is required on `DAGFlow`. See
+[`AGENTS.md` §5](https://github.com/dgenio/ChainWeaver/blob/main/AGENTS.md#5-executor-and-flow-semantics)
+for the full field table. The `--tools` modules supply the actual `Tool`
+implementations referenced by `tool_name`.
+
+---
+
 ## Commands
 
 ### `inspect`
@@ -134,7 +187,9 @@ chainweaver run <flow_file> [--tools module] [--input file] [--format table|json
 **Example**:
 
 ```bash
-chainweaver run flows/etl.flow.yaml --tools my_package.tools
+# Runnable from the repository root — the flow file and tools both ship in examples/:
+chainweaver run examples/double_add_format.flow.yaml --tools examples.simple_linear_flow --input '{"number": 5}'
+
 chainweaver run flows/etl.flow.yaml --tools my_package.tools --input input.json --format json
 ```
 
@@ -339,6 +394,91 @@ chainweaver diff baseline.json current.json --format json
 
 ---
 
+### `attest`
+
+Run an observed-determinism attestation against a flow: generate `--runs` distinct inputs (or read them from `--seed-input`), run the flow `--repeats` times per input, and emit a JSON attestation report. When all repeats agree the attestation passes; any divergence fails it.
+
+This produces *observed-deterministic* evidence, not a formal proof — re-running with the same `--seed` and ChainWeaver version yields a byte-identical `aggregate_fingerprint`.
+
+```
+chainweaver attest <flow_file> [--tools module] [--runs N] [--repeats N] [--seed N] [--seed-input file] [--format json|table]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tools` / `-t` | (none) | Python module path exposing `Tool` instances at top level. Repeatable. |
+| `--runs` | `100` | Number of distinct inputs to generate (ignored when `--seed-input` is set). |
+| `--repeats` | `3` | Executions per input. Must be ≥ 2. |
+| `--seed` | `0` | Integer seed for the input generator. Same seed → same inputs. |
+| `--seed-input` | (none) | JSON file containing a list of input objects to use directly (bypasses the generator). |
+| `--format` / `-f` | `json` | Output format: `json` (the attestation artifact) or `table`. |
+
+**Exit codes**: `0` = observed-deterministic across all inputs, `1` = divergence detected / execution / argument error, `2` = flow file or tools module not found.
+
+**Example**:
+
+```bash
+chainweaver attest examples/double_add_format.flow.yaml --tools examples.simple_linear_flow --runs 50 --repeats 3
+```
+
+---
+
+### `suggest`
+
+Emit advisory static optimization suggestions for a flow file. A successful run always exits `0` (the suggester is advisory); machine consumers should gate on the `suggestions` array length in `--format json`.
+
+Suggestion families (stable codes):
+
+- `CW001` — wasteful-passthrough (empty `input_mapping`).
+- `CW002` — parallelizable-pair (adjacent steps reading disjoint context keys). Requires `--tools`.
+- `CW003` — dead-step (step outputs are not read downstream). Requires `--tools`.
+- `CW004` — cacheable-step (identical outputs across observed traces). Requires two or more `--trace` files.
+
+```
+chainweaver suggest <flow_file> [--tools module] [--trace file] [--format table|json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tools` / `-t` | (none) | Python module path exposing `Tool` instances at top level. Required for CW003 (dead-step). Repeatable. |
+| `--trace` | (none) | Path to a recorded `ExecutionResult` JSON file. Two or more required for CW004 (cacheable-step). Repeatable. |
+| `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON. |
+
+**Exit codes**: `0` = ran successfully (regardless of suggestion count), `1` = malformed input, `2` = file not found.
+
+**Example**:
+
+```bash
+chainweaver suggest examples/double_add_format.flow.yaml --tools examples.simple_linear_flow
+chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace run_a.json --trace run_b.json --format json
+```
+
+---
+
+### `dump-schema`
+
+Emit the JSON Schema for `.flow.json` / `.flow.yaml` files, derived from the Pydantic models in `chainweaver.flow`. Editors that consume JSON Schema (VS Code via `redhat.vscode-yaml`, JetBrains, …) get autocomplete, hover docs, and inline validation once they point `yaml.schemas` at the published schema.
+
+```
+chainweaver dump-schema [--output PATH] [--check]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` / `-o` | stdout | Write the JSON Schema to this path. Recommended in-repo path: `schemas/flow.schema.json`. |
+| `--check` | `False` | Write nothing; exit `0` if the file at `--output` already matches the current schema, `1` if it would change. Useful as a CI guard. |
+
+**Exit codes**: `0` = written / printed successfully (or `--check` match), `1` = `--check` mismatch or `--output` unwritable, `2` = `--check` used without `--output`.
+
+**Example**:
+
+```bash
+chainweaver dump-schema --output schemas/flow.schema.json
+chainweaver dump-schema --check --output schemas/flow.schema.json   # CI: fails if the checked-in schema is stale
+```
+
+---
+
 ## Programmatic registration (`inspect`, `viz`)
 
 `inspect` and `viz` read from a process-scoped registry installed via `cli.set_default_registry`:
@@ -352,4 +492,4 @@ cli.set_default_registry(registry)
 cli.main(["inspect", "my_flow"])
 ```
 
-`validate`, `check`, `run`, `profile`, and `diff` read directly from disk and do not consult the default registry.
+`validate`, `check`, `run`, `profile`, `diff`, `attest`, `suggest`, and `doctor` read directly from disk and do not consult the default registry. `dump-schema` takes no flow input.

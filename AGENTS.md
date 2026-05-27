@@ -172,18 +172,30 @@ For the full prohibited-actions list and anti-patterns, see
 
 ### `Flow` (Pydantic model)
 
+The rows below are the actual Pydantic fields (`Flow.model_fields`), in
+declaration order. `DAGFlow` carries the same fields except `version` is
+**required** (no default).
+
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `name` | `str` | — | Unique identifier for the flow. |
-| `description` | `str` | — | Human-readable description of what the flow does. |
-| `steps` | `list[FlowStep]` | — | Ordered list of tool invocations. |
+| `name` | `str` | — (required) | Unique identifier for the flow. |
+| `version` | `str` | `"0.1.0"` | SemVer string. Required on `DAGFlow` (no default). Surfaced on every `ExecutionResult` as `flow_version`. |
+| `description` | `str` | — (required) | Human-readable description of what the flow does. |
+| `steps` | `list[FlowStep]` | — (required) | Ordered list of tool invocations. |
 | `deterministic` | `bool` | `True` | Metadata annotation for downstream orchestrators. `FlowExecutor` is unconditionally LLM-free and does not evaluate this flag. |
+| `status` | `FlowStatus` | `ACTIVE` | Lifecycle gate (`active` / `needs_review` / `disabled`). Non-`ACTIVE` flows are refused by `execute_flow` unless `force=True`. |
 | `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
-| `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
-| `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
+| `input_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref to a Pydantic model validating `initial_input` before the first step runs. Resolved lazily by the `input_schema` property. |
+| `output_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref to a Pydantic model validating the final merged context. Resolved lazily by the `output_schema` property. |
+| `context_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref for the accumulated execution context (#152). Resolved lazily by the `context_schema` property; validated at flow end. |
+| `tool_schema_hashes` | `dict[str, str] \| None` | `None` | Snapshot of per-tool schema fingerprints (#50). Drives drift detection and `doctor --check-drift`. |
 | `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
-| `determinism_level` | `DeterminismLevel` (computed) | — | Structural determinism inference (#8): linear `Flow` → `FULL` (or `NONE` if `deterministic=False`); `DAGFlow` with any conditional `branches` → `PARTIAL`. |
-| `context_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for the accumulated execution context (#152). Resolved lazily from `context_schema_ref`. Validated at flow end. |
+
+**Read-only properties (not fields):** `input_schema`, `output_schema`, and
+`context_schema` resolve their `*_schema_ref` counterparts to a
+`type[BaseModel] | None`. `determinism_level` is a computed
+`DeterminismLevel` (#8): linear `Flow` → `FULL` (or `NONE` if
+`deterministic=False`); `DAGFlow` with any conditional `branches` → `PARTIAL`.
 
 ### `DAGFlowStep` conditional branching (#9)
 

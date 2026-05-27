@@ -428,6 +428,7 @@ literal constants.
 ```python
 Flow(
     name="my_flow",
+    version="0.1.0",             # SemVer string; defaults to "0.1.0" if omitted
     description="...",
     steps=[step_a, step_b, step_c],
     deterministic=True,          # metadata annotation; executor is always LLM-free
@@ -435,7 +436,9 @@ Flow(
 )
 ```
 
-An ordered sequence of steps.
+An ordered sequence of steps. See [AGENTS.md](AGENTS.md) §5 for the full
+field table (`status`, `tool_schema_hashes`, and the `input_schema_ref` /
+`output_schema_ref` string fields with their resolved-property accessors).
 
 #### `FlowRegistry`
 
@@ -698,10 +701,12 @@ Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainW
 | **v0.1.0** — Harden Foundation & Streamline DX | Infra, docs, DX APIs, CI | shipped |
 | **v0.2.0** — Build Core Execution & MCP Bridge | DAG execution, MCP adapter/server, guardrails | shipped |
 | **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance workflow | shipped |
-| **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | **shipped (current)** |
-| **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | planned |
-| **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | planned |
-| **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, offline LLM compiler | planned |
+| **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | shipped |
+| **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | shipped |
+| **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | shipped |
+| **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, observed-determinism `attest` | shipped |
+| **v0.8.0** — Advisory Optimization | `suggest` optimizer (CW001–CW004 families) | shipped |
+| **v0.9.0** — MCP Integration & Editor Tooling | `chainweaver.mcp` adapter + flow server, `doctor`, `dump-schema` | **shipped (current)** |
 | **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
 
 Curious how ChainWeaver compares to LangChain, LangGraph, Prefect,
@@ -714,10 +719,12 @@ Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
 ChainWeaver ships a `chainweaver` console script with the following subcommands:
 
 ```bash
-# Run a flow from disk — no Python required.
-chainweaver run flows/etl.flow.yaml \
-    --tools my_pkg.tools \
-    --input '{"date": "2026-05-15"}'
+# Run a flow from disk — no Python required. (.flow.yaml needs the YAML extra:
+# pip install 'chainweaver[yaml]'.) Run from the repo root so the example
+# tools module is importable.
+chainweaver run examples/double_add_format.flow.yaml \
+    --tools examples.simple_linear_flow \
+    --input '{"number": 5}'
 
 # Validate a flow file (used by CI gates and editor tooling).
 chainweaver validate flows/etl.flow.yaml
@@ -749,7 +756,9 @@ chainweaver doctor flows/ --check-drift --tools my_pkg.tools
 `run` is the fastest path from a fresh install to seeing a flow execute:
 point it at a `.flow.yaml`/`.flow.json` file, pass `--tools <module>` (the
 import path of a Python module that exposes `Tool` instances at top
-level), and supply the initial input as JSON. Every subcommand also
+level), and supply the initial input as JSON. Hand-authored flow files must
+declare a `type: Flow` (or `type: DAGFlow`) discriminator at the top — see
+the [flow file format](docs/cli.md#flow-file-format) reference. Every subcommand also
 supports `--format json` for machine consumption, and shares the same
 exit-code contract (`0` success, `1` business-logic error, `2`
 file-not-found / argument error).
