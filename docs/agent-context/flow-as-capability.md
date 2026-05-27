@@ -30,8 +30,8 @@ rather than only at the step level.  Issue #90 adds it.
 
 ## The `capability_id` field
 
-Both [`Flow`](../../chainweaver/flow.py) and
-[`DAGFlow`](../../chainweaver/flow.py) gained an optional
+Both `Flow` and
+`DAGFlow` gained an optional
 `capability_id: str | None = None` field.
 
 When set, the flow is routable as a capability — contextweaver can
@@ -67,8 +67,8 @@ than to choose well now.
 
 ## Exporting to contextweaver
 
-[`flow_to_selectable_item`](../../chainweaver/integrations/weaver_spec.py)
-projects a flow to a [`SelectableItem`](../../chainweaver/integrations/weaver_spec.py)
+`flow_to_selectable_item`
+projects a flow to a `SelectableItem`
 ready for contextweaver catalog ingestion:
 
 ```python
@@ -100,7 +100,7 @@ contextweaver, it just returns the data structure.  Ingesting the
 ## Capability vs tool: two layers
 
 `DAGFlowStep` already carried a per-step
-[`capability_id`](../../chainweaver/flow.py) field used for
+`capability_id` field used for
 kernel-delegated execution (`step_type="capability"`).  That field is
 **different** from `Flow.capability_id` — they sit at two layers:
 
@@ -117,7 +117,7 @@ dispatches the step's work.
 
 ## Boundaries
 
-- The base [`FlowExecutor`](../../chainweaver/executor.py) does **not**
+- The base `FlowExecutor` does **not**
   invoke any weaver-spec or contextweaver imports — the executor stays
   standalone and deterministic.  The seam that exposes flows as
   capabilities (`flow_to_selectable_item`) lives in
