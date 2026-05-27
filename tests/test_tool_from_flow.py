@@ -14,6 +14,12 @@ import pytest
 from helpers import FormattedOutput, NumberInput, ValueInput, ValueOutput
 from pydantic import BaseModel, ValidationError
 
+from chainweaver.contracts import (
+    DeterminismLevel,
+    SideEffectLevel,
+    StabilityLevel,
+    ToolSafetyContract,
+)
 from chainweaver.exceptions import FlowExecutionError, ToolDefinitionError
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
@@ -527,3 +533,298 @@ class TestClosureCapturesExecutor:
 
         result = wrapped.run({"number": 3})
         assert result == {"result": "Final value: 16"}
+
+
+# ---------------------------------------------------------------------------
+# Safety derivation (issue #125)
+# ---------------------------------------------------------------------------
+
+
+class TestFromFlowSafetyDerivation:
+    """``Tool.from_flow`` merges constituent tools' :class:`ToolSafetyContract`s.
+
+    The merge rule is "most-restrictive wins" across every field:
+
+    - ``side_effects`` and ``stability`` and ``determinism_level`` pick the
+      worst (highest-ordered) value seen.
+    - ``idempotent`` and ``cacheable`` use ``all()`` — one False contaminates.
+    - ``requires_review`` uses ``any()`` — one True contaminates.
+
+    A caller can override the derivation entirely by passing
+    ``safety=ToolSafetyContract(...)`` to :meth:`Tool.from_flow`.
+    """
+
+    @staticmethod
+    def _three_step_flow() -> Flow:
+        return Flow(
+            name="safety_demo",
+            version="0.1.0",
+            description="Three steps with mixed safety.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
+                FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
+            ],
+        )
+
+    def test_default_constituents_yield_default_contract(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(add_ten_tool)
+        ex.register_tool(format_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety == ToolSafetyContract()
+
+    def test_write_constituent_propagates(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        # Swap add_ten for a tool with side_effects=WRITE.
+        write_tool = Tool(
+            name="add_ten",
+            description=add_ten_tool.description,
+            input_schema=add_ten_tool.input_schema,
+            output_schema=add_ten_tool.output_schema,
+            fn=add_ten_tool.fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
+        )
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(write_tool)
+        ex.register_tool(format_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety.side_effects is SideEffectLevel.WRITE
+
+    def test_external_outranks_write(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        write_tool = Tool(
+            name="add_ten",
+            description=add_ten_tool.description,
+            input_schema=add_ten_tool.input_schema,
+            output_schema=add_ten_tool.output_schema,
+            fn=add_ten_tool.fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
+        )
+        external_tool = Tool(
+            name="format_result",
+            description=format_tool.description,
+            input_schema=format_tool.input_schema,
+            output_schema=format_tool.output_schema,
+            fn=format_tool.fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL),
+        )
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(write_tool)
+        ex.register_tool(external_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety.side_effects is SideEffectLevel.EXTERNAL
+
+    def test_requires_review_propagates(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        risky = Tool(
+            name="double",
+            description=double_tool.description,
+            input_schema=double_tool.input_schema,
+            output_schema=double_tool.output_schema,
+            fn=double_tool.fn,
+            safety=ToolSafetyContract(requires_review=True),
+        )
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(risky)
+        ex.register_tool(add_ten_tool)
+        ex.register_tool(format_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety.requires_review is True
+
+    def test_explicit_override_wins(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        # All constituent tools are default-safe; the override forces
+        # a restrictive contract regardless.
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(add_ten_tool)
+        ex.register_tool(format_tool)
+
+        override = ToolSafetyContract(
+            side_effects=SideEffectLevel.EXTERNAL,
+            stability=StabilityLevel.UNSTABLE,
+            determinism_level=DeterminismLevel.NONE,
+            idempotent=False,
+            cacheable=False,
+            requires_review=True,
+        )
+        wrapped = Tool.from_flow(flow, ex, safety=override)
+        assert wrapped.safety == override
+
+    def test_unregistered_constituent_skipped_during_derivation(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        # Late-bound format_result is not yet registered; the format
+        # contract cannot contribute.  Other constituents still merge
+        # normally — and merging the remaining defaults plus an
+        # override-free first/second tool yields default safety.
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_tool)
+        ex.register_tool(add_ten_tool)
+
+        wrapped = Tool.from_flow(flow, ex, output_schema=FormattedOutput)
+        # Constituent contracts were the default ToolSafetyContract().
+        # The "skipped" unregistered tool contributed nothing.
+        assert wrapped.safety == ToolSafetyContract()
+
+
+# ---------------------------------------------------------------------------
+# Tool.cacheable <-> safety.cacheable reconciliation (issue #19 review)
+# ---------------------------------------------------------------------------
+
+
+class TestToolCacheableReconciliation:
+    """``Tool.cacheable`` (executor step-cache flag) and
+    ``Tool.safety.cacheable`` (exported metadata) must never silently
+    disagree.
+    """
+
+    @staticmethod
+    def _tool(*, cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> Tool:
+        return Tool(
+            name="noop",
+            description="noop",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": inp.number},
+            cacheable=cacheable,
+            safety=safety,
+        )
+
+    def test_default_is_cacheable_on_both(self) -> None:
+        tool = self._tool()
+        assert tool.cacheable is True
+        assert tool.safety.cacheable is True
+
+    def test_cacheable_flag_propagates_to_default_contract(self) -> None:
+        # Passing cacheable=False without a safety contract must mark the
+        # derived contract non-cacheable too (previously diverged).
+        tool = self._tool(cacheable=False)
+        assert tool.cacheable is False
+        assert tool.safety.cacheable is False
+
+    def test_explicit_safety_drives_cacheable(self) -> None:
+        tool = self._tool(safety=ToolSafetyContract(cacheable=False))
+        assert tool.cacheable is False
+        assert tool.safety.cacheable is False
+
+    def test_conflicting_cacheable_and_safety_raises(self) -> None:
+        with pytest.raises(ValueError, match="conflicting cacheable"):
+            self._tool(cacheable=True, safety=ToolSafetyContract(cacheable=False))
+
+    def test_from_flow_propagates_non_cacheable_constituent(
+        self,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        # A non-cacheable constituent must surface on both the wrapped
+        # tool's contract and its executor step-cache flag.
+        double_uncacheable = Tool(
+            name="double",
+            description="Doubles a number (non-cacheable).",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": inp.number * 2},
+            cacheable=False,
+        )
+        flow = Flow(
+            name="cacheable_demo",
+            version="0.1.0",
+            description="One non-cacheable constituent.",
+            steps=[
+                FlowStep(tool_name="double", input_mapping={"number": "number"}),
+                FlowStep(tool_name="add_ten", input_mapping={"value": "value"}),
+                FlowStep(tool_name="format_result", input_mapping={"value": "value"}),
+            ],
+        )
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        ex.register_tool(double_uncacheable)
+        ex.register_tool(add_ten_tool)
+        ex.register_tool(format_tool)
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety.cacheable is False
+        assert wrapped.cacheable is False
+
+
+# ---------------------------------------------------------------------------
+# Tool.safety attribute (issue #19) — direct construction
+# ---------------------------------------------------------------------------
+
+
+class TestToolSafetyAttribute:
+    def test_default_safety_present_on_tool(self, double_tool: Tool) -> None:
+        assert double_tool.safety == ToolSafetyContract()
+
+    def test_explicit_safety_preserved(self) -> None:
+        explicit = ToolSafetyContract(
+            side_effects=SideEffectLevel.WRITE,
+            idempotent=False,
+        )
+        # Use any existing schema pair from helpers.
+        from helpers import NumberInput, ValueOutput
+
+        def _fn(inp: NumberInput) -> dict[str, Any]:
+            return {"value": inp.number}
+
+        tool = Tool(
+            name="echo",
+            description="Echoes the number.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_fn,
+            safety=explicit,
+        )
+        assert tool.safety is explicit

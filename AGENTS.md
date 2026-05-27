@@ -12,7 +12,7 @@ It compiles multi-tool flows into executable sequences that run without any
 LLM involvement between steps.
 
 - Python 3.10+; `from __future__ import annotations` in every module.
-- Single runtime dependency: `pydantic>=2.0`.
+- Small runtime dependency set: `pydantic`, `typer`, `tenacity`, `packaging`, and `deepdiff`.
 - Core philosophy: **compiled, not interpreted** — the executor is a graph
   runner, not a reasoning engine.
 
@@ -37,9 +37,10 @@ chainweaver/
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
 ├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
+├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + safety vocabulary (#19, #125, #9, #8)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash; Tool.from_flow() wraps a Flow as a Tool (#24)
-├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
+├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass + ConditionalEdge (#9) + determinism_level property (#8)
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
@@ -62,16 +63,31 @@ chainweaver/
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile
+├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, doctor, dump-schema
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
 ├── helpers.py         Shared Pydantic schemas and tool functions
 ├── test_*.py          Test files
 examples/
-└── simple_linear_flow.py   Runnable standalone usage example
-pyproject.toml             Ruff, mypy, pytest config (source of truth for tooling)
-.github/workflows/         CI (ci.yml) and publish (publish.yml) pipelines
+├── simple_linear_flow.py    Runnable standalone usage example
+├── coding_agent_*.py        Coding-agent workflow templates (#173): PR review, changelog, debug-log triage
+├── cookbook/                Paired scripts for docs/cookbook/ recipes (#146)
+└── (other domain-specific demos)
+docs/
+├── index.md                 Hosted-site landing page
+├── boundaries.md            Fit / non-fit guidance (#169)
+├── comparisons.md           vs LangChain / Prefect / Dagster / Temporal / LangGraph (#141)
+├── data-integrity.md        Five formal guarantees for compiled flow execution (#104)
+├── cookbook/                Six runnable recipes for the hosted docs site (#146)
+├── getting-started/, concepts/, reference/   Hosted-site nav sections (#133)
+├── cli.md, security.md, versioning-policy.md, v1-release-criteria.md
+└── agent-context/           Agent-specific deep-dive docs
+mkdocs.yml                   MkDocs Material site config (#133)
+.readthedocs.yaml            Read the Docs build config (#133)
+pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
+.github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), and publish (publish.yml) workflows
 ```
 
 ### Key entry points
@@ -86,7 +102,7 @@ pyproject.toml             Ruff, mypy, pytest config (source of truth for toolin
 - `FlowExecutor(..., checkpointer=..., delete_on_success=True)` → crash-resume (#128); writes an `ExecutionSnapshot` after every successful linear step or DAG level. `FlowExecutor.resume_flow(trace_id)` validates the snapshot's flow version and tool `schema_hash` values against the current registry — drift raises `CheckpointDriftError` — then continues execution with the original `trace_id`. Snapshots are deleted on terminal success when `delete_on_success=True` (the default); preserved on failure for operator-driven retry.
 - `OTelTraceExporter(tracer=...)` from `chainweaver.integrations.opentelemetry` (#126) → emits OpenTelemetry spans as a `FlowExecutorMiddleware`: one parent `chainweaver.flow.{name}` span + one child `chainweaver.tool.{name}` span per `StepRecord`. After-the-fact export of a completed `ExecutionResult` via `export_result_to_otel(result, tracer=...)`. Optional extra: `pip install 'chainweaver[otel]'`.
 - `FlowExecutor(..., middleware=[...])` → register lifecycle hooks (#131); fire order is `on_flow_start` → (`on_step_start` → `on_step_end`)* → `on_flow_end`. Hook exceptions are caught and logged at `WARNING` (chainweaver.middleware) — observability bugs never abort a flow.
-- `FlowExecutor.add_middleware(mw)` → append a middleware to the registration chain
+- `FlowExecutor.add_middleware(mw)` → append a middleware to the registration sequence
 - `FlowRegistry.register_flow(flow, *, overwrite=False)` → register a flow
 - `FlowRegistry.get_flow(name, *, version=None)` → latest or specific version
 - `FlowExecutor.register_tool(tool)` → register a tool; triggers drift detection on schema change
@@ -138,6 +154,17 @@ For the full prohibited-actions list and anti-patterns, see
 | `input_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating `initial_input` before the first step runs. |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for validating the final merged context after the last step finishes. |
 | `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
+| `determinism_level` | `DeterminismLevel` (computed) | — | Structural determinism inference (#8): linear `Flow` → `FULL` (or `NONE` if `deterministic=False`); `DAGFlow` with any conditional `branches` → `PARTIAL`. |
+| `context_schema` | `type[BaseModel] \| None` | `None` | Optional Pydantic schema for the accumulated execution context (#152). Resolved lazily from `context_schema_ref`. Validated at flow end. |
+
+### `DAGFlowStep` conditional branching (#9)
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `branches` | `list[ConditionalEdge]` | `[]` | Outgoing guards.  After this step runs, the first `ConditionalEdge` whose `predicate` evaluates truthy against the merged context picks the active downstream path; non-selected immediate dependents are recorded as `StepRecord(skipped=True)`.  Empty list (default) → unconditional fan-out, every dependent runs. |
+| `default_next` | `str \| None` | `None` | Fallback `target_step_id` when no `ConditionalEdge` matches.  Only meaningful alongside non-empty `branches`. |
+
+Predicates are evaluated by `chainweaver.contracts.evaluate_predicate`, which parses the string with `ast` and walks the tree by hand — `eval()` is **never** called.  Predicate syntax errors and unsupported AST nodes raise `PredicateSyntaxError` and abort the flow with a synthetic failed `StepRecord`.
 
 ### `FlowStep.input_mapping`
 
@@ -230,7 +257,10 @@ python -m pytest tests/ -v
 
 CI runs lint + format + mypy on Python 3.10 / `ubuntu-latest` only; tests
 run across `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
-3.12, 3.13}` (12 jobs in total).
+3.12, 3.13}` (12 jobs in total). A separate `bench.yml` workflow runs
+the naive-vs-compiled benchmark on `ubuntu-22.04` and fails PRs whose
+median `total_duration_ms` regresses beyond 125 % of the `gh-pages`
+baseline (see [benchmarks/README.md](benchmarks/README.md)).
 
 For full CI, PR, branch, and commit conventions, see
 [workflows.md](docs/agent-context/workflows.md).

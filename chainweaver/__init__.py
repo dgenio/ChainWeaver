@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
-from chainweaver.analyzer import ChainAnalyzer, ToolChain
+from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
@@ -56,6 +56,14 @@ from chainweaver.compiler import (
     CompilationResult,
     CompilationWarning,
     compile_flow,
+)
+from chainweaver.contracts import (
+    DeterminismLevel,
+    SideEffectLevel,
+    StabilityLevel,
+    ToolSafetyContract,
+    evaluate_predicate,
+    merge_safety,
 )
 from chainweaver.cost import CostProfile, CostReport
 from chainweaver.decisions import (
@@ -82,6 +90,7 @@ from chainweaver.exceptions import (
     InputMappingError,
     InvalidFlowVersionError,
     KernelInvocationError,
+    PredicateSyntaxError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -99,6 +108,7 @@ from chainweaver.executor import (
     StepRecord,
 )
 from chainweaver.flow import (
+    ConditionalEdge,
     DAGFlow,
     DAGFlowStep,
     DriftInfo,
@@ -119,6 +129,7 @@ from chainweaver.middleware import (
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.registry import FlowRegistry
+from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
     flow_from_dict,
     flow_from_json,
@@ -163,6 +174,7 @@ __all__ = [
     "CompilationError",
     "CompilationResult",
     "CompilationWarning",
+    "ConditionalEdge",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
@@ -172,6 +184,7 @@ __all__ = [
     "DecisionCallback",
     "DecisionCallbackError",
     "DecisionContext",
+    "DeterminismLevel",
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
@@ -203,12 +216,15 @@ __all__ = [
     "KernelInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "PredicateSyntaxError",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "SideEffectLevel",
+    "StabilityLevel",
     "StepCache",
     "StepCacheKey",
     "StepDiff",
@@ -216,11 +232,13 @@ __all__ = [
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "Suggestion",
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
     "ToolNotFoundError",
     "ToolOutputSizeError",
+    "ToolSafetyContract",
     "ToolTimeoutError",
     "TraceRecorder",
     "attest_flow",
@@ -228,17 +246,21 @@ __all__ = [
     "cli",
     "coerce_decision_callback",
     "compile_flow",
+    "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
     "flow_to_dot",
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "merge_safety",
     "result_to_mermaid",
     "schema_fingerprint",
+    "suggest_optimizations",
     "tool",
     "validate_dag_topology",
 ]

@@ -27,6 +27,19 @@ class FormattedOutput(BaseModel):
     result: str
 
 
+class LinearContextSchema(BaseModel):
+    """Typed execution context for the canonical linear flow used in tests.
+
+    Mirrors what the ``double → add_ten → format_result`` flow accumulates
+    in its context dict at the point ``format_result`` has finished:
+    ``{"number": int, "value": int, "result": str}``.
+    """
+
+    number: int
+    value: int
+    result: str
+
+
 # ---------------------------------------------------------------------------
 # Shared tool functions
 # ---------------------------------------------------------------------------

@@ -24,9 +24,10 @@ and tools, the same flow produces the same output every time.
 | `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
 | `compat.py` | `schema_fingerprint()`, `CompatibilityIssue`, `check_flow_compatibility()` | Pure utility; no execution or I/O |
 | `compiler.py` | `compile_flow()`: static schema flow validation pre-execution | Returns `CompilationResult`; no execution logic |
+| `contracts.py` | `ToolSafetyContract`, `SideEffectLevel`, `StabilityLevel`, `DeterminismLevel`, `merge_safety()`, `evaluate_predicate()` — the determinism + safety vocabulary (#19, #125, #9, #8) | Pure module: enums + frozen Pydantic model + AST-based predicate evaluator.  `evaluate_predicate` never calls `eval`/`exec`; nodes are matched against an explicit allow-list |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
-| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash`; `Tool.from_flow()` adapter (#24) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
-| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
+| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` + `safety` contract (#19); `Tool.from_flow()` adapter (#24) with `merge_safety` derivation (#125) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
+| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `ConditionalEdge` (#9), `validate_dag_topology` | Pure data definitions + topology validation + structural `determinism_level` inference (#8); no execution logic |
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
 | `analyzer.py` | `ChainAnalyzer`: offline schema-compatibility analysis — compatibility matrix, chain enumeration, suggested flows (#77) | Pure static pass: no LLM, no network, no randomness; cycle-free DFS bounded by `max_depth` |
@@ -62,6 +63,8 @@ and tools, the same flow produces the same output every time.
 | Weaver-spec mirror types over a hard dep (#91, #107) | `weaver-spec`, `contextweaver`, `agent-kernel` are sibling repos, not PyPI packages.  ChainWeaver carries its own Pydantic mirrors of the I-03 / I-04 / I-07 contracts so the integration is testable without an external install; the optional `[weaver-stack]` extra is a placeholder for when the SDKs ship. |
 | `KernelBackedExecutor` as a subclass, not a flag (#89) | Subclass overrides only the `_execute_capability_step` hook.  Keeps the executor's three invariants (no LLM, no network I/O, no randomness in `executor.py`) intact — kernel side-effects live in `integrations/agent_kernel.py`. |
 | Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
+| Branch targets must be direct dependents (#9) | Keeps conditional routing local — a `ConditionalEdge.target_step_id` (or `default_next`) must reference a step that already lists the branching step in its `depends_on`.  This makes "skipped" propagation a one-hop computation in the executor and prevents branches from jumping across unrelated subgraphs.  Enforced at registration time by `validate_dag_topology`. |
+| AST-based predicate evaluator (#9) | Predicate strings are parsed with `ast.parse(mode="eval")` and walked against an explicit node allow-list — `eval`/`exec` are **never** called.  The grammar deliberately excludes attribute access, function calls, and binary arithmetic so predicates stay routing decisions, not computations (unary `+`/`-` is permitted so signed literals like `n == -1` parse). |
 
 ---
 
@@ -109,6 +112,7 @@ files that conflict with these names:
 | `observer.py` | #78 | Runtime flow observer |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
+| ~~`schemas.py`~~ | #135 ✅ | JSON Schema export for flow files (delivered) |
 | `mcp/` | #70, #72 | MCP adapter + flow server |
 | ~~`integrations/weaver_spec.py`~~ | #91, #107 ✅ | Weaver-spec mirror types + `SelectableItem` exporter (delivered) |
 | ~~`integrations/contextweaver.py`~~ | #106 ✅ | `RoutingDecisionAdapter` (delivered) |

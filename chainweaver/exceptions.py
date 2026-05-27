@@ -276,3 +276,23 @@ class KernelInvocationError(ChainWeaverError):
             f"Kernel invocation for capability '{capability_id}' at step {step_index} "
             f"failed: {detail}"
         )
+
+
+class PredicateSyntaxError(ChainWeaverError):
+    """Raised when a conditional-branch predicate cannot be parsed or evaluated.
+
+    Conditional branches (issue #9) use a restricted boolean grammar that
+    :func:`~chainweaver.contracts.evaluate_predicate` walks with :mod:`ast`
+    — never :func:`eval`.  Any syntax error, unsupported node, or
+    unresolved name raises this exception with a precise detail so the
+    operator can fix the flow definition.
+
+    Attributes:
+        predicate: The offending predicate string.
+        detail: Human-readable explanation of what failed.
+    """
+
+    def __init__(self, predicate: str, detail: str) -> None:
+        self.predicate = predicate
+        self.detail = detail
+        super().__init__(f"Invalid predicate '{predicate}': {detail}")

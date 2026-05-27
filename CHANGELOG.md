@@ -68,25 +68,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marker for the Weaver Stack sibling SDKs when they ship on PyPI.
   The mirror types in `chainweaver.integrations.weaver_spec` keep the
   integration self-contained until then.
+- **Determinism + safety contracts** (#19): new `chainweaver/contracts.py`
+  module exposing `ToolSafetyContract` (Pydantic, frozen) plus the
+  `SideEffectLevel` / `StabilityLevel` / `DeterminismLevel` enums that
+  describe a tool's safety surface.  Defaults are maximally permissive
+  (`SideEffectLevel.NONE`, `StabilityLevel.STABLE`,
+  `DeterminismLevel.FULL`, `idempotent=True`, `cacheable=True`,
+  `requires_review=False`) so bare `Tool(...)` constructors keep working
+  unchanged.  `merge_safety(contracts)` computes the most-restrictive
+  contract across an iterable — used by `Tool.from_flow`.
+- **`Tool.safety` attribute and `Tool.from_flow(..., safety=...)` derivation**
+  (#125): every `Tool` instance now carries a `ToolSafetyContract`.
+  `Tool.from_flow` derives the wrapped flow's contract via `merge_safety`
+  over the constituent step tools (most-restrictive wins) and accepts an
+  explicit `safety=` override that bypasses derivation entirely.  A
+  `Tool`'s `cacheable` flag and its contract's `cacheable` are kept in
+  lockstep: passing `cacheable=` seeds the default contract, an explicit
+  `safety=` drives the flag, and a conflicting pair raises `ValueError`.
+- **DAG conditional branching** (#9): `DAGFlowStep` gains two optional
+  fields — `branches: list[ConditionalEdge]` and `default_next: str | None`.
+  After a decision step runs, the executor evaluates each
+  `ConditionalEdge.predicate` against the merged context; the first match
+  picks the active downstream path.  Non-selected immediate dependents
+  are recorded as `StepRecord(skipped=True)`, and the skip propagates to
+  steps whose every predecessor is itself skipped.  `default_next` is the
+  fallback when no edge matches.  Branch targets must be direct dependents
+  — enforced at registration time by `validate_dag_topology`, which now
+  raises `DAGDefinitionError(reason="unknown_branch_target")`.
+- **Safe AST-based predicate evaluator** (#9): `evaluate_predicate(expr, ctx)`
+  parses the expression with `ast.parse(mode="eval")` and walks the tree
+  against an explicit node allow-list.  Supports variable lookups,
+  subscript, unary `+`/`-` (for signed literals such as `n == -1`),
+  `==`/`!=`/`<`/`<=`/`>`/`>=`, `in`/`not in`, and `and`/`or`/`not`
+  (short-circuiting like Python, so the right operand of a settled
+  `and`/`or` is never evaluated), plus literal constants.  Binary
+  arithmetic, attribute access, and function calls are rejected.
+  `eval`/`exec` are **never** called.  Syntax errors, unsupported nodes,
+  and unresolved names raise the new `PredicateSyntaxError` exception.
+- **Structural determinism inference on flows** (#8): `Flow.determinism_level`
+  and `DAGFlow.determinism_level` computed properties return
+  `DeterminismLevel.FULL` / `PARTIAL` / `NONE`.  Linear `Flow` →
+  `FULL` (downgraded to `NONE` when `deterministic=False`); `DAGFlow`
+  with any non-empty `branches` → `PARTIAL` (downgraded to `NONE` when
+  `deterministic=False`).  Reflects flow *structure* only — tool-level
+  contracts are not consulted here.
+- **Public API exports** added to `chainweaver.__all__`:
+  `BaseDecisionCallback`, `ConditionalEdge`, `DecisionCallable`,
+  `DecisionCallback`, `DecisionCallbackError`, `DecisionContext`,
+  `DeterminismLevel`, `KernelInvocationError`, `PredicateSyntaxError`,
+  `SideEffectLevel`, `StabilityLevel`, `ToolSafetyContract`,
+  `coerce_decision_callback`, `evaluate_predicate`, `merge_safety`.
+- **New Weaver Stack integration symbols** (import from the submodule —
+  not re-exported from `chainweaver` to keep the public surface narrow):
+  `chainweaver.integrations.weaver_spec`
+  (`WEAVER_SPEC_VERSION`, `CapabilityToken`, `RoutingDecision`,
+  `SelectableItem`, `SpecCompatibilityReport`, `flow_to_selectable_item`,
+  `spec_compatibility_report`),
+  `chainweaver.integrations.contextweaver`
+  (`ContextweaverClient`, `RoutingDecisionAdapter`, `StaticRoutingClient`),
+  and `chainweaver.integrations.agent_kernel`
+  (`InMemoryKernel`, `KernelBackedExecutor`, `KernelProtocol`).
+- **Typed step input / output contracts** (#172): `FlowStep` gains
+  optional `input_contract` and `output_contract` fields (each a
+  `"module:qualname"` string ref to a Pydantic `BaseModel` subclass).
+  When set, `FlowExecutor` validates the resolved inputs against
+  `input_contract` *before* the tool runs and the tool's outputs against
+  `output_contract` *after* the tool runs.  Failures surface as
+  `SchemaValidationError` with `context="step_input_contract"` /
+  `"step_output_contract"` and abort the step.  `FlowStep` exposes
+  `resolved_input_contract` / `resolved_output_contract` properties and
+  a `contract_ref_from(cls)` static helper mirroring
+  `Flow.schema_ref_from`.  `DAGFlowStep` inherits both fields; the
+  executor forwards them through the DAG-step proxy.
+- **`Flow.context_schema_ref` / `DAGFlow.context_schema_ref`** (#152):
+  optional class ref to a Pydantic `BaseModel` describing the shape of
+  the accumulated execution context.  The executor validates the final
+  context against the resolved schema at flow end (mirroring
+  `output_schema_ref`).  Primary value is static typing — mypy + IDE
+  autocomplete over a single source of truth for context keys; runtime
+  validation at the flow boundary is a secondary safety net.  Both
+  models expose a lazy `.context_schema` property.
+- **JSON Schema export for flow files** (#135): new `chainweaver/schemas.py`
+  module exposing `flow_schema_json()` which returns a draft-2020-12
+  JSON Schema describing the on-disk `.flow.json` / `.flow.yaml`
+  format.  Derived from the live Pydantic models via
+  `model_json_schema()` so it never drifts from the runtime types.
+  Combined `oneOf` over Flow and DAGFlow discriminated by the existing
+  `type` field; nested `$defs` are merged.  Exported in
+  `chainweaver.__all__`.
+- **CLI `dump-schema`** (#135): `chainweaver dump-schema [--output PATH] [--check]`
+  writes the schema to disk (default stdout) and supports a CI-friendly
+  `--check` mode that fails with exit 1 when the on-disk artifact
+  drifts from the Pydantic source of truth.  Recommended in-repo path:
+  `schemas/flow.schema.json` (now checked in).
+- **SchemaStore submission template** (#139): new
+  `schemas/schemastore-catalog-entry.json` (maintainer-facing payload
+  to drop into SchemaStore/schemastore's `catalog.json`) plus
+  `docs/json-schema.md` documenting the editor setup today (VS Code
+  YAML, JetBrains) and the upstream submission workflow.
+- **`@tool(output_schema=…)` keyword** (#118): the decorator now
+  accepts an explicit `output_schema` parameter so user code can type
+  the function body's return as `dict[str, Any]` without
+  `# type: ignore[return-value]`.  When unset, the existing
+  return-annotation path still works.  Function bodies may now also
+  return a `BaseModel` instance directly; the adapter calls
+  `model_dump()` on the way out.  All 22 `type: ignore[return-value]`
+  suppressions in `tests/test_decorators.py` were removed.
+- **CLI `doctor`** (#175): `chainweaver doctor --check-drift <path>`
+  loads every flow file under *path* (single file or recursive
+  directory), imports tools from the modules passed via `--tools`, and
+  reports per-flow `missing_tool` and `schema_mismatch` issues using
+  `check_flow_compatibility`.  Flows without a recorded
+  `tool_schema_hashes` snapshot are surfaced as
+  `fingerprints_present=False` so callers can distinguish "fingerprints
+  match" from "no fingerprints were recorded".  Supports
+  `--format table|json`.  Exit codes: 0 = no drift, 1 = drift detected
+  or malformed flow file, 2 = path or `--tools` module missing.
+- **`FlowExecutor.registered_tools`** (#178): public read-only accessor
+  that returns a snapshot of currently registered tools as
+  `dict[str, Tool]`.  Replaces ad-hoc private `_tools` access in
+  downstream consumers; `doctor --check-drift` and `attest_flow`
+  now use the public accessor.
+- **Profile reliability aggregates** (#176): `chainweaver profile`
+  JSON output now carries `retry_count`, `skipped`, `fallback_used`,
+  `cached`, and `error_type` on every step entry, plus an
+  `aggregates` block with totals (`retry_count`, `skip_count`,
+  `fallback_count`, `failure_count`, `cached_count`) and a `by_tool`
+  breakdown keyed by tool name with `invocation_count` and the same
+  per-bucket counts.  Multi-trace mode sums these across every trace.
+  The table view surfaces the same data as a "Reliability:" footer
+  plus a per-tool problem list (only emitted when at least one count
+  is non-zero, so happy-path runs keep their compact output).
+- **`StepRecord.fallback_used`** (#176): new boolean field set when
+  the step's `on_error="fallback:<tool_name>"` policy invoked a
+  fallback tool — set regardless of whether the fallback itself
+  succeeded or failed (covers the case where the configured fallback
+  tool is missing too).
 
-### Public API
+### Fixed
 
-New symbols in `chainweaver.__all__`:
-`BaseDecisionCallback`, `DecisionCallable`, `DecisionCallback`,
-`DecisionContext`, `DecisionCallbackError`, `KernelInvocationError`,
-`coerce_decision_callback`.
+- **`dump-schema --check` guidance** (#181): both error messages now
+  interpolate the real `--output` path (single-quoted, matching the
+  surrounding exception-message style) instead of printing the literal
+  `{path}` token to stderr.  Locked with regression assertions in
+  `tests/test_cli_dump_schema.py`.
+- **DAG step retry / on_error parity** (#181): the DAG executor proxy
+  was forwarding the `#172` step-contract refs but silently dropping
+  `retry` and `on_error`, so DAG steps ignored per-step retry policy
+  and `on_error` handling.  The proxy now forwards both fields; new
+  `TestDAGStepRetryParity` and `TestDAGStepOnErrorParity` in
+  `tests/test_step_contracts.py` lock the parity contract.
+- **Public API snapshot** order-independence (mirroring the fix being
+  shipped in #177): `tests/public_api_snapshot.py` now skips
+  constructor signatures for Pydantic models (which differ depending
+  on forward-ref resolution state inside the same pytest process),
+  treats `types.GenericAlias` (`ToolChain = tuple[str, ...]`) before
+  class inspection, and normalises unresolved forward references
+  through `chainweaver.__all__`.  Regenerated `tests/fixtures/public_api.json`
+  to match.
 
-New integration symbols (import from the submodule — not re-exported
-from `chainweaver` to keep the public surface narrow):
+## [0.8.0] - 2026-05-22
 
-- `chainweaver.integrations.weaver_spec`: `WEAVER_SPEC_VERSION`,
-  `CapabilityToken`, `RoutingDecision`, `SelectableItem`,
-  `SpecCompatibilityReport`, `flow_to_selectable_item`,
-  `spec_compatibility_report`.
-- `chainweaver.integrations.contextweaver`: `ContextweaverClient`,
-  `RoutingDecisionAdapter`, `StaticRoutingClient`.
-- `chainweaver.integrations.agent_kernel`: `InMemoryKernel`,
-  `KernelBackedExecutor`, `KernelProtocol`.
+### Added
+
+- **CLI `suggest`** (#155): `chainweaver suggest <flow.yaml|json>` emits
+  advisory static optimization suggestions for a flow.  Four suggestion
+  families with stable codes:
+  - `CW001` — wasteful-passthrough: a step passes the full context to a
+    tool whose input schema uses only a subset of keys.
+  - `CW002` — parallelizable-pair: two adjacent linear steps read
+    disjoint context keys and could run concurrently.  Requires
+    `--tools`.
+  - `CW003` — dead-step: a step's outputs are not referenced by any
+    downstream step's `input_mapping`.  Requires `--tools`.
+  - `CW004` — cacheable-step: across two or more observed trace files
+    the step produces identical outputs for identical inputs.  Requires
+    `--trace`.
+  Accepts `--tools` (repeatable Python module path), `--trace` (repeatable
+  path to `ExecutionResult` JSON files for CW004), and `--format
+  table|json`.  Exit code is always 0 (the suggester is advisory).
+  `suggest_optimizations(flow, *, tools, traces)` and the `Suggestion`
+  model are exported in `chainweaver.__all__`.
+
+### Fixed
+
+- `suggest_optimizations` no longer emits false-positive CW002 or CW003
+  suggestions when a step has an empty `input_mapping` (which passes the
+  full context — that step cannot be treated as having disjoint or
+  dead outputs without full schema information).
+- CW001 docstring now correctly states that `--tools` is required to
+  detect wasteful-passthrough for steps without explicit `input_mapping`.
+
+### Tests
+
+- **Property-based determinism harness** (#143): new
+  `tests/property/test_idempotence.py` and
+  `tests/property/test_dag_equivalence.py` using Hypothesis strategies
+  (defined in `tests/property/strategies.py`) to assert that linear and
+  DAG flows produce identical results across repeated executions with
+  the same inputs.  Tagged `@pytest.mark.property`; run as part of the
+  standard `pytest` suite.
+- **Public-API snapshot guard** (#140): `tests/test_public_api_snapshot.py`
+  pins the exact set of names exported in `chainweaver.__all__` against
+  a golden fixture (`tests/fixtures/public_api.json`), catching accidental
+  additions or removals before they reach a release.
+
+### CI / Infrastructure
+
+- **Performance-budget guard** (#144): `bench.yml` workflow now uses
+  `github-action-benchmark` to store naive-vs-compiled benchmark results
+  on `gh-pages` and fail PRs whose median `total_duration_ms` regresses
+  beyond 125 % of the baseline.  Baseline bootstraps automatically on the
+  first push to `gh-pages`.
+- **Reusable `chainweaver-action`** (#149): composite GitHub Action that
+  wraps the CLI; lets downstream workflows call
+  `uses: dgenio/ChainWeaver/.github/actions/chainweaver-action@main`
+  without installing ChainWeaver separately.
+- **Pre-commit hooks** (#137): `.pre-commit-config.yaml` mirrors the four
+  AGENTS.md §7 validation commands (`ruff check`, `ruff format --check`,
+  `mypy`, `pytest`).  Install with `pre-commit install`.
+
+### Docs
+
+- Added `docs/comparisons.md` comparing ChainWeaver to LangChain,
+  LangGraph, Prefect, Dagster, and Temporal (#141).
+- Added OSS health files: `CODE_OF_CONDUCT.md`, `SECURITY.md`, and
+  expanded `CONTRIBUTING.md` with pre-commit hook installation
+  instructions (#138).
 
 ## [0.7.0] - 2026-05-20
 

@@ -235,6 +235,8 @@ class TestOnErrorSkip:
         assert record.outputs == {}
         assert record.error_type == "FlowExecutionError"
         assert record.error_message is not None
+        # Skip path must not be mistakenly flagged as a fallback (issue #176).
+        assert record.fallback_used is False
 
 
 class TestOnErrorFallback:
@@ -253,6 +255,26 @@ class TestOnErrorFallback:
         assert record.outputs == {"value": 107}
         # Original failure preserved in retry_errors.
         assert any("intermittent failure" in msg for msg in record.retry_errors)
+        # Successful fallback must be flagged for profile aggregation (issue #176).
+        assert record.fallback_used is True
+
+    def test_fallback_failure_still_marked_fallback_used(self) -> None:
+        # Fallback tool exists but also fails — record must reflect that
+        # the fallback path was taken, even though the step ultimately
+        # failed.  This is the dominant CI signal for "step is unstable
+        # and fallback isn't helping" (issue #176).
+        primary = _make_tool("primary", _Counter(fail_until_attempt=10))
+        alt = _make_tool("alt", _Counter(fail_until_attempt=10))
+        ex = _build_executor(
+            primary,
+            on_error="fallback:alt",
+            extra_tools=(alt,),
+        )
+        result = ex.execute_flow("retry_flow", {"number": 1})
+        assert result.success is False
+        record = result.execution_log[0]
+        assert record.success is False
+        assert record.fallback_used is True
 
     def test_fallback_missing_tool_records_failure(self) -> None:
         primary = _make_tool("primary", _Counter(fail_until_attempt=10))
@@ -261,6 +283,50 @@ class TestOnErrorFallback:
         assert result.success is False
         record = result.execution_log[0]
         assert record.error_type == "ToolNotFoundError"
+        # The policy invoked the fallback path even though the tool was
+        # missing — surface that distinction so profile aggregates can
+        # separate "fallback configured but unusable" from "no fallback".
+        assert record.fallback_used is True
+
+    def test_first_attempt_success_leaves_fallback_used_false(self) -> None:
+        # Sanity check: a step that succeeds on its first attempt with
+        # ``on_error="fallback:alt"`` configured must NOT be flagged as
+        # having used the fallback.
+        primary = _make_tool("primary", _Counter(fail_until_attempt=0))
+        alt = _make_tool("alt", lambda inp: {"value": 999})
+        ex = _build_executor(
+            primary,
+            on_error="fallback:alt",
+            extra_tools=(alt,),
+        )
+        result = ex.execute_flow("retry_flow", {"number": 2})
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.fallback_used is False
+        assert record.outputs == {"value": 4}
+
+
+class TestRegisteredToolsAccessor:
+    """``FlowExecutor.registered_tools`` (issue #178)."""
+
+    def test_returns_snapshot_of_registered_tools(self) -> None:
+        primary = _make_tool("primary", lambda inp: {"value": inp.number})
+        alt = _make_tool("alt", lambda inp: {"value": inp.number})
+        ex = _build_executor(primary, extra_tools=(alt,))
+        registered = ex.registered_tools
+        assert set(registered) == {"primary", "alt"}
+        assert registered["primary"] is primary
+        assert registered["alt"] is alt
+
+    def test_returned_dict_is_a_copy(self) -> None:
+        primary = _make_tool("primary", lambda inp: {"value": inp.number})
+        ex = _build_executor(primary)
+        snapshot = ex.registered_tools
+        snapshot.pop("primary")
+        # Mutating the snapshot must not affect the executor.
+        assert "primary" in ex.registered_tools
+        # And subsequent calls keep returning fresh copies.
+        assert ex.registered_tools is not snapshot
 
 
 class TestBackoffTiming:

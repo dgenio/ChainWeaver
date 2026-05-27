@@ -45,6 +45,15 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
+      # Property-based determinism tests are tagged @pytest.mark.property
+      # and already run in the step above. We re-invoke them explicitly on
+      # the canonical Python 3.10 / ubuntu lane with statistics enabled so
+      # the Hypothesis seed is recorded in CI logs — the seed is what lets
+      # contributors reproduce a shrunk counter-example locally.
+      - name: Property tests (Hypothesis seed reporting)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
+        run: python -m pytest tests/ -m property --no-cov --hypothesis-show-statistics -v
+
   conformance:
     name: weaver-spec conformance (#91)
     runs-on: ubuntu-latest

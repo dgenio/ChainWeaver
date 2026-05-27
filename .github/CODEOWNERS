@@ -1,0 +1,23 @@
+# Code owners for ChainWeaver.
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# Order matters: the last matching pattern takes precedence.
+
+# Default owner for everything in the repo.
+* @dgenio
+
+# Canonical agent documentation: keep review tight so AGENTS.md and
+# docs/agent-context/ stay coherent.
+/AGENTS.md                 @dgenio
+/docs/agent-context/       @dgenio
+
+# Tool-specific instruction projections.
+/.github/copilot-instructions.md  @dgenio
+/.github/instructions/            @dgenio
+/.claude/                         @dgenio
+
+# Release-sensitive configuration.
+/pyproject.toml            @dgenio
+/.github/workflows/        @dgenio
+/.github/actions/          @dgenio

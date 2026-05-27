@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from chainweaver.flow import Flow
+    from chainweaver.flow import DAGFlow, Flow
     from chainweaver.tools import Tool
 
 from pydantic import BaseModel
@@ -55,7 +55,7 @@ class CompatibilityIssue:
 
 
 def check_flow_compatibility(
-    flow: Flow,
+    flow: Flow | DAGFlow,
     tools: dict[str, Tool],
 ) -> list[CompatibilityIssue]:
     """Check that each step's tool exists and its schema matches expectations.
@@ -63,8 +63,12 @@ def check_flow_compatibility(
     Compares each step's tool against the flow's stored ``tool_schema_hashes``
     snapshot (if present). Returns a list of issues (empty means compatible).
 
+    Accepts both :class:`~chainweaver.flow.Flow` and
+    :class:`~chainweaver.flow.DAGFlow` — the implementation only touches
+    ``name``, ``steps``, and ``tool_schema_hashes``, which exist on both.
+
     Args:
-        flow: The flow to check.
+        flow: The flow (or DAG flow) to check.
         tools: A mapping of tool name to Tool instance.
 
     Returns:

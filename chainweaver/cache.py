@@ -8,10 +8,10 @@ output of every cacheable step is provably the same.
 
 The cache is keyed by ``(tool_name, schema_hash, input_value_hash)``:
 
-- ``schema_hash`` reuses :attr:`Tool.schema_hash` (the combined input +
-  output SHA-256 fingerprint) so any tool-schema change invalidates the
-  cache automatically — no stale outputs after a tool definition
-  rolls.
+- ``schema_hash`` reuses :attr:`Tool.schema_hash` (the combined input
+  schema + output schema + schema version SHA-256 fingerprint) so any
+  tool-schema or schema-version change invalidates the cache automatically
+  — no stale outputs after a tool definition rolls.
 - ``input_value_hash`` is the SHA-256 of the *validated* input's
   canonical ``model_dump_json`` form, so equivalent inputs differing
   only in field ordering or Pydantic coercion collapse onto the same
@@ -64,10 +64,10 @@ class StepCacheKey(BaseModel):
 
     Attributes:
         tool_name: Name of the tool whose output is being cached.
-        schema_hash: Combined input + output schema fingerprint
-            (:attr:`Tool.schema_hash`).  When the tool's schemas change
-            this hash changes, so old cache entries are bypassed
-            without needing an explicit invalidation step.
+        schema_hash: Combined input schema + output schema + schema version
+            fingerprint (:attr:`Tool.schema_hash`).  When the tool's schemas
+            or schema version change this hash changes, so old cache entries
+            are bypassed without needing an explicit invalidation step.
         input_value_hash: SHA-256 hex digest of the validated input
             payload's canonical ``model_dump_json`` form.
     """
