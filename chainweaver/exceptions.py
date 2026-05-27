@@ -233,6 +233,46 @@ class CheckpointNotFoundError(ChainWeaverError):
         super().__init__(f"No snapshot found for trace_id '{trace_id}'.")
 
 
+class MCPError(ChainWeaverError):
+    """Base class for errors raised by the ``chainweaver.mcp`` package
+    (issues #70, #72, #150).
+
+    All MCP-adapter / MCP-server failures inherit from this class so
+    callers can catch the whole family with a single ``except MCPError``.
+    """
+
+
+class MCPSchemaConversionError(MCPError):
+    """Raised when an MCP tool's JSON Schema cannot be projected to Pydantic.
+
+    Attributes:
+        tool_name: Name of the MCP tool whose schema could not be converted.
+        detail: Human-readable explanation of which JSON Schema construct
+            tripped the converter.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"Failed to convert JSON Schema for MCP tool '{tool_name}': {detail}.")
+
+
+class MCPToolInvocationError(MCPError):
+    """Raised when an MCP tool invocation returns ``isError=True``
+    or the SDK call itself raises.
+
+    Attributes:
+        tool_name: Name of the MCP tool that failed (server-prefixed).
+        detail: Human-readable explanation of the failure, including any
+            ``content`` text returned by the server when available.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"MCP tool '{tool_name}' invocation failed: {detail}.")
+
+
 class DecisionCallbackError(ChainWeaverError):
     """Raised when a :class:`~chainweaver.decisions.DecisionCallback` fails (issue #102).
 

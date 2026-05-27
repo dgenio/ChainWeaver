@@ -32,10 +32,11 @@ and tools, the same flow produces the same output every time.
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
 | `analyzer.py` | `ChainAnalyzer`: offline schema-compatibility analysis — compatibility matrix, chain enumeration, suggested flows (#77) | Pure static pass: no LLM, no network, no randomness; cycle-free DFS bounded by `max_depth` |
 | `decisions.py` | `DecisionCallback` Protocol + `DecisionContext` + `coerce_decision_callback` (#102) | Pure protocol module — no executor logic, no network, no randomness; the executor depends on it but it does not depend on the executor |
-| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection, invoke `DecisionCallback` at decision points, dispatch capability steps via the `_execute_capability_step` hook | **No LLM, no network I/O, no randomness.** No `agent-kernel` / `weaver-spec` / `contextweaver` imports — those live in `integrations/` and reach the executor only via the `DecisionCallback` seam and `KernelBackedExecutor` subclass hook |
+| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection, invoke `DecisionCallback` at decision points, dispatch capability steps via the `_execute_capability_step` hook. `execute_flow_async` provides the async lane (#80). | **No LLM, no network I/O, no randomness.** No `agent-kernel` / `weaver-spec` / `contextweaver` imports — those live in `integrations/` and reach the executor only via the `DecisionCallback` seam and `KernelBackedExecutor` subclass hook |
 | `integrations/weaver_spec.py` | Weaver Stack mirror types (`SelectableItem`, `RoutingDecision`, `CapabilityToken`); `flow_to_selectable_item()` exporter; `WEAVER_SPEC_VERSION` (#91, #107) | Pure data + a single exporter; no external dependency — mirror types match weaver-spec v0.1.0 contract |
 | `integrations/contextweaver.py` | `RoutingDecisionAdapter` (`DecisionCallback` impl) + `ContextweaverClient` Protocol + `StaticRoutingClient` (#106) | Translates `RoutingDecision` → tool name; no hard dep on a `contextweaver` SDK |
 | `integrations/agent_kernel.py` | `KernelBackedExecutor` (FlowExecutor subclass) + `KernelProtocol` + `InMemoryKernel` (#89) | Overrides only `_execute_capability_step`; no LLM, no randomness; kernel side-effects are the kernel's responsibility |
+| `mcp/` | MCP integration package (#70, #72, #150): `MCPToolAdapter` (inbound), `FlowServer` (outbound), JSON Schema ↔ Pydantic bridge. Async-only — relies on `FlowExecutor.execute_flow_async`. | All third-party `mcp` imports guarded; isolated from `executor.py` per the no-network-I/O invariant. |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
@@ -113,7 +114,7 @@ files that conflict with these names:
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
 | ~~`schemas.py`~~ | #135 ✅ | JSON Schema export for flow files (delivered) |
-| `mcp/` | #70, #72 | MCP adapter + flow server |
+| ~~`mcp/`~~ | #70, #72, #150 ✅ | MCP adapter + flow server (delivered; requires `chainweaver[mcp]`) |
 | ~~`integrations/weaver_spec.py`~~ | #91, #107 ✅ | Weaver-spec mirror types + `SelectableItem` exporter (delivered) |
 | ~~`integrations/contextweaver.py`~~ | #106 ✅ | `RoutingDecisionAdapter` (delivered) |
 | ~~`integrations/agent_kernel.py`~~ | #89 ✅ | `KernelBackedExecutor` (delivered) |

@@ -13,6 +13,7 @@ strings so the result is JSON-serializable end-to-end.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import queue
 import threading
@@ -564,6 +565,16 @@ class FlowExecutor:
         # invoking the relevant ``_execute_*`` path so the loops know
         # where to start and which records to prepend.
         self._resume_snapshot: ExecutionSnapshot | None = None
+
+    @property
+    def registry(self) -> FlowRegistry:
+        """The :class:`~chainweaver.registry.FlowRegistry` backing this executor.
+
+        Read-only accessor so callers (notably
+        :class:`chainweaver.mcp.FlowServer`) can enumerate registered
+        flows without reaching into the private ``_registry`` attribute.
+        """
+        return self._registry
 
     def add_middleware(self, middleware: FlowExecutorMiddleware) -> None:
         """Register an additional :class:`FlowExecutorMiddleware`.
@@ -1197,6 +1208,660 @@ class FlowExecutor:
             started_at=flow_started_at,
             perf_start=flow_t0,
             initial_input=initial_input,
+        )
+
+    async def execute_flow_async(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        force: bool = False,
+    ) -> ExecutionResult:
+        """Asynchronously execute a registered flow (issue #80).
+
+        Coroutine variant of :meth:`execute_flow`.  Runs the flow
+        lifecycle natively in the calling event loop and dispatches
+        each tool through :meth:`Tool.run_async`:
+
+        * Async-fn tools (e.g. the wrappers produced by
+          :class:`chainweaver.mcp.MCPToolAdapter`) are ``await``-ed
+          directly so I/O resources bound to the calling loop —
+          notably MCP ``ClientSession`` streams — are usable.
+        * Sync-fn tools are offloaded to a worker thread via
+          :func:`asyncio.to_thread`, keeping the event loop
+          responsive to other tasks while a blocking tool runs.
+
+        Linear and DAG flows are both supported.  The async lane
+        preserves middleware, retries, the ``on_error`` policy, and
+        flow-level input/output validation.  It deliberately bypasses
+        the step cache and crash-resume checkpointer for v0.1 — those
+        features are async-unaware today and will be folded into the
+        async lane in a follow-up.
+
+        The async lane does **not** yet honour conditional branching
+        (``branches`` / ``default_next``, #9) or decision callbacks
+        (``decision_candidates``, #102).  Flows declaring those features
+        raise :class:`FlowExecutionError` up front rather than executing
+        with the directives silently dropped — use the synchronous
+        :meth:`execute_flow` for such flows until the async lane reaches
+        parity.
+
+        Args:
+            flow_name: Name of the flow to execute.
+            initial_input: Initial key/value context passed to the first step.
+            force: When ``True``, bypass the status guard and execute even
+                if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+
+        Returns:
+            An :class:`ExecutionResult` with the full execution log.
+        """
+        flow = self._registry.get_flow(flow_name)
+
+        if not force and flow.status != FlowStatus.ACTIVE:
+            raise FlowStatusError(flow_name, flow.status.value)
+
+        self._assert_async_lane_supported(flow)
+
+        if isinstance(flow, DAGFlow):
+            return await self._execute_dag_flow_async(flow, initial_input)
+        return await self._execute_linear_flow_async(flow, initial_input)
+
+    @staticmethod
+    def _assert_async_lane_supported(flow: Any) -> None:
+        """Reject flows using execution features the async lane can't honour.
+
+        ``execute_flow_async`` is a v0.1 lane (issue #80).  It does not
+        yet implement the conditional-branching (#9) or decision-callback
+        (#102) semantics the synchronous :meth:`execute_flow` supports.
+        The async DAG path also builds a plain tool proxy per step, so
+        those directives would be **silently dropped** — producing a
+        different result than the sync lane for the same flow.  Fail fast
+        with a clear error (rather than diverge silently) so callers route
+        such flows through :meth:`execute_flow` until the async lane gains
+        parity.  ``step_type='capability'`` is handled separately by the
+        DAG path, which already errors loudly on it.
+        """
+        for idx, step in enumerate(flow.steps):
+            if getattr(step, "decision_candidates", None):
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support decision_candidates "
+                    "(issue #102) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
+            if getattr(step, "branches", None):
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support conditional branches "
+                    "(issue #9) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
+            if getattr(step, "default_next", None) is not None:
+                raise FlowExecutionError(
+                    step.tool_name,
+                    idx,
+                    "execute_flow_async does not support default_next routing "
+                    "(issue #9) yet; run this flow via the synchronous "
+                    "execute_flow.",
+                )
+
+    async def _execute_linear_flow_async(
+        self,
+        flow: Any,
+        initial_input: dict[str, Any],
+    ) -> ExecutionResult:
+        """Async-native counterpart to the linear branch of :meth:`execute_flow`."""
+        trace_id = _new_trace_id()
+        flow_started_at = _now_utc()
+        flow_t0 = time.perf_counter()
+        flow_name = flow.name
+
+        _logger.info(
+            "Flow '%s' (async) started | trace_id=%s | steps=%d",
+            flow_name,
+            trace_id,
+            len(flow.steps),
+        )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        if flow.input_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=initial_input,
+                schema=flow.input_schema,
+                step_index=-1,
+                context_label="flow_input",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=0,
+                )
+
+        context: dict[str, Any] = dict(initial_input)
+        log: list[StepRecord] = []
+        for idx, step in enumerate(flow.steps):
+            record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
+            log.append(record)
+            if not record.success:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                )
+            if record.outputs is None:
+                raise RuntimeError(
+                    f"Step {idx} ({step.tool_name}) succeeded but produced no outputs"
+                )
+            context.update(record.outputs)
+
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow_name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=initial_input,
+        )
+
+    async def _execute_dag_flow_async(
+        self,
+        flow: DAGFlow,
+        initial_input: dict[str, Any],
+    ) -> ExecutionResult:
+        """Async-native counterpart to :meth:`_execute_dag_flow`.
+
+        Level-by-level execution mirrors the sync path: steps within a
+        level run sequentially (concurrent intra-level execution is a
+        follow-up — see issue #80 acceptance criteria), and outputs are
+        merged with sibling-key-conflict detection between levels.
+        """
+        trace_id = _new_trace_id()
+        flow_started_at = _now_utc()
+        flow_t0 = time.perf_counter()
+
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow.name,
+                flow_version=flow.version,
+                initial_input=dict(initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        if flow.input_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow.name,
+                payload=initial_input,
+                schema=flow.input_schema,
+                step_index=-1,
+                context_label="flow_input",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow.name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=0,
+                )
+
+        context: dict[str, Any] = dict(initial_input)
+        log: list[StepRecord] = []
+        flat_index = 0
+        levels = self._compute_dag_levels(flow)
+
+        for level_steps in levels:
+            level_outputs: dict[str, Any] = {}
+            for step in level_steps:
+                if step.step_type != "tool":
+                    err = FlowExecutionError(
+                        step.tool_name,
+                        flat_index,
+                        f"Step '{step.step_id}' has step_type='{step.step_type}' "
+                        f"which is not supported by FlowExecutor.",
+                    )
+                    err_type, err_msg = _exc_to_strings(err)
+                    now = _now_utc()
+                    log.append(
+                        StepRecord(
+                            step_index=flat_index,
+                            tool_name=step.tool_name,
+                            inputs={},
+                            error_type=err_type,
+                            error_message=err_msg,
+                            success=False,
+                            started_at=now,
+                            ended_at=now,
+                            duration_ms=0.0,
+                        )
+                    )
+                    return self._make_result(
+                        flow_name=flow.name,
+                        success=False,
+                        final_output=None,
+                        execution_log=log,
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
+                        initial_input=initial_input,
+                    )
+
+                proxy = FlowStep(
+                    tool_name=step.tool_name,
+                    input_mapping=step.input_mapping,
+                )
+                record = await self._execute_step_async(
+                    flat_index, proxy, context, flow.name, trace_id
+                )
+                log.append(record)
+                flat_index += 1
+                if not record.success:
+                    return self._make_result(
+                        flow_name=flow.name,
+                        success=False,
+                        final_output=None,
+                        execution_log=log,
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
+                        initial_input=initial_input,
+                    )
+                assert record.outputs is not None
+                for key, value in record.outputs.items():
+                    if key in level_outputs:
+                        conflict_err = FlowExecutionError(
+                            step.tool_name,
+                            record.step_index,
+                            f"Key '{key}' produced by both '{step.tool_name}' and a "
+                            f"sibling step in the same DAG level.",
+                        )
+                        err_type, err_msg = _exc_to_strings(conflict_err)
+                        log[-1] = StepRecord(
+                            step_index=record.step_index,
+                            tool_name=step.tool_name,
+                            inputs=record.inputs,
+                            error_type=err_type,
+                            error_message=err_msg,
+                            success=False,
+                            started_at=record.started_at,
+                            ended_at=_now_utc(),
+                            duration_ms=record.duration_ms,
+                        )
+                        return self._make_result(
+                            flow_name=flow.name,
+                            success=False,
+                            final_output=None,
+                            execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
+                            initial_input=initial_input,
+                        )
+                    level_outputs[key] = value
+            context.update(level_outputs)
+
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow.name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=len(flow.steps),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow.name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow.name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=initial_input,
+        )
+
+    async def _execute_step_async(
+        self,
+        step_index: int,
+        step: FlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+    ) -> StepRecord:
+        """Async-native counterpart to :meth:`_execute_step`.
+
+        Mirrors the sync path's tool-not-found / input-mapping /
+        invocation / wrap / on-error machinery, but uses
+        :meth:`Tool.run_async` so async-fn tools never trigger a
+        cross-loop dispatch.
+
+        Retries and middleware hooks (which are sync APIs) are
+        applied in the same order as the sync path; ``on_error``
+        fallback tools are also dispatched via ``run_async`` so MCP
+        fallbacks compose correctly.
+        """
+        started_at = _now_utc()
+        t0 = time.perf_counter()
+        tool_attempts = [0]
+
+        def _record(
+            *,
+            inputs: dict[str, Any],
+            outputs: dict[str, Any] | None,
+            error: Exception | None,
+            success: bool,
+            skipped: bool,
+            retry_errors: list[str],
+            fallback_used: bool = False,
+        ) -> StepRecord:
+            err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
+            retry_count = max(0, tool_attempts[0] - 1)
+            return StepRecord(
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs=inputs,
+                outputs=outputs,
+                error_type=err_type,
+                error_message=err_msg,
+                success=success,
+                started_at=started_at,
+                ended_at=_now_utc(),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+                retry_count=retry_count,
+                retry_errors=list(retry_errors),
+                skipped=skipped,
+                cached=False,
+                fallback_used=fallback_used,
+            )
+
+        def _finish(record: StepRecord) -> StepRecord:
+            self._fire_step_end(
+                StepEndContext(
+                    trace_id=trace_id,
+                    flow_name=flow_name,
+                    step_record=record,
+                )
+            )
+            return record
+
+        try:
+            tool = self.get_tool(step.tool_name)
+        except ToolNotFoundError as exc:
+            log_step_error(_logger, step_index, step.tool_name, exc)
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
+
+        try:
+            inputs = self._resolve_inputs(step, context, step_index)
+        except InputMappingError as exc:
+            log_step_error(_logger, step_index, step.tool_name, exc)
+            return _finish(
+                _record(
+                    inputs={},
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=step.tool_name,
+                inputs=dict(inputs),
+                started_at=started_at,
+            )
+        )
+        log_step_start(
+            _logger,
+            step_index,
+            step.tool_name,
+            inputs,
+            redaction=self._redaction_policy,
+        )
+
+        retry_errors: list[str] = []
+        try:
+            outputs = await self._invoke_tool_async(
+                tool, inputs, step.retry, retry_errors, tool_attempts
+            )
+        except Exception as exc:
+            wrapped = self._wrap_tool_exception(step, step_index, exc)
+            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            # Re-use the sync ``_apply_on_error`` for fail / skip; the
+            # fallback path needs an async dispatch, so route through
+            # an async-aware helper.
+            return _finish(
+                await self._apply_on_error_async(
+                    step=step,
+                    step_index=step_index,
+                    inputs=inputs,
+                    wrapped_error=wrapped,
+                    retry_errors=retry_errors,
+                    make_record=_record,
+                )
+            )
+
+        log_step_end(
+            _logger,
+            step_index,
+            step.tool_name,
+            outputs,
+            redaction=self._redaction_policy,
+        )
+        return _finish(
+            _record(
+                inputs=inputs,
+                outputs=outputs,
+                error=None,
+                success=True,
+                skipped=False,
+                retry_errors=retry_errors,
+            )
+        )
+
+    async def _invoke_tool_async(
+        self,
+        tool: Tool,
+        inputs: dict[str, Any],
+        policy: RetryPolicy | None,
+        retry_errors: list[str],
+        attempts: list[int],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`_invoke_tool`.
+
+        Applies the same backoff schedule via :func:`asyncio.sleep`
+        instead of tenacity's blocking ``time.sleep``, so retries don't
+        starve the calling event loop.
+        """
+        if policy is None:
+            attempts[0] += 1
+            try:
+                return await tool.run_async(inputs)
+            except Exception as exc:
+                retry_errors.append(str(exc))
+                raise
+
+        retryable = policy.resolved_retryable_errors()
+        last_exc: Exception | None = None
+        for attempt_number in range(1, policy.max_retries + 2):
+            attempts[0] += 1
+            try:
+                return await tool.run_async(inputs)
+            except Exception as exc:
+                retry_errors.append(str(exc))
+                last_exc = exc
+                if not isinstance(exc, retryable):
+                    raise
+                if attempt_number >= policy.max_retries + 1:
+                    raise
+                delay = policy.compute_delay(attempt_number)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        # Unreachable in practice (the loop either returns or re-raises).
+        assert last_exc is not None
+        raise last_exc  # pragma: no cover
+
+    async def _apply_on_error_async(
+        self,
+        *,
+        step: FlowStep,
+        step_index: int,
+        inputs: dict[str, Any],
+        wrapped_error: Exception,
+        retry_errors: list[str],
+        make_record: Callable[..., StepRecord],
+    ) -> StepRecord:
+        """Async counterpart to :meth:`_apply_on_error`.
+
+        Identical fail / skip behaviour to the sync path; the
+        ``fallback:<tool_name>`` branch dispatches the fallback tool
+        via :meth:`Tool.run_async` so async fallbacks compose.
+        """
+        on_error = step.on_error
+        if on_error == "fail":
+            return make_record(
+                inputs=inputs,
+                outputs=None,
+                error=wrapped_error,
+                success=False,
+                skipped=False,
+                retry_errors=retry_errors,
+            )
+        if on_error == "skip":
+            return make_record(
+                inputs=inputs,
+                outputs={},
+                error=None,
+                success=True,
+                skipped=True,
+                retry_errors=retry_errors,
+            )
+        # fallback:<tool_name>
+        prefix = "fallback:"
+        if on_error.startswith(prefix):
+            fb_name = on_error[len(prefix) :]
+            try:
+                fb_tool = self.get_tool(fb_name)
+            except ToolNotFoundError as exc:
+                retry_errors.append(f"fallback '{fb_name}' not registered")
+                return make_record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=exc,
+                    success=False,
+                    skipped=False,
+                    retry_errors=retry_errors,
+                    fallback_used=True,
+                )
+            try:
+                outputs = await fb_tool.run_async(inputs)
+            except Exception as exc:
+                retry_errors.append(f"fallback '{fb_name}' failed: {exc}")
+                wrapped_fb = self._wrap_tool_exception(step, step_index, exc)
+                return make_record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=wrapped_fb,
+                    success=False,
+                    skipped=False,
+                    retry_errors=retry_errors,
+                    fallback_used=True,
+                )
+            return make_record(
+                inputs=inputs,
+                outputs=outputs,
+                error=None,
+                success=True,
+                skipped=False,
+                retry_errors=retry_errors,
+                fallback_used=True,
+            )
+        # Unrecognised on_error → treat as fail.
+        return make_record(
+            inputs=inputs,
+            outputs=None,
+            error=wrapped_error,
+            success=False,
+            skipped=False,
+            retry_errors=retry_errors,
         )
 
     def stream_flow(

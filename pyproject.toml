@@ -40,6 +40,9 @@ yaml = [
 otel = [
     "opentelemetry-api>=1.20",
 ]
+mcp = [
+    "mcp>=1.0,<2",
+]
 weaver-stack = [
     # Placeholder for the Weaver Stack sibling SDKs (issue #91 — weaver-spec
     # conformance, #106 — contextweaver, #89 — agent-kernel).  ChainWeaver's
@@ -63,6 +66,7 @@ docs = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.8",
     "mypy>=1.0",
     "pyyaml>=6.0",
@@ -72,6 +76,7 @@ dev = [
     "hypothesis-jsonschema>=0.23",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
+    "mcp>=1.0,<2",
 ]
 
 [project.urls]
@@ -88,6 +93,7 @@ python_functions = ["test_*"]
 # directories to `sys.path` before collection.
 pythonpath = ["tests", "tests/property"]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
+asyncio_mode = "auto"
 markers = [
     "conformance: weaver-spec conformance gate (issue #91); run with -m conformance",
     "property: Hypothesis property-based determinism test (also run via `pytest -m property`)",
