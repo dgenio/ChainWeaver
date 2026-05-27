@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779877872940,
+  "lastUpdate": 1779900488068,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -504,6 +504,78 @@ window.BENCHMARK_DATA = {
             "value": 0.3301149999970221,
             "unit": "ms",
             "extra": "min=0.30ms max=0.36ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4638331b9b92edfbe4d3b50dd88d4153576cf102",
+          "message": "Merge pull request #184 from dgenio/claude/triage-issues-UcGHs\n\nfeat: MCP integration + async executor lane (#70, #72, #80, #150)",
+          "timestamp": "2026-05-27T17:47:09+01:00",
+          "tree_id": "3e60226bc55bfa0648e858dea8397ecacccd8261",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/4638331b9b92edfbe4d3b50dd88d4153576cf102"
+        },
+        "date": 1779900487743,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.1991850000138129,
+            "unit": "ms",
+            "extra": "min=0.17ms max=0.24ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.13803400003098432,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.25550800000928575,
+            "unit": "ms",
+            "extra": "min=0.25ms max=0.27ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.14614700000947778,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.00820500000418,
+            "unit": "ms",
+            "extra": "min=101.70ms max=102.40ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.3814329999158872,
+            "unit": "ms",
+            "extra": "min=0.34ms max=0.48ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.60430700000802,
+            "unit": "ms",
+            "extra": "min=251.42ms max=251.69ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.3428069999813488,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.36ms repeats=5"
           }
         ]
       }
