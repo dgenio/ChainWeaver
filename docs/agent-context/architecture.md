@@ -24,13 +24,18 @@ and tools, the same flow produces the same output every time.
 | `builder.py` | `FlowBuilder`: chainable API that produces validated `Flow` objects | Pure construction sugar — no execution logic; delegates to `Flow`/`FlowStep` |
 | `compat.py` | `schema_fingerprint()`, `CompatibilityIssue`, `check_flow_compatibility()` | Pure utility; no execution or I/O |
 | `compiler.py` | `compile_flow()`: static schema flow validation pre-execution | Returns `CompilationResult`; no execution logic |
+| `contracts.py` | `ToolSafetyContract`, `SideEffectLevel`, `StabilityLevel`, `DeterminismLevel`, `merge_safety()`, `evaluate_predicate()` — the determinism + safety vocabulary (#19, #125, #9, #8) | Pure module: enums + frozen Pydantic model + AST-based predicate evaluator.  `evaluate_predicate` never calls `eval`/`exec`; nodes are matched against an explicit allow-list |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
-| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash`; `Tool.from_flow()` adapter (#24) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
-| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `validate_dag_topology` | Pure data definitions + topology validation; no execution logic |
+| `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` + `safety` contract (#19); `Tool.from_flow()` adapter (#24) with `merge_safety` derivation (#125) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
+| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `DriftInfo`, `ConditionalEdge` (#9), `validate_dag_topology` | Pure data definitions + topology validation + structural `determinism_level` inference (#8); no execution logic |
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |
 | `analyzer.py` | `ChainAnalyzer`: offline schema-compatibility analysis — compatibility matrix, chain enumeration, suggested flows (#77) | Pure static pass: no LLM, no network, no randomness; cycle-free DFS bounded by `max_depth` |
-| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection. `execute_flow_async` provides the async lane (#80). | **No LLM, no network I/O, no randomness** |
+| `decisions.py` | `DecisionCallback` Protocol + `DecisionContext` + `coerce_decision_callback` (#102) | Pure protocol module — no executor logic, no network, no randomness; the executor depends on it but it does not depend on the executor |
+| `executor.py` | Run flows step-by-step (linear) or level-by-level (DAG), validate I/O, merge context, drift detection, invoke `DecisionCallback` at decision points, dispatch capability steps via the `_execute_capability_step` hook. `execute_flow_async` provides the async lane (#80). | **No LLM, no network I/O, no randomness.** No `agent-kernel` / `weaver-spec` / `contextweaver` imports — those live in `integrations/` and reach the executor only via the `DecisionCallback` seam and `KernelBackedExecutor` subclass hook |
+| `integrations/weaver_spec.py` | Weaver Stack mirror types (`SelectableItem`, `RoutingDecision`, `CapabilityToken`); `flow_to_selectable_item()` exporter; `WEAVER_SPEC_VERSION` (#91, #107) | Pure data + a single exporter; no external dependency — mirror types match weaver-spec v0.1.0 contract |
+| `integrations/contextweaver.py` | `RoutingDecisionAdapter` (`DecisionCallback` impl) + `ContextweaverClient` Protocol + `StaticRoutingClient` (#106) | Translates `RoutingDecision` → tool name; no hard dep on a `contextweaver` SDK |
+| `integrations/agent_kernel.py` | `KernelBackedExecutor` (FlowExecutor subclass) + `KernelProtocol` + `InMemoryKernel` (#89) | Overrides only `_execute_capability_step`; no LLM, no randomness; kernel side-effects are the kernel's responsibility |
 | `mcp/` | MCP integration package (#70, #72, #150): `MCPToolAdapter` (inbound), `FlowServer` (outbound), JSON Schema ↔ Pydantic bridge. Async-only — relies on `FlowExecutor.execute_flow_async`. | All third-party `mcp` imports guarded; isolated from `executor.py` per the no-network-I/O invariant. |
 | `exceptions.py` | Typed exception hierarchy | All inherit `ChainWeaverError`; carry context attrs |
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
@@ -53,8 +58,14 @@ and tools, the same flow produces the same output every time.
 | No LLM calls in executor | "Compiled, not interpreted." |
 | `from __future__ import annotations` | Forward-reference support; cleaner type hints. |
 | Pydantic `BaseModel` for `StepRecord`/`ExecutionResult` (since #20) | Errors are stored as `error_type` / `error_message` strings instead of live `Exception` instances, so the trace round-trips through JSON. |
-| `step_type` + `capability_id` on `DAGFlowStep` | Forward-compat slots for Weaver Stack kernel integration (weaver-spec I-07). Only `"tool"` is executed today; `"capability"` is reserved for `KernelBackedExecutor`. |
+| `step_type` + `capability_id` on `DAGFlowStep` | Per-step capability slot for Weaver Stack kernel integration (weaver-spec I-07).  `"capability"`-typed steps are dispatched by `KernelBackedExecutor._execute_capability_step` (#89); the base `FlowExecutor` rejects them. |
+| `Flow.capability_id` and `DAGFlow.capability_id` (#90) | Flow-level capability identifier — distinct from `DAGFlowStep.capability_id`.  Names *the flow itself* as a routable capability; resolved by `flow_to_selectable_item()` for contextweaver catalog ingestion. |
+| `DecisionCallback` Protocol in `chainweaver/decisions.py` (#102) | Single LLM-router / contextual-narrowing extension point.  Executor invokes it for steps with `decision_candidates` set; failures wrap as `DecisionCallbackError` and abort the step (no silent fall-through to `tool_name`). |
+| Weaver-spec mirror types over a hard dep (#91, #107) | `weaver-spec`, `contextweaver`, `agent-kernel` are sibling repos, not PyPI packages.  ChainWeaver carries its own Pydantic mirrors of the I-03 / I-04 / I-07 contracts so the integration is testable without an external install; the optional `[weaver-stack]` extra is a placeholder for when the SDKs ship. |
+| `KernelBackedExecutor` as a subclass, not a flag (#89) | Subclass overrides only the `_execute_capability_step` hook.  Keeps the executor's three invariants (no LLM, no network I/O, no randomness in `executor.py`) intact — kernel side-effects live in `integrations/agent_kernel.py`. |
 | Cycle detection at registration time | Fail fast — no silent deferral to execution. Belt-and-suspenders check also runs in the executor for flows created without registry. |
+| Branch targets must be direct dependents (#9) | Keeps conditional routing local — a `ConditionalEdge.target_step_id` (or `default_next`) must reference a step that already lists the branching step in its `depends_on`.  This makes "skipped" propagation a one-hop computation in the executor and prevents branches from jumping across unrelated subgraphs.  Enforced at registration time by `validate_dag_topology`. |
+| AST-based predicate evaluator (#9) | Predicate strings are parsed with `ast.parse(mode="eval")` and walked against an explicit node allow-list — `eval`/`exec` are **never** called.  The grammar deliberately excludes attribute access, function calls, and binary arithmetic so predicates stay routing decisions, not computations (unary `+`/`-` is permitted so signed literals like `n == -1` parse). |
 
 ---
 
@@ -98,17 +109,30 @@ files that conflict with these names:
 | Reserved name | Issue | Purpose |
 |---------------|-------|---------|
 | ~~`analyzer.py`~~ | #77 ✅ | Offline schema-compatibility analyzer (delivered) |
+| ~~`decisions.py`~~ | #102 ✅ | `DecisionCallback` Protocol (delivered) |
 | `observer.py` | #78 | Runtime flow observer |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
+| ~~`schemas.py`~~ | #135 ✅ | JSON Schema export for flow files (delivered) |
 | ~~`mcp/`~~ | #70, #72, #150 ✅ | MCP adapter + flow server (delivered; requires `chainweaver[mcp]`) |
-| `integrations/` | #82 | LangChain/LlamaIndex bridge adapters |
+| ~~`integrations/weaver_spec.py`~~ | #91, #107 ✅ | Weaver-spec mirror types + `SelectableItem` exporter (delivered) |
+| ~~`integrations/contextweaver.py`~~ | #106 ✅ | `RoutingDecisionAdapter` (delivered) |
+| ~~`integrations/agent_kernel.py`~~ | #89 ✅ | `KernelBackedExecutor` (delivered) |
+| `integrations/langchain.py` / `integrations/llama_index.py` | #82 | LangChain / LlamaIndex bridge adapters |
 | `export/` | #25 | Flow export formats |
 | `governance.py` | #13 | Governance policies |
 
-### Weaver Stack guardrail
+### Weaver Stack guardrail (still in force after #89/#90/#91/#102/#106/#107)
 
-Issues #89–#91 introduce a kernel-backed executor (`KernelBackedExecutor`) that
-delegates step execution to an agent-kernel. This is a **separate class** —
-do not add agent-kernel or weaver-spec imports to `executor.py`. The core
-`FlowExecutor` stays deterministic and standalone.
+`KernelBackedExecutor` (#89) is a **separate subclass** of `FlowExecutor` —
+do not add `agent-kernel`, `weaver-spec`, or `contextweaver` imports to
+`executor.py` itself. The core `FlowExecutor` stays deterministic and
+standalone; the only seams that reach into integrations are:
+
+- The `DecisionCallback` Protocol from `chainweaver.decisions` (a
+  protocol — no third-party imports leak through it).
+- The `_execute_capability_step` hook — overridden by
+  `KernelBackedExecutor`, not by the base class.
+
+`docs/SPEC_COMPAT.md` declares the targeted weaver-spec version; bumping it
+follows the procedure documented there.

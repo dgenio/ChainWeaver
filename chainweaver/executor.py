@@ -30,15 +30,24 @@ from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_a
 
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
+from chainweaver.contracts import evaluate_predicate
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
+from chainweaver.decisions import (
+    DecisionCallable,
+    DecisionCallback,
+    DecisionContext,
+    coerce_decision_callback,
+)
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    DecisionCallbackError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
+    PredicateSyntaxError,
     SchemaValidationError,
     ToolNotFoundError,
     ToolOutputSizeError,
@@ -270,10 +279,14 @@ class ReplayMode(str, Enum):
       entries on the :class:`ReplayResult`.
     - ``EXECUTE`` re-runs the flow with the recorded ``initial_input``
       and returns the new result without comparing it to the original.
+    - ``STRICT`` is a compatibility alias for ``VERIFY``.
+    - ``SKIP_VALIDATION`` is a compatibility alias for ``EXECUTE``.
     """
 
     VERIFY = "verify"
+    STRICT = "verify"
     EXECUTE = "execute"
+    SKIP_VALIDATION = "execute"
 
 
 class StepDiff(BaseModel):
@@ -349,6 +362,11 @@ class StepRecord(BaseModel):
             callable was not invoked.  ``duration_ms`` for cached steps
             reflects only the cache lookup time.  ``False`` for normal
             executions (the default).
+        fallback_used: ``True`` when the primary tool failed and the
+            step's ``on_error="fallback:<tool_name>"`` policy invoked a
+            fallback tool (issue #176).  Set regardless of whether the
+            fallback itself succeeded or failed; ``False`` for normal
+            execution, retry-success, ``skip``, and ``fail`` paths.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -367,6 +385,7 @@ class StepRecord(BaseModel):
     retry_errors: list[str] = Field(default_factory=list)
     skipped: bool = False
     cached: bool = False
+    fallback_used: bool = False
 
 
 class ExecutionResult(BaseModel):
@@ -510,6 +529,7 @@ class FlowExecutor:
         step_cache: StepCache | None = None,
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
+        decision_callback: DecisionCallback | DecisionCallable | None = None,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -517,6 +537,15 @@ class FlowExecutor:
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
         self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
+        # Guided decision-point callback (issue #102).  Wraps a bare
+        # callable in an adapter so the executor can call
+        # ``self._decision_callback.decide(ctx)`` uniformly regardless
+        # of whether the user passed a class or a function.  ``None``
+        # means decision_candidates steps fall back to their static
+        # ``tool_name``.
+        self._decision_callback: DecisionCallback | None = coerce_decision_callback(
+            decision_callback
+        )
         # Step-result cache (issue #127).  ``None`` (the default)
         # disables caching entirely — every tool runs every call.
         # When set, eligible step outputs are read from / written to
@@ -639,6 +668,18 @@ class FlowExecutor:
         if name not in self._tools:
             raise ToolNotFoundError(name)
         return self._tools[name]
+
+    @property
+    def registered_tools(self) -> dict[str, Tool]:
+        """Return a snapshot of currently registered tools (issue #178).
+
+        Returns a *copy* of the internal ``{name: Tool}`` registry, so callers
+        can safely iterate or mutate the returned dict without affecting the
+        executor's state.  Use this instead of reaching for the private
+        ``_tools`` attribute when computing tool schema hashes, building
+        compatibility reports, or attestation artifacts.
+        """
+        return dict(self._tools)
 
     def get_drift_report(self) -> list[DriftInfo]:
         """Compare registered tools' current schema hashes against each flow's snapshot.
@@ -1123,6 +1164,33 @@ class FlowExecutor:
                     success=False,
                     final_output=None,
                     execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=len(log),
+                )
+
+        # -- Flow-level context-schema validation (issue #152) --------------
+        if flow.context_schema is not None:
+            context_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.context_schema,
+                step_index=len(flow.steps),
+                context_label="flow_context",
+            )
+            if context_record is not None:
+                _logger.error(
+                    "Flow '%s' context-schema validation failed: %s",
+                    flow_name,
+                    context_record.error_message,
+                )
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, context_record],
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,
@@ -2144,6 +2212,28 @@ class FlowExecutor:
                     tool_step_count=len(log),
                 )
 
+        # Flow-level context-schema validation (issue #152).
+        if flow.context_schema is not None:
+            context_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.context_schema,
+                step_index=len(flow.steps),
+                context_label="flow_context",
+            )
+            if context_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, context_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                    tool_step_count=len(log),
+                )
+
         return self._make_result(
             flow_name=flow_name,
             success=True,
@@ -2222,6 +2312,32 @@ class FlowExecutor:
             )
         return None
 
+    def _check_step_contract(
+        self,
+        *,
+        step: FlowStep,
+        step_index: int,
+        payload: dict[str, Any],
+        contract: type[BaseModel],
+        context_label: str,
+    ) -> SchemaValidationError | None:
+        """Validate a step-level contract against *payload* (issue #172).
+
+        Returns ``None`` on success, or a :class:`SchemaValidationError`
+        ready to be wrapped into a :class:`StepRecord` by the caller's
+        normal ``on_error`` / ``_record`` machinery.
+        """
+        try:
+            contract.model_validate(payload)
+        except ValidationError as exc:
+            return SchemaValidationError(
+                step.tool_name,
+                step_index,
+                str(exc),
+                context=context_label,
+            )
+        return None
+
     def _resolve_inputs(
         self,
         step: FlowStep,
@@ -2259,6 +2375,59 @@ class FlowExecutor:
                 resolved[target_key] = source
         return resolved
 
+    def _execute_capability_step(
+        self,
+        step_index: int,
+        step: DAGFlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+    ) -> StepRecord:
+        """Dispatch a ``step_type != "tool"`` step (issue #89).
+
+        Hook for subclasses such as
+        :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`
+        to delegate capability steps to an external runner.  The base
+        :class:`FlowExecutor` does not know how to execute capabilities
+        and always returns a failed :class:`StepRecord` carrying a
+        :class:`~chainweaver.exceptions.FlowExecutionError`.
+
+        Args:
+            step_index: Zero-based position of the step in the flow.
+            step: The :class:`DAGFlowStep` whose ``step_type`` is not
+                ``"tool"``.
+            context: The current accumulated context (read-only here).
+            flow_name: Name of the enclosing flow, for diagnostics.
+            trace_id: Trace id of the enclosing execution, for diagnostics.
+
+        Returns:
+            A :class:`StepRecord` describing the failure.  Subclasses
+            return a successful record after dispatching the capability.
+        """
+        err = FlowExecutionError(
+            step.tool_name,
+            step_index,
+            f"Step '{step.step_id}' has step_type='{step.step_type}' "
+            f"which is not supported by FlowExecutor. "
+            f"Only step_type='tool' can be executed — use "
+            f"KernelBackedExecutor for capability-typed steps.",
+        )
+        log_step_error(_logger, step_index, step.tool_name, err)
+        err_type, err_msg = _exc_to_strings(err)
+        now = _now_utc()
+        return StepRecord(
+            step_index=step_index,
+            tool_name=step.tool_name,
+            inputs={},
+            outputs=None,
+            error_type=err_type,
+            error_message=err_msg,
+            success=False,
+            started_at=now,
+            ended_at=now,
+            duration_ms=0.0,
+        )
+
     def _execute_step(
         self,
         step_index: int,
@@ -2266,6 +2435,8 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        step_id: str | None = None,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -2296,6 +2467,82 @@ class FlowExecutor:
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Resolve guided decision points (issue #102).  When the step
+        # declares ``decision_candidates`` *and* the executor has a
+        # ``decision_callback`` registered, ask the callback which
+        # candidate to invoke and rebind the step to that tool for the
+        # remainder of this call.  No callback registered → fall back to
+        # the static ``tool_name`` so flows stay runnable without the
+        # integration.  Callback failures fail the step early via
+        # ``DecisionCallbackError`` — silent fall-through would mask
+        # configuration bugs.
+        if step.decision_candidates is not None and self._decision_callback is not None:
+            try:
+                chosen = self._decision_callback.decide(
+                    DecisionContext(
+                        trace_id=trace_id,
+                        flow_name=flow_name,
+                        step_index=step_index,
+                        step_id=step_id,
+                        default_tool_name=step.tool_name,
+                        candidates=list(step.decision_candidates),
+                        context=dict(context),
+                    )
+                )
+            except Exception as exc:
+                err = DecisionCallbackError(
+                    step.tool_name,
+                    step_index,
+                    f"callback raised {type(exc).__name__}: {exc}",
+                )
+                err.__cause__ = exc
+                log_step_error(_logger, step_index, step.tool_name, err)
+                err_type, err_msg = _exc_to_strings(err)
+                now = _now_utc()
+                record = StepRecord(
+                    step_index=step_index,
+                    tool_name=step.tool_name,
+                    inputs={},
+                    outputs=None,
+                    error_type=err_type,
+                    error_message=err_msg,
+                    success=False,
+                    started_at=started_at,
+                    ended_at=now,
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+                self._fire_step_end(
+                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+                )
+                return record
+            if chosen not in step.decision_candidates:
+                err = DecisionCallbackError(
+                    step.tool_name,
+                    step_index,
+                    f"callback returned '{chosen}' which is not in "
+                    f"decision_candidates={list(step.decision_candidates)!r}",
+                )
+                log_step_error(_logger, step_index, step.tool_name, err)
+                err_type, err_msg = _exc_to_strings(err)
+                now = _now_utc()
+                record = StepRecord(
+                    step_index=step_index,
+                    tool_name=step.tool_name,
+                    inputs={},
+                    outputs=None,
+                    error_type=err_type,
+                    error_message=err_msg,
+                    success=False,
+                    started_at=started_at,
+                    ended_at=now,
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+                self._fire_step_end(
+                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+                )
+                return record
+            if chosen != step.tool_name:
+                step = step.model_copy(update={"tool_name": chosen})
         # Mutable holder so ``_invoke_tool`` can report how many times the
         # primary tool was actually called.  Threading this through (instead
         # of deriving from ``len(retry_errors)``) keeps ``retry_count``
@@ -2312,6 +2559,7 @@ class FlowExecutor:
             skipped: bool,
             retry_errors: list[str],
             cached: bool = False,
+            fallback_used: bool = False,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -2334,6 +2582,7 @@ class FlowExecutor:
                 retry_errors=list(retry_errors),
                 skipped=skipped,
                 cached=cached,
+                fallback_used=fallback_used,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -2376,6 +2625,33 @@ class FlowExecutor:
                 )
             )
 
+        # Step-level input contract (issue #172).  Validates the resolved
+        # inputs against the step's declared shape before the tool runs.
+        # Surfaces input_mapping mistakes with a typed error rather than
+        # waiting for the tool's own validation to fail.
+        if step.input_contract is not None:
+            input_contract_cls = step.resolved_input_contract
+            assert input_contract_cls is not None
+            contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=inputs,
+                contract=input_contract_cls,
+                context_label="step_input_contract",
+            )
+            if contract_err is not None:
+                log_step_error(_logger, step_index, step.tool_name, contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=[],
+                    )
+                )
+
         self._fire_step_start(
             StepStartContext(
                 trace_id=trace_id,
@@ -2416,6 +2692,37 @@ class FlowExecutor:
                 )
                 cached_output = self._step_cache.get(cache_key)
                 if cached_output is not None:
+                    # Apply step-level output contract on cache-hit too —
+                    # different steps may share a cache entry via the same
+                    # (tool_name, schema_hash, input_value_hash) but declare
+                    # different output_contract refs.  Without this check
+                    # the contract-bearing step silently accepts whatever
+                    # was cached by a contract-less step.
+                    if step.output_contract is not None:
+                        cached_contract_cls = step.resolved_output_contract
+                        assert cached_contract_cls is not None
+                        cached_contract_err = self._check_step_contract(
+                            step=step,
+                            step_index=step_index,
+                            payload=cached_output,
+                            contract=cached_contract_cls,
+                            context_label="step_output_contract",
+                        )
+                        if cached_contract_err is not None:
+                            log_step_error(
+                                _logger, step_index, step.tool_name, cached_contract_err
+                            )
+                            return _finish(
+                                _record(
+                                    inputs=inputs,
+                                    outputs=None,
+                                    error=cached_contract_err,
+                                    success=False,
+                                    skipped=False,
+                                    retry_errors=[],
+                                )
+                            )
+
                     log_step_end(
                         _logger,
                         step_index,
@@ -2466,6 +2773,34 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
+
+        # Step-level output contract (issue #172).  Validates the tool's
+        # outputs against the step's declared shape before the cache
+        # records anything and before the outputs are merged into the
+        # accumulated context.
+        if step.output_contract is not None:
+            output_contract_cls = step.resolved_output_contract
+            assert output_contract_cls is not None
+            contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=outputs,
+                contract=output_contract_cls,
+                context_label="step_output_contract",
+            )
+            if contract_err is not None:
+                log_step_error(_logger, step_index, step.tool_name, contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=retry_errors,
+                    )
+                )
+
         # Cache write happens *after* the output has been schema-validated
         # by ``Tool.run`` — never store invalid output.
         if cache_key is not None and self._step_cache is not None:
@@ -2596,6 +2931,9 @@ class FlowExecutor:
         try:
             fallback_tool = self.get_tool(fallback_name)
         except ToolNotFoundError as missing:
+            # The fallback tool itself is missing — we attempted the
+            # fallback policy, so the record reflects that even though
+            # no fallback tool actually ran.
             return make_record(
                 inputs=inputs,
                 outputs=None,
@@ -2603,6 +2941,7 @@ class FlowExecutor:
                 success=False,
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
+                fallback_used=True,
             )
 
         try:
@@ -2616,6 +2955,7 @@ class FlowExecutor:
                 success=False,
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
+                fallback_used=True,
             )
 
         return make_record(
@@ -2625,11 +2965,47 @@ class FlowExecutor:
             success=True,
             skipped=False,
             retry_errors=[*retry_errors, str(wrapped_error)],
+            fallback_used=True,
         )
 
     # ------------------------------------------------------------------
     # DAG execution
     # ------------------------------------------------------------------
+
+    def _select_branch(
+        self,
+        *,
+        step: DAGFlowStep,
+        context: dict[str, Any],
+        level_outputs: dict[str, Any],
+        step_outputs: dict[str, Any] | None,
+    ) -> str | None | PredicateSyntaxError:
+        """Resolve a branching step's outgoing edge (issue #9).
+
+        Builds the post-step view of the execution context (initial
+        context + completed levels + sibling outputs from the current
+        level + this step's outputs), walks ``step.branches`` in order,
+        and returns the first matching target.  Falls back to
+        ``step.default_next`` when no predicate matches.  Returns
+        ``None`` when nothing matches and no default is set — branching
+        had no effect and every dependent runs as usual.
+
+        Returns the :class:`PredicateSyntaxError` instance instead of
+        raising so the caller can fold the failure into the standard
+        synthetic-record / abort path.
+        """
+        post_context: dict[str, Any] = {**context, **level_outputs}
+        if step_outputs:
+            post_context.update(step_outputs)
+        try:
+            for edge in step.branches:
+                if evaluate_predicate(edge.predicate, post_context):
+                    return edge.target_step_id
+        except PredicateSyntaxError as exc:
+            return exc
+        if step.default_next is not None:
+            return step.default_next
+        return None
 
     def _compute_dag_levels(self, flow: DAGFlow) -> list[list[DAGFlowStep]]:
         """Return steps grouped into topological execution levels.
@@ -2765,56 +3141,174 @@ class FlowExecutor:
             flat_index = 0
         levels = self._compute_dag_levels(flow)
 
+        # Conditional-branch bookkeeping (issue #9).
+        #
+        # ``skipped_ids`` accumulates step ids that branch routing has
+        # deactivated — either by direct selection (a branch picked a
+        # sibling) or by transitive skip-propagation (every predecessor
+        # of the step is itself skipped, so no live path reaches it).
+        #
+        # ``dependents_map`` is the inverse of ``depends_on``: for each
+        # step id, the set of step ids that list it as a predecessor.
+        # Building it once up front lets the "select target X, skip
+        # other dependents" step run in O(|dependents|).
+        skipped_ids: set[str] = set()
+        dependents_map: dict[str, set[str]] = {step.step_id: set() for step in flow.steps}
+        for s in flow.steps:
+            for dep in s.depends_on:
+                dependents_map[dep].add(s.step_id)
+
         for relative_level_idx, level_steps in enumerate(levels[start_level:]):
             absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []
 
             for step in level_steps:
-                # Reject non-tool step types until KernelBackedExecutor exists.
-                if step.step_type != "tool":
-                    err = FlowExecutionError(
-                        step.tool_name,
-                        flat_index,
-                        f"Step '{step.step_id}' has step_type='{step.step_type}' "
-                        f"which is not supported by FlowExecutor. "
-                        f"Only step_type='tool' can be executed.",
-                    )
-                    log_step_error(_logger, flat_index, step.tool_name, err)
-                    err_type, err_msg = _exc_to_strings(err)
+                # Skip propagation (issue #9): a step whose every predecessor
+                # is already skipped has no live path reaching it, so it is
+                # also skipped.  Roots (depends_on == []) are never skipped
+                # by this rule — they always run unless explicitly marked.
+                if (
+                    step.step_id not in skipped_ids
+                    and step.depends_on
+                    and all(dep in skipped_ids for dep in step.depends_on)
+                ):
+                    skipped_ids.add(step.step_id)
+
+                if step.step_id in skipped_ids:
                     now = _now_utc()
-                    log.extend(level_records)
-                    log.append(
+                    level_records.append(
                         StepRecord(
                             step_index=flat_index,
                             tool_name=step.tool_name,
                             inputs={},
-                            error_type=err_type,
-                            error_message=err_msg,
-                            success=False,
+                            outputs={},
+                            success=True,
+                            skipped=True,
                             started_at=now,
                             ended_at=now,
                             duration_ms=0.0,
                         )
                     )
-                    return self._make_result(
-                        flow_name=flow.name,
-                        success=False,
-                        final_output=None,
-                        execution_log=log,
-                        trace_id=trace_id,
-                        started_at=flow_started_at,
-                        perf_start=flow_t0,
-                        initial_input=initial_input,
+                    flat_index += 1
+                    continue
+
+                # Dispatch ``step_type="capability"`` through the
+                # subclass hook (issue #89).  The base FlowExecutor
+                # rejects capability steps; KernelBackedExecutor
+                # overrides ``_execute_capability_step`` to delegate to
+                # an agent-kernel.  Either way the result is a
+                # StepRecord we can append and (on failure) abort the
+                # flow on.
+                if step.step_type != "tool":
+                    record = self._execute_capability_step(
+                        flat_index, step, context, flow.name, trace_id
                     )
+                    # Capability steps are dispatched through the
+                    # ``_execute_capability_step`` hook, bypassing
+                    # ``_execute_step``'s lifecycle firing.  Emit the same
+                    # events here so middleware, tracing, and ``stream_flow``
+                    # observe capability steps too.  Mirror ``_execute_step``:
+                    # ``on_step_start`` fires only once the step ran past input
+                    # resolution (skipped for pre-resolution failures such as
+                    # the base-class rejection or a missing input mapping);
+                    # ``on_step_end`` always fires.
+                    if record.success or record.inputs:
+                        self._fire_step_start(
+                            StepStartContext(
+                                trace_id=trace_id,
+                                flow_name=flow.name,
+                                step_index=record.step_index,
+                                tool_name=step.tool_name,
+                                inputs=dict(record.inputs),
+                                started_at=record.started_at,
+                            )
+                        )
+                    self._fire_step_end(
+                        StepEndContext(
+                            trace_id=trace_id,
+                            flow_name=flow.name,
+                            step_record=record,
+                        )
+                    )
+                    level_records.append(record)
+                    flat_index += 1
+                    if not record.success:
+                        log.extend(level_records)
+                        return self._make_result(
+                            flow_name=flow.name,
+                            success=False,
+                            final_output=None,
+                            execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
+                            initial_input=initial_input,
+                        )
+                    assert record.outputs is not None
+                    for key, value in record.outputs.items():
+                        if key in level_outputs:
+                            conflict_err = FlowExecutionError(
+                                step.tool_name,
+                                record.step_index,
+                                f"Key '{key}' produced by both '{step.tool_name}' and a "
+                                f"sibling step in the same DAG level — execution "
+                                f"would be order-dependent.",
+                            )
+                            log_step_error(
+                                _logger, record.step_index, step.tool_name, conflict_err
+                            )
+                            err_type, err_msg = _exc_to_strings(conflict_err)
+                            now = _now_utc()
+                            level_records[-1] = StepRecord(
+                                step_index=record.step_index,
+                                tool_name=step.tool_name,
+                                inputs=record.inputs,
+                                outputs=None,
+                                error_type=err_type,
+                                error_message=err_msg,
+                                success=False,
+                                started_at=record.started_at,
+                                ended_at=now,
+                                duration_ms=record.duration_ms,
+                            )
+                            log.extend(level_records)
+                            return self._make_result(
+                                flow_name=flow.name,
+                                success=False,
+                                final_output=None,
+                                execution_log=log,
+                                trace_id=trace_id,
+                                started_at=flow_started_at,
+                                perf_start=flow_t0,
+                                initial_input=initial_input,
+                            )
+                        level_outputs[key] = value
+                    continue
 
                 # Build a lightweight FlowStep-compatible view so _execute_step
-                # can be reused without modification.
+                # can be reused without modification.  Forward the step
+                # contract refs (issue #172), retry / on_error, and
+                # ``decision_candidates`` (issue #102) so DAG steps honour
+                # per-step contracts and guided decision points just like
+                # linear flows; otherwise the proxy silently drops them.
                 proxy = FlowStep(
                     tool_name=step.tool_name,
                     input_mapping=step.input_mapping,
+                    input_contract=step.input_contract,
+                    output_contract=step.output_contract,
+                    retry=step.retry,
+                    on_error=step.on_error,
+                    decision_candidates=step.decision_candidates,
                 )
-                record = self._execute_step(flat_index, proxy, context, flow.name, trace_id)
+                record = self._execute_step(
+                    flat_index,
+                    proxy,
+                    context,
+                    flow.name,
+                    trace_id,
+                    step_id=step.step_id,
+                )
                 level_records.append(record)
                 flat_index += 1
 
@@ -2880,6 +3374,60 @@ class FlowExecutor:
                         )
                     level_outputs[key] = value
 
+                # Branch evaluation (issue #9): the step succeeded; if it
+                # carries conditional edges, pick the active downstream
+                # path and mark non-selected dependents as skipped.
+                if step.branches:
+                    branch_outcome = self._select_branch(
+                        step=step,
+                        context=context,
+                        level_outputs=level_outputs,
+                        step_outputs=record.outputs,
+                    )
+                    if isinstance(branch_outcome, PredicateSyntaxError):
+                        err_type, err_msg = _exc_to_strings(branch_outcome)
+                        # The step ran exactly once, so its log must hold one
+                        # record.  Convert the step's own (successful) record
+                        # to a failure in place rather than appending a second
+                        # record at ``flat_index`` — a second record would make
+                        # ``len(log)`` exceed the number of executed steps and
+                        # shift step indexes.  Mirrors the sibling-conflict
+                        # handling above.
+                        record_failed = StepRecord(
+                            step_index=record.step_index,
+                            tool_name=step.tool_name,
+                            inputs=record.inputs,
+                            error_type=err_type,
+                            error_message=err_msg,
+                            success=False,
+                            started_at=record.started_at,
+                            ended_at=_now_utc(),
+                            duration_ms=record.duration_ms,
+                        )
+                        log.extend(level_records[:-1])
+                        log.append(record_failed)
+                        _logger.error(
+                            "DAGFlow '%s' branch evaluation failed at step '%s': %s",
+                            flow.name,
+                            step.step_id,
+                            err_msg,
+                        )
+                        return self._make_result(
+                            flow_name=flow.name,
+                            success=False,
+                            final_output=None,
+                            execution_log=log,
+                            trace_id=trace_id,
+                            started_at=flow_started_at,
+                            perf_start=flow_t0,
+                            initial_input=initial_input,
+                        )
+                    selected = branch_outcome
+                    if selected is not None:
+                        for dep_id in dependents_map[step.step_id]:
+                            if dep_id != selected:
+                                skipped_ids.add(dep_id)
+
             log.extend(level_records)
             # Merge all level outputs into context after the level completes.
             for key in level_outputs:
@@ -2925,6 +3473,33 @@ class FlowExecutor:
                     success=False,
                     final_output=None,
                     execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                    tool_step_count=len(log),
+                )
+
+        # -- Flow-level context-schema validation (issue #152) --------------
+        if flow.context_schema is not None:
+            context_record = self._validate_flow_schema(
+                flow_name=flow.name,
+                payload=context,
+                schema=flow.context_schema,
+                step_index=len(flow.steps),
+                context_label="flow_context",
+            )
+            if context_record is not None:
+                _logger.error(
+                    "DAGFlow '%s' context-schema validation failed: %s",
+                    flow.name,
+                    context_record.error_message,
+                )
+                return self._make_result(
+                    flow_name=flow.name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, context_record],
                     trace_id=trace_id,
                     started_at=flow_started_at,
                     perf_start=flow_t0,

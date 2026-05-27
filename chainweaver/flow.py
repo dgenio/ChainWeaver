@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from chainweaver.contracts import DeterminismLevel
 from chainweaver.exceptions import DAGDefinitionError, FlowSerializationError
 
 
@@ -178,6 +179,50 @@ class RetryPolicy(BaseModel):
         return delay
 
 
+class ConditionalEdge(BaseModel):
+    """A guarded outgoing edge from a :class:`DAGFlowStep` (issue #9).
+
+    Conditional edges drive runtime branching in a DAG: after a decision
+    step runs successfully, the executor walks its ``branches`` in order
+    and the *first* edge whose :attr:`predicate` evaluates truthy against
+    the merged context picks the next active path.  Non-selected dependent
+    steps are recorded as ``StepRecord(skipped=True)``.
+
+    The predicate grammar is intentionally narrow — variable lookups,
+    subscript, comparison operators, ``in`` / ``not in``, ``and`` / ``or``
+    / ``not`` — and is evaluated by
+    :func:`~chainweaver.contracts.evaluate_predicate`, which parses the
+    string with :mod:`ast` and walks the tree by hand.  :func:`eval` is
+    never called.  See :class:`~chainweaver.exceptions.PredicateSyntaxError`
+    for failure modes.
+
+    Attributes:
+        target_step_id: The ``step_id`` of the dependent step to activate
+            when :attr:`predicate` matches.  Must reference a step that
+            also lists the branching step in its ``depends_on``.
+        predicate: A restricted boolean expression evaluated against the
+            merged execution context — for example
+            ``"status == 'ok'"`` or ``"count > 0 and country in ('PT','ES')"``.
+
+    Example::
+
+        DAGFlowStep(
+            tool_name="probe",
+            step_id="probe",
+            depends_on=[],
+            branches=[
+                ConditionalEdge(target_step_id="fast", predicate="cache_hit == True"),
+                ConditionalEdge(target_step_id="slow", predicate="cache_hit == False"),
+            ],
+        )
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    target_step_id: str
+    predicate: str
+
+
 class FlowStep(BaseModel):
     """A single step inside a :class:`Flow`.
 
@@ -193,6 +238,39 @@ class FlowStep(BaseModel):
 
             An empty mapping (the default) means the tool receives the full
             current context as-is.
+        decision_candidates: Optional list of tool names that an external
+            :class:`~chainweaver.decisions.DecisionCallback` may pick from
+            at execution time (issue #102).  When ``None`` (the default)
+            the step always invokes ``tool_name``.  When set, the executor
+            calls the registered ``decision_callback`` with the candidate
+            list and the current context, and runs whichever tool the
+            callback selects.  The callback's return value must be a
+            member of ``decision_candidates``; if no callback is
+            registered the executor falls back to ``tool_name``.
+        retry: Optional :class:`RetryPolicy` driving the executor's retry
+            behaviour for this step.
+        on_error: How the executor reacts when all retry attempts are
+            exhausted: ``"fail"`` (the default), ``"skip"``, or
+            ``"fallback:<tool_name>"``.  Step-contract failures
+            (:attr:`input_contract` / :attr:`output_contract`) intentionally
+            bypass this policy and always abort the step — contract
+            mismatches are wiring bugs rather than transient errors.
+        input_contract: Optional ``"module:qualname"`` reference to a
+            :class:`~pydantic.BaseModel` subclass that the executor
+            validates against the *resolved* step inputs **before** the
+            tool is invoked (issue #172).  This is independent from the
+            tool's own ``input_schema``: it expresses a step-level
+            contract that the wiring (``input_mapping`` + accumulated
+            context) must satisfy, surfacing mapping mistakes with a
+            schema-shaped error rather than waiting for the tool's own
+            validation to fail.
+        output_contract: Optional ``"module:qualname"`` reference to a
+            :class:`~pydantic.BaseModel` subclass that the executor
+            validates against the tool's outputs **after** the tool has
+            run (issue #172).  Use this when the step has a tighter
+            output contract than the tool's own ``output_schema`` — e.g.
+            a tool that returns a superset of fields but this step only
+            promises a subset.
 
     Example::
 
@@ -204,12 +282,40 @@ class FlowStep(BaseModel):
             tool_name="scale",
             input_mapping={"number": "value", "factor": 3},
         )
+
+        # Hybrid execution: let an external callback pick a tool
+        step = FlowStep(
+            tool_name="summarize_short",   # default if no callback set
+            decision_candidates=["summarize_short", "summarize_long"],
+        )
+
+        # Add typed step contracts (issue #172)
+        step = FlowStep(
+            tool_name="scale",
+            input_mapping={"number": "value", "factor": 3},
+            input_contract=FlowStep.contract_ref_from(ScaleInput),
+            output_contract=FlowStep.contract_ref_from(ScaleOutput),
+        )
     """
 
     tool_name: str
     input_mapping: dict[str, Any] = Field(default_factory=dict)
     retry: RetryPolicy | None = None
     on_error: str = "fail"
+    decision_candidates: list[str] | None = None
+    input_contract: str | None = None
+    output_contract: str | None = None
+
+    @field_validator("decision_candidates")
+    @classmethod
+    def _validate_decision_candidates(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if len(value) < 1:
+            raise ValueError("decision_candidates must contain at least one tool name.")
+        if len(set(value)) != len(value):
+            raise ValueError("decision_candidates must not contain duplicates.")
+        return value
 
     @field_validator("on_error")
     @classmethod
@@ -221,6 +327,55 @@ class FlowStep(BaseModel):
         raise ValueError(
             f"on_error must be 'fail', 'skip', or 'fallback:<tool_name>'; got '{value}'."
         )
+
+    @model_validator(mode="after")
+    def _check_tool_name_in_candidates(self) -> FlowStep:
+        """Ensure ``tool_name`` is itself one of the ``decision_candidates``.
+
+        ``DecisionContext`` documents ``default_tool_name`` (the step's
+        ``tool_name``) as always present in ``candidates``, and a callback that
+        returns the default must clear the executor's membership check.  Reject
+        configurations where the default is not a candidate so the gap fails at
+        construction rather than at execution time.
+        """
+        if self.decision_candidates is not None and self.tool_name not in self.decision_candidates:
+            raise ValueError(
+                f"tool_name '{self.tool_name}' must be a member of decision_candidates "
+                f"{self.decision_candidates!r}; it is the default a callback may return."
+            )
+        return self
+
+    @staticmethod
+    def contract_ref_from(cls: type[BaseModel]) -> str:
+        """Return a ``"module:qualname"`` ref string for *cls* (issue #172).
+
+        Convenience helper mirroring :meth:`Flow.schema_ref_from`.
+        """
+        return _qualified_name(cls)
+
+    @property
+    def resolved_input_contract(self) -> type[BaseModel] | None:
+        """Resolve :attr:`input_contract` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.input_contract is None:
+            return None
+        return resolve_class_ref(self.input_contract, expected_base=BaseModel)
+
+    @property
+    def resolved_output_contract(self) -> type[BaseModel] | None:
+        """Resolve :attr:`output_contract` to a class, or ``None`` if unset.
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.output_contract is None:
+            return None
+        return resolve_class_ref(self.output_contract, expected_base=BaseModel)
 
 
 class Flow(BaseModel):
@@ -256,6 +411,24 @@ class Flow(BaseModel):
             :class:`~chainweaver.executor.FlowExecutor` validates the
             accumulated context against the resolved schema **after** the
             last step finishes.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90).  When set, this flow is exposed as a routable capability
+            via :func:`chainweaver.integrations.weaver_spec.flow_to_selectable_item`
+            and can be addressed by a ``RoutingDecision`` from
+            contextweaver.  Should be a stable, dotted identifier (e.g.
+            ``"data.ingest"``); ``None`` (the default) means the flow is
+            not exposed as a capability.
+        context_schema_ref: An optional ``"module:qualname"`` reference to
+            a :class:`~pydantic.BaseModel` subclass describing the shape
+            of the *accumulated execution context* (issue #152).  The
+            executor validates the context against the resolved schema
+            at flow end, once every step has completed successfully
+            (skipped when an earlier step aborts the flow, since no
+            ``final_output`` is produced in that case).  The primary
+            value of this field is static typing — flow authors get
+            mypy + IDE autocomplete + a single source of truth for
+            context keys; runtime validation at the flow boundary is a
+            secondary safety net.
 
     Example::
 
@@ -270,11 +443,12 @@ class Flow(BaseModel):
             ],
             input_schema_ref=Flow.schema_ref_from(NumberInput),
             output_schema_ref=Flow.schema_ref_from(FormattedOutput),
+            context_schema_ref=Flow.schema_ref_from(MyFlowContext),
         )
     """
 
     name: str
-    version: str
+    version: str = "0.1.0"
     description: str
     steps: list[FlowStep]
     deterministic: bool = True
@@ -282,7 +456,9 @@ class Flow(BaseModel):
     trigger_conditions: dict[str, Any] | None = None
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
+    context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -318,6 +494,39 @@ class Flow(BaseModel):
         if self.output_schema_ref is None:
             return None
         resolved = resolve_class_ref(self.output_schema_ref, expected_base=BaseModel)
+        return resolved
+
+    @property
+    def determinism_level(self) -> DeterminismLevel:
+        """Return the structural determinism level of this flow (issue #8).
+
+        Linear :class:`Flow` instances are :class:`DeterminismLevel.FULL`
+        by definition — every step always runs, in declared order — *unless*
+        the flow author explicitly opts out by setting ``deterministic=False``,
+        in which case the level is :class:`DeterminismLevel.NONE`.
+
+        This property reflects flow *structure* only.  Tool-level safety
+        contracts are not consulted here because the flow does not have
+        access to the tool registry; consumers that want a worst-case
+        composite (this property combined with constituent tools'
+        :attr:`ToolSafetyContract.determinism_level` values) should merge
+        the two themselves.
+        """
+        if not self.deterministic:
+            return DeterminismLevel.NONE
+        return DeterminismLevel.FULL
+
+    @property
+    def context_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152).
+
+        Raises:
+            FlowSerializationError: When the ref cannot be resolved or does
+                not point to a :class:`BaseModel` subclass.
+        """
+        if self.context_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.context_schema_ref, expected_base=BaseModel)
         return resolved
 
     def to_ascii(self) -> str:
@@ -459,6 +668,20 @@ class DAGFlowStep(FlowStep):
         capability_id: Weaver Stack capability identifier used when
             ``step_type == "capability"``.  Ignored (and should be ``None``)
             for ``step_type == "tool"``.
+        branches: Optional list of :class:`ConditionalEdge` outgoing
+            guards (issue #9).  When non-empty, this step is a *decision*
+            step: after it runs, the executor evaluates each branch's
+            predicate against the merged context and the first match
+            selects the active downstream path.  Non-selected immediate
+            dependents are skipped (their :class:`StepRecord` carries
+            ``skipped=True``), and the skip propagates to dependents whose
+            only inbound paths are themselves skipped.  When ``branches``
+            is empty (the default), the step is a regular DAG node and
+            every dependent runs.
+        default_next: Step id activated when none of :attr:`branches` match
+            (issue #9).  Treated as if it were a final-fallback
+            ``ConditionalEdge`` whose predicate is always true.  Ignored
+            when ``branches`` is empty.
 
     Example::
 
@@ -478,6 +701,8 @@ class DAGFlowStep(FlowStep):
     depends_on: list[str] = Field(default_factory=list)
     step_type: Literal["tool", "capability"] = "tool"
     capability_id: str | None = None
+    branches: list[ConditionalEdge] = Field(default_factory=list)
+    default_next: str | None = None
 
     @model_validator(mode="after")
     def _check_tool_has_no_capability_id(self) -> DAGFlowStep:
@@ -486,6 +711,39 @@ class DAGFlowStep(FlowStep):
             msg = (
                 f"Step '{self.step_id}' has step_type='tool' but capability_id="
                 f"'{self.capability_id}'. capability_id must be None for tool steps."
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_default_next_requires_branches(self) -> DAGFlowStep:
+        """``default_next`` is only meaningful alongside at least one branch."""
+        if self.default_next is not None and not self.branches:
+            msg = (
+                f"Step '{self.step_id}' sets default_next='{self.default_next}' "
+                f"but has no branches. default_next is the fallback when no "
+                f"branch matches and is ignored without branches; remove it "
+                f"or add the first branch."
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_capability_has_no_branches(self) -> DAGFlowStep:
+        """Conditional branching is unsupported on capability steps.
+
+        The DAG runner dispatches ``step_type='capability'`` steps through the
+        ``_execute_capability_step`` hook, which returns before
+        ``FlowExecutor._select_branch`` runs, so ``branches`` / ``default_next``
+        would be silently ignored.  Reject the combination at construction
+        (fail-loud) rather than dropping the edges at runtime.
+        """
+        if self.step_type == "capability" and self.branches:
+            msg = (
+                f"Step '{self.step_id}' has step_type='capability' with "
+                f"conditional branches. Branching is only supported on "
+                f"step_type='tool' steps; capability steps cannot carry "
+                f"branches or default_next."
             )
             raise ValueError(msg)
         return self
@@ -517,6 +775,15 @@ class DAGFlow(BaseModel):
             :class:`~pydantic.BaseModel` subclass validated against the
             final merged context after all steps finish.  Resolved lazily
             via the :attr:`output_schema` property.
+        capability_id: Optional Weaver Stack capability identifier (issue
+            #90); see :attr:`Flow.capability_id` for full semantics.
+        context_schema_ref: Optional ``"module:qualname"`` ref to a
+            :class:`~pydantic.BaseModel` subclass validated against the
+            accumulated context at flow end, once every step has
+            completed successfully (issue #152; validation is skipped
+            when an earlier step aborts the flow).  Mirrors the
+            :class:`Flow` field of the same name; see there for the
+            DX motivation.
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
@@ -548,7 +815,9 @@ class DAGFlow(BaseModel):
     trigger_conditions: dict[str, Any] | None = None
     input_schema_ref: str | None = None
     output_schema_ref: str | None = None
+    context_schema_ref: str | None = None
     tool_schema_hashes: dict[str, str] | None = None
+    capability_id: str | None = None
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -572,6 +841,32 @@ class DAGFlow(BaseModel):
         if self.output_schema_ref is None:
             return None
         resolved = resolve_class_ref(self.output_schema_ref, expected_base=BaseModel)
+        return resolved
+
+    @property
+    def determinism_level(self) -> DeterminismLevel:
+        """Return the structural determinism level of this DAG flow (issue #8).
+
+        :class:`DAGFlow` instances downgrade to
+        :class:`DeterminismLevel.PARTIAL` whenever **any** step carries a
+        non-empty :attr:`DAGFlowStep.branches` list — branches make the
+        executed path data-dependent at runtime, even though the graph
+        itself is fixed.  A DAG with no branches is
+        :class:`DeterminismLevel.FULL`, and any flow that explicitly opts
+        out via ``deterministic=False`` is :class:`DeterminismLevel.NONE`.
+        """
+        if not self.deterministic:
+            return DeterminismLevel.NONE
+        if any(step.branches for step in self.steps):
+            return DeterminismLevel.PARTIAL
+        return DeterminismLevel.FULL
+
+    @property
+    def context_schema(self) -> type[BaseModel] | None:
+        """Resolve :attr:`context_schema_ref` to a class, or ``None`` (issue #152)."""
+        if self.context_schema_ref is None:
+            return None
+        resolved = resolve_class_ref(self.context_schema_ref, expected_base=BaseModel)
         return resolved
 
     def to_ascii(self) -> str:
@@ -657,6 +952,11 @@ def validate_dag_topology(flow: DAGFlow) -> None:
     1. No duplicate ``step_id`` values.
     2. Every ``depends_on`` entry refers to a ``step_id`` that exists.
     3. No cycles (via :class:`graphlib.TopologicalSorter`).
+    4. Every :class:`ConditionalEdge` target (and any ``default_next``) is a
+       direct dependent of the branching step — that is, the target lists
+       the branching step in its own ``depends_on``.  This keeps branch
+       routing local: a branch picks among the step's *immediate* successors
+       rather than jumping into an unrelated part of the graph.
 
     Args:
         flow: The :class:`DAGFlow` to validate.
@@ -664,7 +964,8 @@ def validate_dag_topology(flow: DAGFlow) -> None:
     Raises:
         DAGDefinitionError: On any topology violation with a structured
             ``reason`` attribute (``"duplicate_step_id"``,
-            ``"unknown_dependency"``, or ``"cycle"``).
+            ``"unknown_dependency"``, ``"cycle"``, or
+            ``"unknown_branch_target"``).
     """
     step_ids: set[str] = set()
     for step in flow.steps:
@@ -695,3 +996,33 @@ def validate_dag_topology(flow: DAGFlow) -> None:
             "cycle",
             f"Dependency cycle detected: {exc}.",
         ) from exc
+
+    # Branch validation (issue #9): every conditional edge target must be a
+    # direct dependent of the branching step.  This keeps routing local and
+    # makes "skipped" computation in the executor a one-hop decision.
+    dependents: dict[str, set[str]] = {sid: set() for sid in step_ids}
+    for step in flow.steps:
+        for dep in step.depends_on:
+            dependents[dep].add(step.step_id)
+
+    for step in flow.steps:
+        candidates: list[tuple[str, str]] = [
+            (edge.target_step_id, "branch target") for edge in step.branches
+        ]
+        if step.default_next is not None:
+            candidates.append((step.default_next, "default_next target"))
+        for target, label in candidates:
+            if target not in step_ids:
+                raise DAGDefinitionError(
+                    flow.name,
+                    "unknown_branch_target",
+                    f"Step '{step.step_id}' {label} '{target}' is not a declared step id.",
+                )
+            if target not in dependents[step.step_id]:
+                raise DAGDefinitionError(
+                    flow.name,
+                    "unknown_branch_target",
+                    f"Step '{step.step_id}' {label} '{target}' is not a "
+                    f"direct dependent (target must list '{step.step_id}' "
+                    f"in its depends_on).",
+                )
