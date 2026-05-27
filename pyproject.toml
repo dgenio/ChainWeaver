@@ -40,6 +40,19 @@ yaml = [
 otel = [
     "opentelemetry-api>=1.20",
 ]
+contrib = [
+    # The six contrib tools shipped today have no extra runtime deps;
+    # this extra is reserved so future additions needing lightweight
+    # extras can be added without breaking the base install.
+]
+langchain = [
+    # ``langchain-core>=0.3`` uses Pydantic v2, matching our base dep.
+    # Earlier 0.1/0.2 releases pulled in Pydantic v1 and would conflict.
+    "langchain-core>=0.3",
+]
+llamaindex = [
+    "llama-index-core>=0.10",
+]
 mcp = [
     "mcp>=1.0,<2",
 ]
@@ -76,6 +89,8 @@ dev = [
     "hypothesis-jsonschema>=0.23",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
+    "langchain-core>=0.3",
+    "llama-index-core>=0.10",
     "mcp>=1.0,<2",
 ]
 

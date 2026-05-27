@@ -80,6 +80,7 @@ from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    ContribError,
     DAGDefinitionError,
     DecisionCallbackError,
     FlowAlreadyExistsError,
@@ -93,6 +94,7 @@ from chainweaver.exceptions import (
     MCPError,
     MCPSchemaConversionError,
     MCPToolInvocationError,
+    PluginDiscoveryError,
     PredicateSyntaxError,
     SchemaValidationError,
     ToolDefinitionError,
@@ -131,6 +133,7 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.plugins import discover_flows, discover_tools
 from chainweaver.registry import FlowRegistry
 from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
@@ -178,6 +181,7 @@ __all__ = [
     "CompilationResult",
     "CompilationWarning",
     "ConditionalEdge",
+    "ContribError",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
@@ -222,6 +226,7 @@ __all__ = [
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "PluginDiscoveryError",
     "PredicateSyntaxError",
     "RedactionPolicy",
     "RegistryStore",
@@ -252,6 +257,8 @@ __all__ = [
     "cli",
     "coerce_decision_callback",
     "compile_flow",
+    "discover_flows",
+    "discover_tools",
     "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",

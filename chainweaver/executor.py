@@ -530,6 +530,7 @@ class FlowExecutor:
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
         decision_callback: DecisionCallback | DecisionCallable | None = None,
+        discover_plugins: bool = False,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -565,6 +566,19 @@ class FlowExecutor:
         # invoking the relevant ``_execute_*`` path so the loops know
         # where to start and which records to prepend.
         self._resume_snapshot: ExecutionSnapshot | None = None
+        # Plugin discovery (issue #130).  When ``True``, every Tool
+        # advertised under the ``chainweaver.tools`` entry-point group
+        # is registered eagerly so end-users don't have to call
+        # ``register_tool`` once per installed plugin package.  Run
+        # last so all internal state is in place before user-supplied
+        # tools go through the normal ``register_tool`` path (which
+        # triggers drift detection).  Off by default to keep startup
+        # cheap and to quarantine third-party plugin failures.
+        if discover_plugins:
+            from chainweaver.plugins import discover_tools
+
+            for plugin_tool in discover_tools():
+                self.register_tool(plugin_tool)
 
     @property
     def registry(self) -> FlowRegistry:

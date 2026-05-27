@@ -169,6 +169,16 @@ For the correctness argument behind the design, see
 pip install chainweaver
 ```
 
+Optional extras:
+
+| Extra | Use when |
+|-------|----------|
+| `chainweaver[yaml]` | Reading / writing `.flow.yaml` files |
+| `chainweaver[otel]` | Emitting OpenTelemetry spans for every flow run |
+| `chainweaver[contrib]` | Importing the curated standard tool library (see [Standard tool library](#standard-tool-library)) |
+| `chainweaver[langchain]` | Bidirectional adapters between ChainWeaver and LangChain `BaseTool` |
+| `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` |
+
 ---
 
 ## Quick Start
@@ -544,8 +554,136 @@ All errors are typed and traceable:
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
 | `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field |
+| `PluginDiscoveryError` | Strict-mode plugin discovery (`discover_tools(strict=True)` / `discover_flows(strict=True)`) hits a misbehaving entry-point loader |
+| `ContribError` | A `chainweaver.contrib.tools` tool hits a contract violation (missing JSON-pointer key, wrong predicate shape, assertion mismatch) |
 
 All exceptions inherit from `ChainWeaverError`.
+
+---
+
+## Standard tool library
+
+`chainweaver.contrib.tools` ships a curated set of deterministic
+utility tools so that a new user can compose a meaningful flow on the
+first afternoon without writing any `Tool` boilerplate.
+
+```python
+from chainweaver.contrib.tools import (
+    assert_equal,
+    filter_list,
+    json_pluck,
+    json_set,
+    map_list,
+    passthrough,
+)
+```
+
+| Tool | Purpose |
+|------|---------|
+| `passthrough` | Identity — return the context unchanged. |
+| `json_pluck` | Extract one value by RFC-6901 JSON pointer. |
+| `json_set` | Set one value by RFC-6901 JSON pointer; returns a new dict. |
+| `assert_equal` | Raise `ContribError` when two context keys differ. |
+| `map_list` | Apply a registered sub-flow to each element of a list. |
+| `filter_list` | Drop elements whose predicate sub-flow returns falsy. |
+
+The library is **deterministic-only**: no HTTP, file I/O, database
+access, RNG, or clocks.  Anything stateful belongs in user code.
+Install with `pip install 'chainweaver[contrib]'`.
+
+Runnable examples: [`examples/contrib_pluck_and_set.py`](examples/contrib_pluck_and_set.py),
+[`examples/contrib_map_filter.py`](examples/contrib_map_filter.py).
+
+---
+
+## Export adapters
+
+Hand a compiled flow off to any external agent framework via
+`chainweaver.export`:
+
+```python
+from chainweaver.export import (
+    flow_to_anthropic_tool,
+    flow_to_callable,
+    flow_to_openai_function,
+)
+
+openai_spec = flow_to_openai_function(flow, executor)
+anthropic_spec = flow_to_anthropic_tool(flow, executor)
+run = flow_to_callable(flow, executor)  # plain dict → dict callable
+```
+
+`flow_to_openai_function` emits the
+`{"type": "function", "function": {…}}` shape OpenAI's chat / responses
+APIs expect.  `flow_to_anthropic_tool` emits Anthropic's `tool_use`
+shape.  `flow_to_callable` wraps the flow as a `Callable[[dict], dict]`
+suitable for any framework that accepts arbitrary Python callables.
+
+None of these adapters imports `openai` or `anthropic` — they emit
+dicts and callables only.  Runtime integration with those clients is
+the caller's job.
+
+Runnable example: [`examples/export_openai_anthropic.py`](examples/export_openai_anthropic.py).
+
+---
+
+## Ecosystem bridges (LangChain, LlamaIndex)
+
+`chainweaver.integrations.langchain` and
+`chainweaver.integrations.llamaindex` ship thin bidirectional adapters
+so existing LangChain `BaseTool` / LlamaIndex `FunctionTool`
+instances can be pulled into ChainWeaver, and ChainWeaver `Tool`
+instances can be pushed back out.
+
+```python
+from chainweaver.integrations.langchain import (
+    from_langchain_tool,
+    to_langchain_tool,
+)
+
+cw_tool = from_langchain_tool(my_langchain_tool)
+lc_tool = to_langchain_tool(my_cw_tool)
+```
+
+Install with `pip install 'chainweaver[langchain]'` /
+`'chainweaver[llamaindex]'`.  Importing either module without the
+relevant extra raises a clear `ImportError`.
+
+---
+
+## Plugin discovery
+
+For third-party packages — `chainweaver-aws`, `chainweaver-stripe`,
+… — ChainWeaver follows the same entry-point convention used by
+pytest, Sphinx, MkDocs, and friends.
+
+Publisher (`pyproject.toml`):
+
+```toml
+[project.entry-points."chainweaver.tools"]
+aws = "chainweaver_aws:get_tools"
+
+[project.entry-points."chainweaver.flows"]
+aws = "chainweaver_aws:get_flows"
+```
+
+Consumer:
+
+```python
+from chainweaver import FlowExecutor, FlowRegistry
+
+# Auto-register every tool / flow advertised by an installed plugin.
+registry = FlowRegistry(discover_plugins=True)
+executor = FlowExecutor(registry=registry, discover_plugins=True)
+```
+
+Discovery is **opt-in** — importing `chainweaver` does not trigger
+plugin imports.  Misbehaving plugins (raise on import, return the
+wrong type) are logged at `WARNING` and skipped; pass
+`strict=True` to `discover_tools()` / `discover_flows()` for the loud
+form.
+
+Runnable example: [`examples/plugin_discovery.py`](examples/plugin_discovery.py).
 
 ---
 

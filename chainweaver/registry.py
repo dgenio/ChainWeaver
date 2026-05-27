@@ -68,7 +68,12 @@ class FlowRegistry:
         registry.register_flow(my_flow)  # writes my_flow@<version>.flow.json
     """
 
-    def __init__(self, store: RegistryStore | None = None) -> None:
+    def __init__(
+        self,
+        store: RegistryStore | None = None,
+        *,
+        discover_plugins: bool = False,
+    ) -> None:
         self._store: RegistryStore = store if store is not None else InMemoryStore()
         # Latest-version pointer; rebuilt from the store on construction so a
         # file-backed registry restored across process boundaries still
@@ -76,6 +81,16 @@ class FlowRegistry:
         self._latest: dict[str, str] = {}
         for name, version in self._store.list_keys():
             self._touch_latest(name, version)
+        # Plugin discovery (issue #130).  When ``True``, every Flow /
+        # DAGFlow advertised under the ``chainweaver.flows`` entry-point
+        # group is registered eagerly via the standard ``register_flow``
+        # path.  Discovery is opt-in and tolerant — see
+        # :mod:`chainweaver.plugins`.
+        if discover_plugins:
+            from chainweaver.plugins import discover_flows
+
+            for plugin_flow in discover_flows():
+                self.register_flow(plugin_flow)
 
     @property
     def store(self) -> RegistryStore:

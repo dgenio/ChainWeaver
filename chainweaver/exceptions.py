@@ -233,6 +233,47 @@ class CheckpointNotFoundError(ChainWeaverError):
         super().__init__(f"No snapshot found for trace_id '{trace_id}'.")
 
 
+class PluginDiscoveryError(ChainWeaverError):
+    """Raised when an entry-point plugin loader fails irrecoverably.
+
+    Plugin discovery (issue #130) is *tolerant* by default: a misbehaving
+    third-party plugin emits a warning and is skipped so other plugins
+    continue to load.  This exception exists for callers that opt into
+    strict mode (``discover_tools(strict=True)`` / ``discover_flows(strict=True)``)
+    and want bad plugins to abort discovery instead.
+
+    Attributes:
+        entry_point: Fully-qualified entry-point name (``"<dist>:<name>"``)
+            that failed.
+        detail: Human-readable explanation of what went wrong.
+    """
+
+    def __init__(self, entry_point: str, detail: str) -> None:
+        self.entry_point = entry_point
+        self.detail = detail
+        super().__init__(f"Plugin discovery failed for entry point '{entry_point}': {detail}.")
+
+
+class ContribError(ChainWeaverError):
+    """Raised by tools in :mod:`chainweaver.contrib.tools` on contract violations.
+
+    Used for first-party contrib tools (issue #145) to surface
+    deterministic failures — missing JSON-pointer keys, predicate
+    sub-flow producing the wrong shape, assertion mismatches — without
+    falling back to bare ``ValueError`` / ``KeyError`` that would not
+    inherit from :class:`ChainWeaverError`.
+
+    Attributes:
+        tool_name: Name of the contrib tool that failed.
+        detail: Human-readable explanation.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"Contrib tool '{tool_name}' failed: {detail}.")
+
+
 class MCPError(ChainWeaverError):
     """Base class for errors raised by the ``chainweaver.mcp`` package
     (issues #70, #72, #150).

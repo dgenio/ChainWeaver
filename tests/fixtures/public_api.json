@@ -15,6 +15,7 @@
     "CompilationResult",
     "CompilationWarning",
     "ConditionalEdge",
+    "ContribError",
     "CostProfile",
     "CostReport",
     "DAGDefinitionError",
@@ -59,6 +60,7 @@
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "PluginDiscoveryError",
     "PredicateSyntaxError",
     "RedactionPolicy",
     "RegistryStore",
@@ -89,6 +91,8 @@
     "cli",
     "coerce_decision_callback",
     "compile_flow",
+    "discover_flows",
+    "discover_tools",
     "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",
@@ -220,6 +224,12 @@
       },
       "module": "chainweaver.flow",
       "qualname": "ConditionalEdge"
+    },
+    "ContribError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "ContribError",
+      "signature": "(tool_name: str, detail: str) -> None"
     },
     "CostProfile": {
       "kind": "pydantic-model",
@@ -471,7 +481,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -489,7 +499,7 @@
       "kind": "class",
       "module": "chainweaver.registry",
       "qualname": "FlowRegistry",
-      "signature": "(store: RegistryStore | None = None) -> None"
+      "signature": "(store: RegistryStore | None = None, *, discover_plugins: bool = False) -> None"
     },
     "FlowSerializationError": {
       "kind": "class",
@@ -612,6 +622,12 @@
       },
       "module": "chainweaver.observation",
       "qualname": "ObservedTrace"
+    },
+    "PluginDiscoveryError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "PluginDiscoveryError",
+      "signature": "(entry_point: str, detail: str) -> None"
     },
     "PredicateSyntaxError": {
       "kind": "class",
@@ -862,6 +878,18 @@
       "module": "chainweaver.compiler",
       "qualname": "compile_flow",
       "signature": "(flow: Flow, tools: dict[str, Tool]) -> CompilationResult"
+    },
+    "discover_flows": {
+      "kind": "function",
+      "module": "chainweaver.plugins",
+      "qualname": "discover_flows",
+      "signature": "(*, group: str = 'chainweaver.flows', strict: bool = False) -> list[Flow | DAGFlow]"
+    },
+    "discover_tools": {
+      "kind": "function",
+      "module": "chainweaver.plugins",
+      "qualname": "discover_tools",
+      "signature": "(*, group: str = 'chainweaver.tools', strict: bool = False) -> list[Tool]"
     },
     "evaluate_predicate": {
       "kind": "function",
