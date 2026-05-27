@@ -728,6 +728,26 @@ class DAGFlowStep(FlowStep):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _check_capability_has_no_branches(self) -> DAGFlowStep:
+        """Conditional branching is unsupported on capability steps.
+
+        The DAG runner dispatches ``step_type='capability'`` steps through the
+        ``_execute_capability_step`` hook, which returns before
+        ``FlowExecutor._select_branch`` runs, so ``branches`` / ``default_next``
+        would be silently ignored.  Reject the combination at construction
+        (fail-loud) rather than dropping the edges at runtime.
+        """
+        if self.step_type == "capability" and self.branches:
+            msg = (
+                f"Step '{self.step_id}' has step_type='capability' with "
+                f"conditional branches. Branching is only supported on "
+                f"step_type='tool' steps; capability steps cannot carry "
+                f"branches or default_next."
+            )
+            raise ValueError(msg)
+        return self
+
 
 class DAGFlow(BaseModel):
     """A deterministic, DAG-structured sequence of tool invocations.

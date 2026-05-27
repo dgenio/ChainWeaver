@@ -166,6 +166,8 @@ For the full prohibited-actions list and anti-patterns, see
 
 Predicates are evaluated by `chainweaver.contracts.evaluate_predicate`, which parses the string with `ast` and walks the tree by hand — `eval()` is **never** called.  Predicate syntax errors and unsupported AST nodes raise `PredicateSyntaxError` and abort the flow with a synthetic failed `StepRecord`.
 
+Branching is only supported on `step_type="tool"` steps.  Capability steps (`step_type="capability"`) are dispatched through `_execute_capability_step` before `_select_branch` runs, so `branches` / `default_next` are rejected on them at construction (a `DAGFlowStep` validator) rather than silently ignored.
+
 ### `FlowStep.input_mapping`
 
 | Value type | Behavior |

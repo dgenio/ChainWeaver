@@ -443,6 +443,23 @@ class TestBranchValidation:
             )
         assert "default_next" in str(exc_info.value)
 
+    def test_capability_step_cannot_have_branches(self) -> None:
+        # The DAG runner dispatches capability steps through
+        # _execute_capability_step, which returns before branch evaluation,
+        # so branches would be silently ignored.  Reject at construction.
+        with pytest.raises(ValueError) as exc_info:
+            DAGFlowStep(
+                tool_name="probe",
+                step_id="probe",
+                depends_on=[],
+                step_type="capability",
+                capability_id="data.ingest",
+                branches=[
+                    ConditionalEdge(target_step_id="fast", predicate="True"),
+                ],
+            )
+        assert "capability" in str(exc_info.value)
+
 
 # ---------------------------------------------------------------------------
 # Predicate failure surfaces cleanly
