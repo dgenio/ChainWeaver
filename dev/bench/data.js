@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779988275225,
+  "lastUpdate": 1780007416750,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -1008,6 +1008,78 @@ window.BENCHMARK_DATA = {
             "value": 0.3007109999941804,
             "unit": "ms",
             "extra": "min=0.30ms max=0.32ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d054f6182b5916b8e6ffe6c6e6c108affa95ea51",
+          "message": "Merge pull request #219 from dgenio/claude/github-issues-triage-JofdQ\n\nfeat: add framework recipes and workflow-template examples (#204, #205, #206, #211, #213)",
+          "timestamp": "2026-05-28T23:29:01+01:00",
+          "tree_id": "99343bb1773733a794795a1c8b6265c6f0e08b1b",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/d054f6182b5916b8e6ffe6c6e6c108affa95ea51"
+        },
+        "date": 1780007416407,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.21874700001944802,
+            "unit": "ms",
+            "extra": "min=0.18ms max=0.24ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.15130100001670144,
+            "unit": "ms",
+            "extra": "min=0.11ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.27791700000534547,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.43ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.15043799999148177,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.97960400000738,
+            "unit": "ms",
+            "extra": "min=101.95ms max=102.01ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.3545420000534705,
+            "unit": "ms",
+            "extra": "min=0.35ms max=0.36ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.5432249999776,
+            "unit": "ms",
+            "extra": "min=251.33ms max=251.82ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.32328000003190027,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.40ms repeats=5"
           }
         ]
       }
