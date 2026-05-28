@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `examples/mcp_style_before_after_demo.py` (#204) — a before/after demo of an
     MCP-style path (`search_docs → extract_facts → validate_schema →
     format_answer`) showing model decisions avoided, and writing a saved
-    `.flow.yaml` and an `ExecutionResult` trace artifact.
+    `.flow.json` and an `ExecutionResult` trace artifact.
   - `examples/integrations/langgraph_node.py` (#205) — call a ChainWeaver flow
     from a LangGraph node; new optional `chainweaver[langgraph]` extra.
   - `examples/integrations/openai_agents_tool.py` (#206) — expose a flow as an

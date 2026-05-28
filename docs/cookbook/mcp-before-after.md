@@ -49,7 +49,7 @@ Running the script prints a side-by-side comparison (steps run, model decisions,
 simulated runtime) and writes two artifacts to a temp directory so you can see
 what a compiled flow looks like on disk:
 
-- `mcp_answer_flow.flow.yaml` — the saved flow definition (`flow_to_yaml`);
+- `mcp_answer_flow.flow.json` — the saved flow definition (`flow_to_json`, so the demo stays runnable on a base install; YAML output would need the optional `chainweaver[yaml]` extra);
 - `mcp_answer_flow.trace.json` — the `ExecutionResult` trace.
 
 ```

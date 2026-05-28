@@ -15,8 +15,10 @@ The MCP-shaped path is::
 Everything runs offline: there are no external services, no network calls, and
 no LLM.  The "before" model decisions are *simulated* with a fixed per-decision
 delay so the comparison is deterministic and reproducible.  The demo also writes
-a saved ``.flow.yaml`` and an ``ExecutionResult`` trace artifact to a temp
-directory so you can inspect what a compiled flow looks like on disk.
+a saved ``.flow.json`` and an ``ExecutionResult`` trace artifact to a temp
+directory so you can inspect what a compiled flow looks like on disk.  JSON is
+used so the demo stays runnable on a base install (writing ``.flow.yaml`` would
+require the optional ``chainweaver[yaml]`` extra).
 
 Run from the repository root::
 
@@ -39,7 +41,7 @@ from chainweaver import (
     FlowStep,
     Tool,
 )
-from chainweaver.serialization import flow_to_yaml
+from chainweaver.serialization import flow_to_json
 
 # A simulated per-decision model latency.  Real values are far larger; the
 # point is the *count* of avoided decisions, not the absolute number.
@@ -215,7 +217,7 @@ def _write_artifacts(executor: FlowExecutor, result: Any) -> Path:
     out_dir = Path(tempfile.mkdtemp(prefix="chainweaver_demo_"))
 
     flow = executor.registry.get_flow("mcp_answer_flow")
-    (out_dir / "mcp_answer_flow.flow.yaml").write_text(flow_to_yaml(flow))
+    (out_dir / "mcp_answer_flow.flow.json").write_text(flow_to_json(flow))
 
     trace = {
         "flow_name": result.flow_name,
@@ -263,11 +265,11 @@ def main() -> None:
     print("-" * 58)
     print(f"Decisions avoided : {before_decisions}")
     print(f"Final answer      : {after_answer}\n")
-    print(f"Saved flow file   : {out_dir / 'mcp_answer_flow.flow.yaml'}")
+    print(f"Saved flow file   : {out_dir / 'mcp_answer_flow.flow.json'}")
     print(f"Saved trace        : {out_dir / 'mcp_answer_flow.trace.json'}")
 
     assert before_decisions == len(_TOOLS)
-    assert (out_dir / "mcp_answer_flow.flow.yaml").exists()
+    assert (out_dir / "mcp_answer_flow.flow.json").exists()
     assert (out_dir / "mcp_answer_flow.trace.json").exists()
 
 
