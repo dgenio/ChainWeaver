@@ -9,7 +9,17 @@ description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-keywords = ["mcp", "agents", "orchestration", "deterministic", "workflow"]
+keywords = [
+    "mcp",
+    "agents",
+    "orchestration",
+    "deterministic",
+    "workflow",
+    "llm",
+    "tools",
+    "pydantic",
+    "flow",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -99,6 +109,10 @@ dev = [
 
 [project.urls]
 "Homepage" = "https://github.com/dgenio/ChainWeaver"
+"Documentation" = "https://chainweaver.readthedocs.io/"
+"Source" = "https://github.com/dgenio/ChainWeaver"
+"Changelog" = "https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md"
+"Issues" = "https://github.com/dgenio/ChainWeaver/issues"
 "Bug Tracker" = "https://github.com/dgenio/ChainWeaver/issues"
 
 [tool.pytest.ini_options]

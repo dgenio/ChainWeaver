@@ -42,6 +42,66 @@ result = executor.execute_flow("calc", {"number": 5})
 
 ---
 
+## See it in 30 seconds
+
+**The problem.** Your agent keeps doing the same path —
+`search → extract → validate → format` — but on every single turn it
+round-trips through the LLM between each tool call to "decide" what to
+do next.  That's four model calls to execute one deterministic
+operation.
+
+**Before — naive agent loop, 4 model-mediated decisions:**
+
+```
+turn 1   ─►  LLM("plan")    ─►  search(query)         ─► 12 results
+turn 2   ─►  LLM("next?")   ─►  extract(results)      ─► 8 facts
+turn 3   ─►  LLM("next?")   ─►  validate(facts)       ─► 7 facts
+turn 4   ─►  LLM("next?")   ─►  format(facts)         ─► answer
+                                                          ⏱  ~6 s, 4 LLM calls
+```
+
+**After — same path, compiled once into a named ChainWeaver flow:**
+
+```
+turn 1   ─►  LLM("plan")    ─►  search_summarize_flow(query)
+                                  └─ search ─► extract ─► validate ─► format
+                                                          ⏱  ~1 s, 1 LLM call
+```
+
+The agent still decides *which* flow to invoke (that part stays
+open-ended).  The four tool calls inside the flow no longer round-trip
+through the model — `FlowExecutor` runs them with strict Pydantic
+validation between every step and zero LLM involvement.
+
+**Copy-paste quick path:**
+
+```bash
+pip install 'chainweaver[yaml]'
+python examples/simple_linear_flow.py
+```
+
+The summary below is a condensed view of the real
+`ExecutionResult` the script produces — the actual stdout also
+includes per-step timestamps and the executor's structured step
+log, but the values, the step order, and the final output are
+exactly what you get on disk:
+
+```
+flow=double_add_format success=True
+final_output={'number': 5, 'value': 20, 'result': 'Final value: 20'}
+step 0 double          {'value': 10}
+step 1 add_ten         {'value': 20}
+step 2 format_result   {'result': 'Final value: 20'}
+```
+
+Three tool calls, no LLM in the loop, fully reproducible from
+`examples/double_add_format.flow.yaml`.  Jump
+to the [Quick Start](#quick-start) for the Python version, or to the
+[Command-line interface](#command-line-interface) for the no-Python
+path.
+
+---
+
 ## Why ChainWeaver?
 
 When an LLM-powered agent routes tools together — `fetch_data → transform → store` — a
@@ -161,23 +221,69 @@ on each minor release of any of the projects above.
 For the correctness argument behind the design, see
 [docs/data-integrity.md](docs/data-integrity.md).
 
+### Where ChainWeaver fits in the Weaver Stack
+
+ChainWeaver is the **deterministic multi-step tool execution** seam of
+the broader [Weaver Stack](https://github.com/dgenio/weaver-spec): the
+loose family of SDKs that share `weaver-spec`'s `SelectableItem`
+contract for capability routing.  In one line: the agent or the host's
+router decides *which* capability to invoke, and ChainWeaver runs the
+deterministic tool path *behind* that capability.
+
+| Layer | What it owns | Sibling project |
+|-------|--------------|-----------------|
+| Routing / capability selection | "Which named operation handles this request?" | `weaver-spec` (#91 — `SelectableItem` contract) |
+| Context assembly | "What facts and tool descriptions belong in the prompt?" | `contextweaver` (#106) |
+| Agent kernel | The model-mediated tool-use loop itself | `agent-kernel` (#89) |
+| **Deterministic flow execution** | "Run this exact tool sequence with strict schemas, no LLM between steps" | **ChainWeaver — this repo** |
+| Lessons & evaluation | Turning traces into reviewed operational guidance | `lessonweaver` (#210) |
+
+ChainWeaver does **not** replace an agent framework.  It is meant to be
+called *from* one — see the [LangGraph
+recipe](#command-line-interface) (issue #205) and the [OpenAI Agents
+SDK recipe](#command-line-interface) (issue #206) once they land for
+the canonical integration patterns.  None of the sibling packages above
+is a hard dependency; the `chainweaver[weaver-stack]` extra is a
+placeholder that will pin them when they ship on PyPI.
+
+For host-level expectations (when to invoke, how to store traces,
+side-effect tools, MCP parity), see the
+[Runtime responsibilities](docs/runtime-responsibilities.md) page.
+
 ---
 
 ## Installation
 
 ```bash
-pip install chainweaver
+pip install chainweaver                  # base install — no extras
+pip install 'chainweaver[yaml]'          # most common — needed for .flow.yaml files
+pip install 'chainweaver[yaml,otel,mcp]' # combine extras with commas
 ```
 
-Optional extras:
+The base install pulls only five runtime dependencies (`deepdiff`,
+`packaging`, `pydantic`, `tenacity`, `typer`) and has no transitive LLM
+SDK pinned.  Pick extras for the integrations you actually use:
 
-| Extra | Use when |
-|-------|----------|
-| `chainweaver[yaml]` | Reading / writing `.flow.yaml` files |
-| `chainweaver[otel]` | Emitting OpenTelemetry spans for every flow run |
-| `chainweaver[contrib]` | Importing the curated standard tool library (see [Standard tool library](#standard-tool-library)) |
-| `chainweaver[langchain]` | Bidirectional adapters between ChainWeaver and LangChain `BaseTool` |
-| `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` |
+| Extra | Use when | Pulls in |
+|-------|----------|----------|
+| `chainweaver[yaml]` | Reading / writing `.flow.yaml` flow files (the CLI's `run`, `validate`, `check`, `doctor` commands need this) | `pyyaml` |
+| `chainweaver[otel]` | Emitting OpenTelemetry spans for every flow run | `opentelemetry-api` |
+| `chainweaver[mcp]` | Exposing flows over MCP via the `chainweaver.mcp` adapter | `mcp` |
+| `chainweaver[contrib]` | Importing the curated standard tool library (see [Standard tool library](#standard-tool-library)) | *(no extra deps today)* |
+| `chainweaver[langchain]` | Bidirectional adapters between ChainWeaver and LangChain `BaseTool` | `langchain-core` |
+| `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` | `llama-index-core` |
+| `chainweaver[test]` | Hypothesis-based property tests for your own flows | `hypothesis`, `hypothesis-jsonschema` |
+| `chainweaver[docs]` | Building the docs site locally with mkdocs | `mkdocs`, `mkdocs-material`, `mkdocstrings` |
+| `chainweaver[weaver-stack]` | Reserving the seam for the sibling Weaver Stack SDKs (`weaver-spec` #91, `contextweaver` #106, `agent-kernel` #89) | *(placeholder — no transitive dep today; will pin them once they ship on PyPI)* |
+| `chainweaver[dev]` | Contributing — pulls every test/lint/type dep and most integration deps | the union of the above |
+
+Package metadata (`pyproject.toml`) publishes URLs for the
+[documentation](https://chainweaver.readthedocs.io/), the
+[source](https://github.com/dgenio/ChainWeaver), the
+[changelog](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md),
+and the
+[issue tracker](https://github.com/dgenio/ChainWeaver/issues), so `pip
+show chainweaver` and the PyPI sidebar point users to the right place.
 
 ---
 
@@ -185,6 +291,7 @@ Optional extras:
 
 ### Define tools, build a flow, and execute it
 
+<!-- smoke-test: run -->
 ```python
 from pydantic import BaseModel
 from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
@@ -294,6 +401,7 @@ scripts under `examples/cookbook/`.
 The `@tool` decorator eliminates boilerplate by introspecting type hints to
 auto-generate input schemas:
 
+<!-- smoke-test: run -->
 ```python
 from pydantic import BaseModel
 from chainweaver import tool, Flow, FlowStep, FlowRegistry, FlowExecutor
@@ -534,6 +642,14 @@ In practice:
 3. On subsequent invocations the executor runs the entire flow in a single
    call — no intermediate LLM calls required.
 
+ChainWeaver is **the library you embed**, not the runtime that owns
+your trace store, auth, side-effect policy, or MCP wiring.  Host
+authors should read
+[`docs/runtime-responsibilities.md`](docs/runtime-responsibilities.md)
+to see which responsibilities stay on their side of the seam (deciding
+when to invoke, persisting traces, redacting sensitive outputs,
+idempotency of side-effect tools, MCP authorisation).
+
 ---
 
 ## Error Handling
@@ -733,9 +849,11 @@ chainweaver validate flows/etl.flow.yaml
 chainweaver check flows/                  # whole-directory variant
 
 # Render a registered flow as ASCII or Graphviz DOT.
+# (See note below — `viz` reads from an in-memory registry, not a file.)
 chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
 
 # Inspect a registered flow's structure (table or JSON).
+# (See note below — `inspect` reads from an in-memory registry, not a file.)
 chainweaver inspect my_flow --format json
 
 # Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
@@ -768,6 +886,30 @@ reporting subcommands also accept `--format json` for machine consumption
 and has no `--format` flag. All subcommands share the same exit-code
 contract (`0` success, `1` business-logic error, `2` file-not-found /
 argument error).
+
+**`inspect` and `viz` need a registry — they don't read from disk.**
+Unlike `run`/`validate`/`check`/`profile`/`diff`/`attest`/`suggest`/`doctor`
+(which load a flow file every time they run), `inspect` and `viz` operate on
+a process-scoped, in-memory registry that **you must install programmatically
+before invoking the CLI**.  Running `chainweaver inspect my_flow` against a
+fresh install will exit `1` with `No registry configured. Call
+chainweaver.cli.set_default_registry(...) before invoking the CLI.` —
+that's expected.  The fix is to wire a small entry script:
+
+```python
+# my_cli_entry.py
+from chainweaver import FlowRegistry
+from chainweaver.cli import main, set_default_registry
+from my_app import build_registry  # returns a populated FlowRegistry
+
+set_default_registry(build_registry())
+main()
+```
+
+See [`docs/cli.md` § Programmatic registration](docs/cli.md#programmatic-registration-inspect-viz)
+for the full pattern, including why the split exists (file-oriented
+commands stay zero-config, registry-oriented commands stay
+introspection-friendly).
 
 ---
 
