@@ -66,6 +66,16 @@ langchain = [
 llamaindex = [
     "llama-index-core>=0.10",
 ]
+langgraph = [
+    # LangGraph node recipe (issue #205).  Builds on ``langchain-core`` (our
+    # existing Pydantic-v2-compatible dep); the recipe itself runs offline.
+    "langgraph>=0.2",
+]
+openai-agents = [
+    # OpenAI Agents SDK tool recipe (issue #206).  The recipe wraps a flow as a
+    # ``FunctionTool`` and validates it in a dry-run — no API key required.
+    "openai-agents>=0.1",
+]
 mcp = [
     "mcp>=1.0,<2",
 ]
@@ -104,6 +114,8 @@ dev = [
     "opentelemetry-sdk>=1.20",
     "langchain-core>=0.3",
     "llama-index-core>=0.10",
+    "langgraph>=0.2",
+    "openai-agents>=0.1",
     "mcp>=1.0,<2",
 ]
 

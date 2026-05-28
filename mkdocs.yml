@@ -109,6 +109,12 @@ nav:
       - 4. Testing flows: cookbook/04-testing-flows.md
       - 5. Schema drift in CI: cookbook/05-schema-drift.md
       - 6. Fan-out / fan-in DAG patterns: cookbook/06-dag-fanout.md
+      - "Framework recipes & workflow templates":
+          - Before/after MCP-style flow: cookbook/mcp-before-after.md
+          - LangGraph node: cookbook/langgraph-node.md
+          - OpenAI Agents SDK tool: cookbook/openai-agents-tool.md
+          - Release-readiness workflow: cookbook/release-readiness.md
+          - Offline policy evaluation (skdr-eval): cookbook/policy-eval-skdr.md
   - Reference:
       - CLI: cli.md
       - Error table: reference/error-table.md

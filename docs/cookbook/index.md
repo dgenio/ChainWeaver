@@ -14,6 +14,20 @@ example) executes the recipe end-to-end and asserts its own output.
 | 5 | [Schema drift in CI](05-schema-drift.md) | Detect when a tool's schema changes underneath a registered flow. |
 | 6 | [Fan-out / fan-in DAG patterns](06-dag-fanout.md) | Build a `DAGFlow` that pulls from two sources in parallel and merges. |
 
+## Framework recipes & workflow templates
+
+These pages show ChainWeaver composing with other runtimes and standing in as a
+deterministic workflow engine. The two framework recipes need an optional extra
+(noted on each page); the rest run offline from a fresh checkout.
+
+| Recipe | What you'll build | Extra |
+|---|---|---|
+| [Before/after MCP-style flow](mcp-before-after.md) | A side-by-side demo of naive routing vs one compiled flow. | — |
+| [LangGraph node](langgraph-node.md) | A LangGraph node that runs a ChainWeaver flow. | `chainweaver[langgraph]` |
+| [OpenAI Agents SDK tool](openai-agents-tool.md) | A compiled flow exposed as one agent tool (dry-run). | `chainweaver[openai-agents]` |
+| [Release-readiness workflow](release-readiness.md) | A deterministic pre-release gate with branching. | — |
+| [Offline policy evaluation (skdr-eval)](policy-eval-skdr.md) | A fixture-based policy-eval flow with a deterministic gate. | — |
+
 ## Conventions used in the cookbook
 
 - All recipes follow the **standalone-script rule** for `examples/`: no pytest imports,

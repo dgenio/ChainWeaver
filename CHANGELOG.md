@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Framework recipes and workflow-template examples** (#204, #205, #206, #211,
+  #213): a batch of runnable, mostly-offline examples plus paired cookbook pages
+  that show how to adopt ChainWeaver from existing runtimes and use it as a
+  deterministic workflow engine.
+  - `examples/mcp_style_before_after_demo.py` (#204) — a before/after demo of an
+    MCP-style path (`search_docs → extract_facts → validate_schema →
+    format_answer`) showing model decisions avoided, and writing a saved
+    `.flow.json` and an `ExecutionResult` trace artifact.
+  - `examples/integrations/langgraph_node.py` (#205) — call a ChainWeaver flow
+    from a LangGraph node; new optional `chainweaver[langgraph]` extra.
+  - `examples/integrations/openai_agents_tool.py` (#206) — expose a flow as an
+    OpenAI Agents SDK `FunctionTool` with a key-free dry-run; new optional
+    `chainweaver[openai-agents]` extra.
+  - `examples/release_readiness_flow/release_readiness.py` (#211) — a
+    deterministic release-readiness `DAGFlow` that branches on placeholder test
+    and repository-check results via `ConditionalEdge`.
+  - `examples/skdr_policy_eval_flow.py` (#213) — a fixture-based offline
+    policy-evaluation workflow with a deterministic support-health gate.
+  - New cookbook pages under `docs/cookbook/` and a smoke-test module
+    (`tests/test_workflow_recipe_examples.py`) that keeps every script runnable
+    in CI; the dangling LangGraph/OpenAI-Agents recipe links in the README now
+    resolve.
+
 ## [0.10.0] - 2026-05-28
 
 ### Added
