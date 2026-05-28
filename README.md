@@ -240,8 +240,8 @@ deterministic tool path *behind* that capability.
 
 ChainWeaver does **not** replace an agent framework.  It is meant to be
 called *from* one — see the [LangGraph
-recipe](#command-line-interface) (issue #205) and the [OpenAI Agents
-SDK recipe](#command-line-interface) (issue #206) once they land for
+recipe](docs/cookbook/langgraph-node.md) (issue #205) and the [OpenAI Agents
+SDK recipe](docs/cookbook/openai-agents-tool.md) (issue #206) for
 the canonical integration patterns.  None of the sibling packages above
 is a hard dependency; the `chainweaver[weaver-stack]` extra is a
 placeholder that will pin them when they ship on PyPI.
@@ -391,10 +391,16 @@ python examples/naive_vs_compiled.py    # timing comparison: naive LLM calls vs 
 python examples/coding_agent_pr_review.py    # deterministic PR-review checklist
 python examples/coding_agent_changelog.py    # changelog generation workflow template
 python examples/coding_agent_debug_log.py    # debug-log triage workflow template
+python examples/mcp_style_before_after_demo.py        # before/after MCP-style flow demo
+python examples/release_readiness_flow/release_readiness.py  # deterministic release-readiness gate
+python examples/skdr_policy_eval_flow.py              # offline policy-evaluation workflow template
+python examples/integrations/langgraph_node.py        # call a flow from a LangGraph node (needs chainweaver[langgraph])
+python examples/integrations/openai_agents_tool.py    # expose a flow as an OpenAI Agents SDK tool (needs chainweaver[openai-agents])
 ```
 
-The hosted docs also include a [cookbook](docs/cookbook/index.md) with six paired
-scripts under `examples/cookbook/`.
+The hosted docs also include a [cookbook](docs/cookbook/index.md) with paired
+scripts under `examples/cookbook/`, plus framework recipes and workflow
+templates (LangGraph, OpenAI Agents SDK, release-readiness, policy evaluation).
 
 ### With the `@tool` decorator
 
