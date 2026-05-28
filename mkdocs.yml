@@ -99,6 +99,7 @@ nav:
   - Is this for me?:
       - When ChainWeaver fits: boundaries.md
       - Data integrity guarantees: data-integrity.md
+      - Runtime responsibilities for hosts: runtime-responsibilities.md
       - vs LangChain, Prefect, Dagster, Temporal, LangGraph: comparisons.md
   - Cookbook:
       - Overview: cookbook/index.md
