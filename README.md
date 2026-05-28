@@ -80,6 +80,12 @@ pip install 'chainweaver[yaml]'
 python examples/simple_linear_flow.py
 ```
 
+The summary below is a condensed view of the real
+`ExecutionResult` the script produces — the actual stdout also
+includes per-step timestamps and the executor's structured step
+log, but the values, the step order, and the final output are
+exactly what you get on disk:
+
 ```
 flow=double_add_format success=True
 final_output={'number': 5, 'value': 20, 'result': 'Final value: 20'}
@@ -88,8 +94,8 @@ step 1 add_ten         {'value': 20}
 step 2 format_result   {'result': 'Final value: 20'}
 ```
 
-That's a real `ExecutionResult` — three tool calls, no LLM in the loop,
-fully reproducible from `examples/double_add_format.flow.yaml`.  Jump
+Three tool calls, no LLM in the loop, fully reproducible from
+`examples/double_add_format.flow.yaml`.  Jump
 to the [Quick Start](#quick-start) for the Python version, or to the
 [Command-line interface](#command-line-interface) for the no-Python
 path.
@@ -226,7 +232,7 @@ deterministic tool path *behind* that capability.
 
 | Layer | What it owns | Sibling project |
 |-------|--------------|-----------------|
-| Routing / capability selection | "Which named operation handles this request?" | `weaver-spec` (#91, #107 — `SelectableItem` contract) |
+| Routing / capability selection | "Which named operation handles this request?" | `weaver-spec` (#91 — `SelectableItem` contract) |
 | Context assembly | "What facts and tool descriptions belong in the prompt?" | `contextweaver` (#106) |
 | Agent kernel | The model-mediated tool-use loop itself | `agent-kernel` (#89) |
 | **Deterministic flow execution** | "Run this exact tool sequence with strict schemas, no LLM between steps" | **ChainWeaver — this repo** |
@@ -268,6 +274,7 @@ SDK pinned.  Pick extras for the integrations you actually use:
 | `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` | `llama-index-core` |
 | `chainweaver[test]` | Hypothesis-based property tests for your own flows | `hypothesis`, `hypothesis-jsonschema` |
 | `chainweaver[docs]` | Building the docs site locally with mkdocs | `mkdocs`, `mkdocs-material`, `mkdocstrings` |
+| `chainweaver[weaver-stack]` | Reserving the seam for the sibling Weaver Stack SDKs (`weaver-spec` #91, `contextweaver` #106, `agent-kernel` #89) | *(placeholder — no transitive dep today; will pin them once they ship on PyPI)* |
 | `chainweaver[dev]` | Contributing — pulls every test/lint/type dep and most integration deps | the union of the above |
 
 Package metadata (`pyproject.toml`) publishes URLs for the
