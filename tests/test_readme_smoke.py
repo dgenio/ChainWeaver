@@ -116,6 +116,15 @@ def test_readme_runnable_block_executes(
         output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
         pytest.fail(f"README runnable block failed (returncode={completed.returncode}):\n{output}")
 
+    # The contract in this module's docstring promises "no traceback on stderr".
+    # A script can still print a traceback (e.g. ``traceback.print_exc()``) and
+    # exit 0, so check stderr directly — otherwise the docstring lies.
+    if "Traceback (most recent call last):" in completed.stderr:
+        pytest.fail(
+            "README runnable block exited 0 but printed a traceback to stderr; "
+            "the smoke contract requires clean stderr:\n" + completed.stderr
+        )
+
 
 @pytest.mark.parametrize("relpath", _BUNDLED_EXAMPLES)
 def test_readme_bundled_example_exists(relpath: str) -> None:

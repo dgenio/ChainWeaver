@@ -19,7 +19,6 @@ keywords = [
     "tools",
     "pydantic",
     "flow",
-    "pipeline",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

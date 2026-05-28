@@ -50,11 +50,15 @@ What the host owns:
 - **Storage lifecycle.** Pick a backend (database, object store,
   append-only log).  Set a retention policy.  Encrypt at rest if the
   tool outputs include sensitive data.
-- **Redaction.** Use `chainweaver.RedactionPolicy` *before* persisting
-  if the inputs or outputs contain secrets, PII, or anything else you
-  don't want in your trace store.  ChainWeaver does not redact by
-  default — `StepRecord.inputs` and `StepRecord.outputs` are recorded
-  verbatim.
+- **Redaction.** `chainweaver.RedactionPolicy` is a dict-level masking
+  filter — it exposes `redact(data: dict) -> dict` and is intended for
+  logs and display.  ChainWeaver does **not** redact
+  `ExecutionResult` / `StepRecord` for you, and `RedactionPolicy` has
+  no `ExecutionResult`-shaped helper today.  If you want redacted
+  persistence, walk `result.execution_log` yourself and apply
+  `policy.redact()` to each step's `inputs` / `outputs` dict before
+  handing the record to your trace store.  `StepRecord.inputs` and
+  `StepRecord.outputs` are recorded verbatim by default.
 - **Index and search.** Decide whether traces are queried by
   `trace_id`, `flow_name`, `flow_version`, time range, or correlation
   ID.  ChainWeaver provides the fields; the host indexes them.
@@ -83,7 +87,7 @@ What the host owns:
   invoke more than once with the same inputs.  Use idempotency keys,
   conditional writes, or upserts as appropriate.
 - **Dry-run and preview modes.** Many hosts want a "show what this
-  flow would do" mode.  Implement it inside the tool (an `dry_run:
+  flow would do" mode.  Implement it inside the tool (a `dry_run:
   bool` field in the input schema) or by registering two variants and
   selecting at flow-build time.  ChainWeaver does not provide a
   framework-level dry-run flag.
@@ -107,8 +111,8 @@ deterministic in the way the host claims they are.
 
 Once a `Flow` is registered, the host should present it to the rest of
 its system as a **single named operation**, not as "a sequence of N
-tool calls".  This is the whole point of compiling tool chains into
-flows.
+tool calls".  This is the whole point of compiling sequences of tool
+calls into flows.
 
 What the host owns:
 
@@ -164,6 +168,8 @@ What the host owns when wearing an MCP-server hat:
 A representative host that owns all five responsibilities at once:
 
 ```python
+from dataclasses import replace
+
 from chainweaver import FlowExecutor, FlowRegistry, RedactionPolicy
 
 # 1. Decide when to invoke — host's routing logic.
@@ -179,8 +185,23 @@ def handle_request(intent: str, payload: dict, caller_id: str) -> dict:
     result = executor.execute_flow(flow.name, payload)
 
     # 3. Persist with redaction — host owns the trace store.
-    redacted = redactor.redact_execution_result(result)
-    trace_store.put(redacted, correlation_id=payload.get("request_id"))
+    #    `RedactionPolicy.redact()` is dict-only, so the host walks
+    #    `execution_log` and applies it per step before persisting.
+    redacted_steps = [
+        replace(
+            step,
+            inputs=redactor.redact(step.inputs),
+            outputs=redactor.redact(step.outputs),
+        )
+        for step in result.execution_log
+    ]
+    trace_store.put_trace(
+        trace_id=result.trace_id,
+        flow_name=flow.name,
+        flow_version=result.flow_version,
+        steps=redacted_steps,
+        correlation_id=payload.get("request_id"),
+    )
 
     # 4. Surface a single named operation back to the caller.
     return {
@@ -194,7 +215,7 @@ def handle_request(intent: str, payload: dict, caller_id: str) -> dict:
 registry = FlowRegistry()
 executor = FlowExecutor(registry=registry)
 redactor = RedactionPolicy(
-    redact_fields=("customer_email", "internal_notes"),
+    redact_keys=frozenset({"customer_email", "internal_notes"}),
 )
 ```
 
