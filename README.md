@@ -758,10 +758,14 @@ point it at a `.flow.yaml`/`.flow.json` file, pass `--tools <module>` (the
 import path of a Python module that exposes `Tool` instances at top
 level), and supply the initial input as JSON. Hand-authored flow files must
 declare a `type: Flow` (or `type: DAGFlow`) discriminator at the top — see
-the [flow file format](docs/cli.md#flow-file-format) reference. Every subcommand also
-supports `--format json` for machine consumption, and shares the same
-exit-code contract (`0` success, `1` business-logic error, `2`
-file-not-found / argument error).
+the [flow file format](docs/cli.md#flow-file-format) reference. Most
+reporting subcommands also accept `--format json` for machine consumption
+(`inspect`, `validate`, `check`, `run`, `profile`, `diff`, `attest`,
+`suggest`, `doctor`); the two exceptions are `viz`, which uses
+`--format ascii|dot`, and `dump-schema`, which writes a raw JSON Schema
+and has no `--format` flag. All subcommands share the same exit-code
+contract (`0` success, `1` business-logic error, `2` file-not-found /
+argument error).
 
 ---
 

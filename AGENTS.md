@@ -173,8 +173,10 @@ For the full prohibited-actions list and anti-patterns, see
 ### `Flow` (Pydantic model)
 
 The rows below are the actual Pydantic fields (`Flow.model_fields`), in
-declaration order. `DAGFlow` carries the same fields except `version` is
-**required** (no default).
+declaration order. `DAGFlow` carries the same field **names**, with two
+differences: `version` is **required** (no default), and `steps` is typed
+`list[DAGFlowStep]` (which extends `FlowStep` with conditional `branches` —
+see the `DAGFlowStep` subsection below).
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
