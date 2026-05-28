@@ -716,12 +716,14 @@ Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
 
 ## Command-line interface
 
-ChainWeaver ships a `chainweaver` console script with the following subcommands:
+ChainWeaver ships a `chainweaver` console script with the following subcommands.
+Reading `.flow.yaml` files needs the YAML extra
+(`pip install 'chainweaver[yaml]'` — also listed in [Installation](#installation)).
+The `run` example below uses a flow shipped under `examples/`, so it should be
+invoked from the repository root.
 
 ```bash
-# Run a flow from disk — no Python required. (.flow.yaml needs the YAML extra:
-# pip install 'chainweaver[yaml]'.) Run from the repo root so the example
-# tools module is importable.
+# Run a flow from disk — no Python required.
 chainweaver run examples/double_add_format.flow.yaml \
     --tools examples.simple_linear_flow \
     --input '{"number": 5}'

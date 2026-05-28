@@ -10,6 +10,7 @@ These tests fail when:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,11 @@ def _registered_command_names() -> list[str]:
 
 def test_every_cli_command_has_a_docs_section() -> None:
     doc_text = _CLI_DOC.read_text(encoding="utf-8")
-    missing = [name for name in _registered_command_names() if f"### `{name}`" not in doc_text]
+    missing = [
+        name
+        for name in _registered_command_names()
+        if not re.search(rf"(?m)^###\s+`{re.escape(name)}`\s*$", doc_text)
+    ]
     assert not missing, f"docs/cli.md is missing reference sections for: {missing}"
 
 
@@ -49,7 +54,10 @@ def test_example_flow_file_validates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exit_code == 0
 
 
-def test_example_flow_file_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_example_flow_file_runs_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.syspath_prepend(str(_REPO_ROOT))
     exit_code = cli.main(
         [
@@ -62,3 +70,5 @@ def test_example_flow_file_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
         ]
     )
     assert exit_code == 0
+    out = capsys.readouterr().out
+    assert '"result": "Final value: 20"' in out
