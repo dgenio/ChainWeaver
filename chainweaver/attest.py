@@ -63,7 +63,9 @@ from chainweaver.flow import DAGFlow, Flow
 __all__ = [
     "AttestationInputError",
     "AttestationReport",
+    "UnsupportedAnnotation",
     "attest_flow",
+    "generate_value",
 ]
 
 
@@ -89,15 +91,19 @@ class AttestationInputError(ChainWeaverError):
 # ---------------------------------------------------------------------------
 
 
-class _UnsupportedAnnotation(Exception):
-    """Internal: raised when _generate_value cannot handle an annotation."""
+class UnsupportedAnnotation(Exception):
+    """Raised when :func:`generate_value` cannot handle an annotation.
+
+    Part of the supported schema-value generation utility shared by the
+    attestation and fuzzing harnesses (issue #220 review follow-up).
+    """
 
     def __init__(self, annotation_repr: str) -> None:
         self.annotation_repr = annotation_repr
         super().__init__(annotation_repr)
 
 
-def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -> Any:
+def generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -> Any:
     """Generate one example value matching *annotation*.
 
     The generator covers the common subset of Pydantic field types:
@@ -110,7 +116,7 @@ def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -
     - ``dict`` / ``dict[K, V]`` → small dict
     - ``Literal[a, b, c]`` → uniform choice
     - ``Optional[X]`` / ``X | None`` → 25% chance of ``None``, else X
-    - ``BaseModel`` subclass → recurse via ``_generate_value`` per field
+    - ``BaseModel`` subclass → recurse via ``generate_value`` per field
     """
     if depth > 4:
         # Bound recursion conservatively for self-referential schemas.
@@ -134,14 +140,14 @@ def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -
     if origin is list or annotation is list:
         item_type = args[0] if args else int
         length = rng.randint(0, 3)
-        return [_generate_value(item_type, rng, depth=depth + 1) for _ in range(length)]
+        return [generate_value(item_type, rng, depth=depth + 1) for _ in range(length)]
     if origin is dict or annotation is dict:
         # Use a small {str: int} dict by default; honour annotation args
         # when provided.
         key_type = args[0] if args else str
         val_type = args[1] if len(args) > 1 else int
         return {
-            _generate_value(key_type, rng, depth=depth + 1): _generate_value(
+            generate_value(key_type, rng, depth=depth + 1): generate_value(
                 val_type, rng, depth=depth + 1
             )
             for _ in range(rng.randint(0, 2))
@@ -152,14 +158,14 @@ def _generate_value(annotation: object, rng: random.Random, *, depth: int = 0) -
         non_none = [a for a in args if a is not type(None)]
         if type(None) in args and rng.random() < 0.25:
             return None
-        return _generate_value(non_none[0] if non_none else args[0], rng, depth=depth + 1)
+        return generate_value(non_none[0] if non_none else args[0], rng, depth=depth + 1)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return {
-            name: _generate_value(info.annotation, rng, depth=depth + 1)
+            name: generate_value(info.annotation, rng, depth=depth + 1)
             for name, info in annotation.model_fields.items()
         }
 
-    raise _UnsupportedAnnotation(repr(annotation))
+    raise UnsupportedAnnotation(repr(annotation))
 
 
 def _generate_inputs(
@@ -181,10 +187,10 @@ def _generate_inputs(
         payload: dict[str, Any] = {}
         for name, info in schema.model_fields.items():
             try:
-                payload[name] = _generate_value(info.annotation, rng)
+                payload[name] = generate_value(info.annotation, rng)
             except RecursionError as exc:
                 raise AttestationInputError(name, repr(info.annotation)) from exc
-            except _UnsupportedAnnotation as exc:
+            except UnsupportedAnnotation as exc:
                 raise AttestationInputError(name, exc.annotation_repr) from exc
         # Validate by constructing the model; .model_dump() normalizes.
         try:

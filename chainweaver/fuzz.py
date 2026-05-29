@@ -41,7 +41,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from chainweaver.attest import _generate_value, _UnsupportedAnnotation
+from chainweaver.attest import UnsupportedAnnotation, generate_value
 from chainweaver.exceptions import ChainWeaverError
 from chainweaver.executor import ExecutionResult, FlowExecutor
 from chainweaver.flow import DAGFlow, Flow
@@ -461,8 +461,8 @@ class FlowFuzzer:
         payload: dict[str, Any] = {}
         for name, info in schema.model_fields.items():
             try:
-                payload[name] = _generate_value(info.annotation, rng)
-            except _UnsupportedAnnotation as exc:
+                payload[name] = generate_value(info.annotation, rng)
+            except UnsupportedAnnotation as exc:
                 raise FuzzConfigError(
                     f"cannot generate inputs for field '{name}' "
                     f"({exc.annotation_repr}); supply base_input"
@@ -473,9 +473,15 @@ class FlowFuzzer:
         if self.fault_config.active or self.fault_hook is not None:
             run_rng = random.Random(seed * 1_000_003 + case.index)
             hook = self.fault_hook or self._default_fault_hook()
-            run_executor = FlowExecutor(registry=self.executor.registry)
-            for tool in self.executor.registered_tools.values():
-                run_executor.register_tool(_wrap_tool_with_fault(tool, hook, run_rng))
+            # Preserve the executor's full configuration (middleware, caches,
+            # cost profile, redaction policy, decision callback, …) so fault
+            # injection does not silently change behavior versus the no-fault
+            # path (issue #220 review follow-up).
+            wrapped_tools = (
+                _wrap_tool_with_fault(tool, hook, run_rng)
+                for tool in self.executor.registered_tools.values()
+            )
+            run_executor = self.executor.with_replaced_tools(wrapped_tools)
             return run_executor.execute_flow(self.flow.name, case.initial_input)
         return self.executor.execute_flow(self.flow.name, case.initial_input)
 

@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   input), optionally injects malformed tool outputs via a seeded fault hook,
   executes the flow, and records any property violation as a replayable
   `ExecutionResult`. All randomness is seeded (`random.Random(seed)`) so runs
-  are reproducible; the executor stays randomness-free.
+  are reproducible; the executor stays randomness-free. Fault injection now runs
+  under a clone that preserves the executor's full configuration (middleware,
+  caches, cost profile, redaction policy, decision callback) via the new
+  `FlowExecutor.with_replaced_tools(...)`, and the schema-driven value generator
+  is shared as the supported `chainweaver.attest.generate_value`.
 - **Trace minimization** (#221): `minimize_failure(...)` delta-debugs a failing
   input down to the smallest reproducer that still violates a property,
   re-verifying every reduction via `FlowExecutor.execute_flow`.
@@ -25,7 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.flow.{yaml,yml,json}` file with `--property` (built-in name or `module:attr`
   path), `--runs`, `--seed`, `--input`/`--input-file`, `--output-fault-prob`,
   `--minimize`, and `--save-failures`. Exits non-zero on a violation; saves
-  redacted, replayable failure traces. Documented in `docs/cli.md`.
+  redacted, replayable failure traces. `--redact` (the default) also redacts
+  the failing/minimized inputs printed to stdout so secrets do not leak into CI
+  logs; duplicate `--property` names are rejected up front; and saved-failure
+  filenames are sanitized for cross-platform safety. Documented in
+  `docs/cli.md`.
 - **Trace-redaction helpers** (#217): `RedactionPolicy.redact_step_record` and
   `RedactionPolicy.redact_execution_result` return redacted copies of a
   `StepRecord` / `ExecutionResult` (used by `chainweaver fuzz --save-failures`

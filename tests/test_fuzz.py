@@ -21,6 +21,32 @@ from chainweaver import (
     Tool,
     minimize_failure,
 )
+from chainweaver import attest as attest_module
+from chainweaver.middleware import (
+    FlowEndContext,
+    FlowStartContext,
+    StepEndContext,
+    StepStartContext,
+)
+
+
+class _RecordingMiddleware:
+    """Records every middleware hook invocation, mirroring test_middleware.py."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, Any]] = []
+
+    def on_flow_start(self, ctx: FlowStartContext) -> None:
+        self.events.append(("flow_start", ctx))
+
+    def on_step_start(self, ctx: StepStartContext) -> None:
+        self.events.append(("step_start", ctx))
+
+    def on_step_end(self, ctx: StepEndContext) -> None:
+        self.events.append(("step_end", ctx))
+
+    def on_flow_end(self, ctx: FlowEndContext) -> None:
+        self.events.append(("flow_end", ctx))
 
 
 def _build() -> tuple[FlowExecutor, Flow]:
@@ -248,3 +274,58 @@ class TestBuiltinProperties:
         result = executor.execute_flow(flow.name, {"number": 2})
         assert BUILTIN_PROPERTIES["final_output_present"].holds(result)
         assert BUILTIN_PROPERTIES["flow_succeeds"].holds(result)
+
+
+class TestExecutorConfigPreservation:
+    """Fault injection must not silently drop executor configuration (#220 review)."""
+
+    def test_middleware_preserved_under_fault_injection(self) -> None:
+        executor, flow = _build()
+        rec = _RecordingMiddleware()
+        executor.add_middleware(rec)
+        fuzzer = FlowFuzzer(
+            executor=executor,
+            flow=flow,
+            properties=[BUILTIN_PROPERTIES["flow_succeeds"]],
+            fault_config=FaultConfig(output_fault_probability=1.0),
+        )
+        fuzzer.run(runs=3, seed=1)
+        # The per-case executor built for fault injection must reuse the
+        # configured middleware, so its hooks fire.  Before the fix it built a
+        # bare FlowExecutor and recorded nothing.
+        kinds = {kind for kind, _ in rec.events}
+        assert "flow_start" in kinds
+        assert "flow_end" in kinds
+
+    def test_with_replaced_tools_preserves_config_and_swaps_tools(self) -> None:
+        executor, flow = _build()
+        rec = _RecordingMiddleware()
+        executor.add_middleware(rec)
+
+        def _tripled(inp: NumberInput) -> dict[str, Any]:
+            return {"value": inp.number * 3}
+
+        replacement = Tool(
+            name="double",  # same name, different behavior
+            description="Actually triples.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_tripled,
+        )
+        clone = executor.with_replaced_tools([replacement])
+        result = clone.execute_flow(flow.name, {"number": 4})
+        assert result.final_output is not None
+        assert result.final_output["value"] == 12  # swapped tool ran
+        assert any(kind == "flow_end" for kind, _ in rec.events)  # config preserved
+
+
+class TestSharedSchemaGenerator:
+    """The schema-value generator is a supported public API (#220 review)."""
+
+    def test_generator_helpers_are_public(self) -> None:
+        from chainweaver.attest import UnsupportedAnnotation, generate_value
+
+        assert "generate_value" in attest_module.__all__
+        assert "UnsupportedAnnotation" in attest_module.__all__
+        assert callable(generate_value)
+        assert issubclass(UnsupportedAnnotation, Exception)

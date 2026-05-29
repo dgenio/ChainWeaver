@@ -481,7 +481,7 @@ chainweaver dump-schema --check --output schemas/flow.schema.json   # CI: fails 
 
 ### `fuzz`
 
-Property-based fuzzing for a flow file (issues #220, #221, #222). Generates `--runs` cases — either from the flow's `input_schema` or by mutating a `--input` base — executes the flow, and checks each `--property` (a generic invariant over the `ExecutionResult`) against the result. Optionally injects malformed tool outputs (`--output-fault-prob`), shrinks failing inputs to a minimal reproducer (`--minimize`, issue #221), and saves failing traces as replayable JSON, redacted by default (`--save-failures` / `--redact`, issue #217).
+Property-based fuzzing for a flow file (issues #220, #221, #222). Generates `--runs` cases — either from the flow's `input_schema` or by mutating a `--input` base — executes the flow, and checks each `--property` (a generic invariant over the `ExecutionResult`) against the result. Optionally injects malformed tool outputs (`--output-fault-prob`), shrinks failing inputs to a minimal reproducer (`--minimize`, issue #221), and saves failing traces as replayable JSON, redacted by default (`--save-failures` / `--redact`, issue #217). With `--redact` (the default) the failing and minimized inputs printed in the summary/table are redacted too, so secrets do not leak into CI logs; pass `--no-redact` for raw values. Each `--property` must resolve to a unique name.
 
 A run is **reproducible**: re-running with the same `--seed`, `--runs`, flow, and tools yields the same cases and failures.
 
@@ -502,7 +502,7 @@ chainweaver fuzz <file> [--tools MODULE...] [--property NAME|module:attr ...] [-
 | `--output-fault-prob` | `0.0` | Probability in `[0,1]` of corrupting a tool's output per call (`0` disables). |
 | `--minimize` / `--no-minimize` | `--no-minimize` | Shrink each failing input to a minimal reproducer. |
 | `--save-failures` | (off) | Directory to write failing `ExecutionResult` traces to (created if absent). |
-| `--redact` / `--no-redact` | `--redact` | Redact saved traces with the default `RedactionPolicy`. |
+| `--redact` / `--no-redact` | `--redact` | Redact saved traces **and emitted failing/minimized inputs** with the default `RedactionPolicy`. Use `--no-redact` for raw values. |
 | `--format` / `-f` | `table` | Output format: human-readable table or structured JSON. |
 
 **Exit codes**: `0` = no property violated, `1` = one or more violations found or a CLI-level error (bad arguments, malformed flow/input, unknown property), `2` = flow file, tools module, or property module not found / not importable.

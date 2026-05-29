@@ -75,8 +75,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import statistics
 import sys
+from collections import Counter
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
@@ -1862,7 +1864,10 @@ _FUZZ_MINIMIZE_OPTION = typer.Option(
 _FUZZ_REDACT_OPTION = typer.Option(
     True,
     "--redact/--no-redact",
-    help="Redact saved failure traces with the default RedactionPolicy (issue #217).",
+    help=(
+        "Redact saved failure traces and emitted failing/minimized inputs with "
+        "the default RedactionPolicy (issue #217). Use --no-redact for raw values."
+    ),
 )
 
 
@@ -1919,7 +1924,32 @@ def _resolve_fuzz_properties(specs: list[str]) -> list[FlowProperty]:
                 err=True,
             )
             raise typer.Exit(code=1)
+
+    # Reject duplicate property names up front.  Downstream the CLI builds
+    # ``{p.name: p for p in props}``, which would silently drop duplicates and
+    # could run minimization/checking against the wrong implementation.
+    counts = Counter(p.name for p in resolved)
+    duplicates = sorted(name for name, count in counts.items() if count > 1)
+    if duplicates:
+        typer.echo(
+            f"chainweaver: duplicate property name(s): {', '.join(duplicates)}. "
+            "Each --property must resolve to a unique name.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     return resolved
+
+
+def _sanitize_path_component(component: str) -> str:
+    """Make *component* safe to use as a single filesystem path segment.
+
+    Property names can contain ``:`` (from ``module:attr`` specs) and flow
+    names could contain ``/`` or ``\\``; these are invalid on Windows and can
+    alter path semantics elsewhere.  Replace any character outside
+    ``[A-Za-z0-9._-]`` with ``_`` and never return an empty string.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", component)
+    return cleaned or "_"
 
 
 @app.command("fuzz")
@@ -2019,19 +2049,29 @@ def fuzz_command(
         saved_path: str | None = None
         if save_failures is not None:
             out_trace = policy.redact_execution_result(trace) if redact else trace
-            filename = f"{flow.name}.{failure.property_name}.case{failure.case_index}.json"
+            filename = (
+                f"{_sanitize_path_component(flow.name)}."
+                f"{_sanitize_path_component(failure.property_name)}."
+                f"case{failure.case_index}.json"
+            )
             path = save_failures / filename
             path.write_text(out_trace.model_dump_json(indent=2) + "\n", encoding="utf-8")
             saved_path = str(path)
 
+        # Honor --redact for emitted inputs too: raw failing/minimized inputs
+        # in stdout/stderr can leak secrets into CI logs even when saved
+        # traces are redacted (issue #217 review follow-up).
+        emitted_initial = policy.redact(failure.initial_input) if redact else failure.initial_input
         record: dict[str, Any] = {
             "property": failure.property_name,
             "case_index": failure.case_index,
-            "initial_input": failure.initial_input,
+            "initial_input": emitted_initial,
             "check_error": failure.check_error,
         }
         if minimized_input is not None:
-            record["minimized_input"] = minimized_input
+            record["minimized_input"] = (
+                policy.redact(minimized_input) if redact else minimized_input
+            )
         if saved_path is not None:
             record["saved"] = saved_path
         failure_records.append(record)

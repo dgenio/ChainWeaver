@@ -19,7 +19,7 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -709,6 +709,41 @@ class FlowExecutor:
         compatibility reports, or attestation artifacts.
         """
         return dict(self._tools)
+
+    def with_replaced_tools(self, tools: Iterable[Tool]) -> FlowExecutor:
+        """Return a new executor sharing this one's configuration and registry.
+
+        The clone preserves every executor-level setting (cost profile,
+        redaction policy, trace recorder, middleware, step cache, checkpointer,
+        ``delete_on_success`` flag, and decision callback) but starts with an
+        empty tool set populated from *tools*.  Plugin discovery is not re-run,
+        because the caller passes the already-resolved tools explicitly.
+
+        This is used by the fuzzing harness to run a flow under the same
+        executor configuration with fault-injecting tool wrappers, so behavior
+        does not diverge depending on whether fault injection is enabled
+        (issue #220 review follow-up).
+
+        Args:
+            tools: Tools to register on the cloned executor.
+
+        Returns:
+            A new :class:`FlowExecutor` with matching configuration.
+        """
+        clone = FlowExecutor(
+            registry=self._registry,
+            cost_profile=self._cost_profile,
+            redaction_policy=self._redaction_policy,
+            trace_recorder=self._trace_recorder,
+            middleware=list(self._middleware),
+            step_cache=self._step_cache,
+            checkpointer=self._checkpointer,
+            delete_on_success=self._delete_on_success,
+            decision_callback=self._decision_callback,
+        )
+        for tool in tools:
+            clone.register_tool(tool)
+        return clone
 
     def get_drift_report(self) -> list[DriftInfo]:
         """Compare registered tools' current schema hashes against each flow's snapshot.

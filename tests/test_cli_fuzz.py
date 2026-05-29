@@ -47,6 +47,9 @@ def _write_module(dir_path: Path) -> str:
         "\n"
         "always_false = FlowProperty('always_false', lambda r: False, 'Never holds.')\n"
         "\n"
+        "def always_false_fn(r: Any) -> bool:\n"
+        "    return False\n"
+        "\n"
         "NOT_CALLABLE = 42\n",
         encoding="utf-8",
     )
@@ -270,6 +273,91 @@ class TestFuzzSaveAndRedact:
         # An always-false property lets the input shrink to nothing.
         assert len(record["minimized_input"]) <= len(record["initial_input"])
 
+    def test_emitted_inputs_redacted_by_default(
+        self, _env: tuple[Path, str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flow_path, module = _env
+        code = cli.main(
+            [
+                "fuzz",
+                str(flow_path),
+                "--tools",
+                module,
+                "--property",
+                f"{module}:always_false",
+                "--input",
+                '{"token": "topsecret"}',
+                "--runs",
+                "1",
+                "--format",
+                "json",
+            ]
+        )
+        assert code == 1
+        out = capsys.readouterr().out
+        # Even without --save-failures, raw inputs printed to stdout must not
+        # leak secrets into CI logs (issue #217 review follow-up).
+        assert "topsecret" not in out
+        record = json.loads(out)["failure_cases"][0]
+        assert record["initial_input"]["token"] == "***REDACTED***"
+
+    def test_emitted_inputs_raw_with_no_redact(
+        self, _env: tuple[Path, str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flow_path, module = _env
+        code = cli.main(
+            [
+                "fuzz",
+                str(flow_path),
+                "--tools",
+                module,
+                "--property",
+                f"{module}:always_false",
+                "--input",
+                '{"token": "topsecret"}',
+                "--runs",
+                "1",
+                "--no-redact",
+                "--format",
+                "json",
+            ]
+        )
+        assert code == 1
+        record = json.loads(capsys.readouterr().out)["failure_cases"][0]
+        assert record["initial_input"]["token"] == "topsecret"
+
+    def test_saved_filename_is_sanitized(
+        self, _env: tuple[Path, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flow_path, module = _env
+        out_dir = tmp_path / "sanitized"
+        # A callable property spec yields the name "module:always_false_fn",
+        # whose ':' is invalid in a Windows filename (issue #217 review
+        # follow-up).  It must be sanitized before building the path.
+        code = cli.main(
+            [
+                "fuzz",
+                str(flow_path),
+                "--tools",
+                module,
+                "--property",
+                f"{module}:always_false_fn",
+                "--input",
+                '{"token": "abc"}',
+                "--runs",
+                "1",
+                "--save-failures",
+                str(out_dir),
+                "--format",
+                "json",
+            ]
+        )
+        assert code == 1
+        saved = list(out_dir.glob("*.json"))
+        assert len(saved) == 1
+        assert ":" not in saved[0].name
+        assert f"{module}_always_false_fn" in saved[0].name
+
 
 class TestFuzzErrors:
     def test_missing_flow_file_returns_two(
@@ -329,6 +417,29 @@ class TestFuzzErrors:
         )
         assert code == 1
         assert "not found in module" in capsys.readouterr().err
+
+    def test_duplicate_property_names_returns_one(
+        self, _env: tuple[Path, str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flow_path, module = _env
+        # The same property twice would silently collapse in props_by_name and
+        # could run minimization against the wrong impl (#222 review follow-up).
+        code = cli.main(
+            [
+                "fuzz",
+                str(flow_path),
+                "--tools",
+                module,
+                "--property",
+                "flow_succeeds",
+                "--property",
+                "flow_succeeds",
+                "--input",
+                '{"token": "abc"}',
+            ]
+        )
+        assert code == 1
+        assert "duplicate property name" in capsys.readouterr().err
 
     def test_output_fault_injection_via_cli(
         self, _env: tuple[Path, str], capsys: pytest.CaptureFixture[str]
