@@ -123,6 +123,17 @@ from chainweaver.flow import (
     RetryPolicy,
     validate_dag_topology,
 )
+from chainweaver.fuzz import (
+    BUILTIN_PROPERTIES,
+    FaultConfig,
+    FlowFuzzer,
+    FlowProperty,
+    FuzzCase,
+    FuzzConfigError,
+    FuzzFailure,
+    FuzzReport,
+    minimize_failure,
+)
 from chainweaver.log_utils import RedactionPolicy
 from chainweaver.middleware import (
     BaseMiddleware,
@@ -167,6 +178,7 @@ logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 __version__ = "0.11.0"
 
 __all__ = [
+    "BUILTIN_PROPERTIES",
     "AttestationInputError",
     "AttestationReport",
     "BaseDecisionCallback",
@@ -197,6 +209,7 @@ __all__ = [
     "ExecutionPlan",
     "ExecutionResult",
     "ExecutionSnapshot",
+    "FaultConfig",
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
@@ -210,13 +223,19 @@ __all__ = [
     "FlowExecutionError",
     "FlowExecutor",
     "FlowExecutorMiddleware",
+    "FlowFuzzer",
     "FlowNotFoundError",
+    "FlowProperty",
     "FlowRegistry",
     "FlowSerializationError",
     "FlowStartContext",
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "FuzzCase",
+    "FuzzConfigError",
+    "FuzzFailure",
+    "FuzzReport",
     "InMemoryCheckpointer",
     "InMemoryStepCache",
     "InMemoryStore",
@@ -273,6 +292,7 @@ __all__ = [
     "flow_to_mermaid",
     "flow_to_yaml",
     "merge_safety",
+    "minimize_failure",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",

@@ -682,6 +682,7 @@ All errors are typed and traceable:
 | `PluginDiscoveryError` | Strict-mode plugin discovery (`discover_tools(strict=True)` / `discover_flows(strict=True)`) hits a misbehaving entry-point loader |
 | `ContribError` | A `chainweaver.contrib.tools` tool hits a contract violation (missing JSON-pointer key, wrong predicate shape, assertion mismatch) |
 | `FixtureStaleError` | A `record_then_replay` replay invocation cannot be matched to a recording (missing/stale fixture) |
+| `FuzzConfigError` | A property-based fuzzing run is misconfigured (no properties, `runs < 1`, a flow with no `input_schema` and no base input, or an unsupported input-field type) |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -877,6 +878,11 @@ chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.jso
 
 # Check saved flows for tool schema drift against the live registry.
 chainweaver doctor flows/ --check-drift --tools my_pkg.tools
+
+# Property-based fuzzing: generate cases, check invariants, save/minimize failures.
+chainweaver fuzz flows/etl.flow.yaml --tools my_pkg.tools \
+  --property my_pkg.props:no_unauthorized_action --runs 1000 --seed 42 \
+  --minimize --save-failures failures/
 ```
 
 `run` is the fastest path from a fresh install to seeing a flow execute:
