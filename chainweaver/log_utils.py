@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from chainweaver.executor import ExecutionResult, StepRecord
 
 DEFAULT_REDACT_KEYS: frozenset[str] = frozenset(
     {"password", "token", "api_key", "apikey", "secret", "authorization"}
@@ -55,6 +58,41 @@ class RedactionPolicy(BaseModel):
         result = self._apply(data)
         assert isinstance(result, dict)
         return result
+
+    def redact_step_record(self, step: StepRecord) -> StepRecord:
+        """Return a copy of *step* with redacted ``inputs`` and ``outputs`` (issue #217).
+
+        Hosts that persist :class:`~chainweaver.executor.StepRecord` instances
+        (e.g. saving a failing fuzz trace) can mask sensitive values without
+        walking the trace themselves.
+
+        ``StepRecord`` is a Pydantic model — its error is carried as the
+        ``error_type`` / ``error_message`` strings, not as a live exception —
+        so this uses :meth:`pydantic.BaseModel.model_copy` with an ``update``
+        rather than ``dataclasses.replace``.  Non-redacted fields (timestamps,
+        durations, retry metadata) are preserved unchanged.
+        """
+        update: dict[str, Any] = {"inputs": self.redact(step.inputs)}
+        if step.outputs is not None:
+            update["outputs"] = self.redact(step.outputs)
+        return step.model_copy(update=update)
+
+    def redact_execution_result(self, result: ExecutionResult) -> ExecutionResult:
+        """Return a copy of *result* with its trace redacted (issue #217).
+
+        Redacts every :class:`~chainweaver.executor.StepRecord` in
+        ``execution_log`` (via :meth:`redact_step_record`) as well as the
+        top-level ``initial_input`` and ``final_output`` so the returned trace
+        is safe to persist in full.  All other fields (``trace_id``,
+        timestamps, ``cost_report``, …) are preserved unchanged.
+        """
+        update: dict[str, Any] = {
+            "execution_log": [self.redact_step_record(s) for s in result.execution_log],
+            "initial_input": self.redact(result.initial_input),
+        }
+        if result.final_output is not None:
+            update["final_output"] = self.redact(result.final_output)
+        return result.model_copy(update=update)
 
     # ------------------------------------------------------------------
     # Internal recursive helpers

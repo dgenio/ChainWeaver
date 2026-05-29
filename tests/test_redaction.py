@@ -213,3 +213,100 @@ class TestExecutorIntegration:
         start_message = start_messages[0]
         assert "s3cret" not in start_message
         assert "***REDACTED***" in start_message
+
+
+# ---------------------------------------------------------------------------
+# Trace-redaction helpers (issue #217)
+# ---------------------------------------------------------------------------
+
+
+def _run_secret_flow() -> Any:
+    """Run a single-step flow whose trace carries a sensitive ``token``."""
+
+    class _In(BaseModel):
+        token: str
+
+    class _Out(BaseModel):
+        token: str
+        ok: bool
+
+    def _echo(inp: _In) -> dict[str, Any]:
+        return {"token": inp.token, "ok": True}
+
+    flow = Flow(
+        name="secret_flow",
+        version="0.1.0",
+        description="Echoes a token.",
+        steps=[FlowStep(tool_name="echo")],
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        Tool(
+            name="echo",
+            description="Echoes.",
+            input_schema=_In,
+            output_schema=_Out,
+            fn=_echo,
+        )
+    )
+    return ex.execute_flow("secret_flow", {"token": "s3cret"})
+
+
+class TestRedactStepRecord:
+    def test_masks_inputs_and_outputs(self) -> None:
+        result = _run_secret_flow()
+        policy = RedactionPolicy()
+        step = result.execution_log[0]
+        redacted = policy.redact_step_record(step)
+        assert redacted.inputs["token"] == policy.redact_replacement
+        assert redacted.outputs is not None
+        assert redacted.outputs["token"] == policy.redact_replacement
+        assert redacted.outputs["ok"] is True
+
+    def test_returns_a_copy_and_preserves_metadata(self) -> None:
+        result = _run_secret_flow()
+        policy = RedactionPolicy()
+        step = result.execution_log[0]
+        redacted = policy.redact_step_record(step)
+        # Original is untouched (audit-grade contract).
+        assert step.inputs["token"] == "s3cret"
+        # Non-redacted metadata is preserved unchanged.
+        assert redacted.tool_name == step.tool_name
+        assert redacted.step_index == step.step_index
+        assert redacted.started_at == step.started_at
+        assert redacted.success == step.success
+
+    def test_none_outputs_preserved(self) -> None:
+        policy = RedactionPolicy()
+        result = _run_secret_flow()
+        step = result.execution_log[0].model_copy(update={"outputs": None})
+        redacted = policy.redact_step_record(step)
+        assert redacted.outputs is None
+        assert redacted.inputs["token"] == policy.redact_replacement
+
+
+class TestRedactExecutionResult:
+    def test_redacts_log_initial_and_final(self) -> None:
+        result = _run_secret_flow()
+        policy = RedactionPolicy()
+        redacted = policy.redact_execution_result(result)
+        assert redacted.initial_input["token"] == policy.redact_replacement
+        assert redacted.final_output is not None
+        assert redacted.final_output["token"] == policy.redact_replacement
+        assert redacted.execution_log[0].outputs is not None
+        assert redacted.execution_log[0].outputs["token"] == policy.redact_replacement
+        # Original trace is unmodified.
+        assert result.initial_input["token"] == "s3cret"
+
+    def test_preserves_trace_id_and_serializes(self) -> None:
+        result = _run_secret_flow()
+        policy = RedactionPolicy()
+        redacted = policy.redact_execution_result(result)
+        assert redacted.trace_id == result.trace_id
+        assert redacted.success == result.success
+        # The redacted trace still round-trips through JSON.
+        dumped = redacted.model_dump_json()
+        assert "s3cret" not in dumped
+        assert policy.redact_replacement in dumped

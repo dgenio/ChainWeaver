@@ -2,6 +2,7 @@
   "__all__": [
     "AttestationInputError",
     "AttestationReport",
+    "BUILTIN_PROPERTIES",
     "BaseDecisionCallback",
     "BaseMiddleware",
     "ChainAnalyzer",
@@ -30,6 +31,7 @@
     "ExecutionPlan",
     "ExecutionResult",
     "ExecutionSnapshot",
+    "FaultConfig",
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
@@ -43,13 +45,19 @@
     "FlowExecutionError",
     "FlowExecutor",
     "FlowExecutorMiddleware",
+    "FlowFuzzer",
     "FlowNotFoundError",
+    "FlowProperty",
     "FlowRegistry",
     "FlowSerializationError",
     "FlowStartContext",
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "FuzzCase",
+    "FuzzConfigError",
+    "FuzzFailure",
+    "FuzzReport",
     "InMemoryCheckpointer",
     "InMemoryStepCache",
     "InMemoryStore",
@@ -106,6 +114,7 @@
     "flow_to_mermaid",
     "flow_to_yaml",
     "merge_safety",
+    "minimize_failure",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",
@@ -144,6 +153,11 @@
       },
       "module": "chainweaver.attest",
       "qualname": "AttestationReport"
+    },
+    "BUILTIN_PROPERTIES": {
+      "kind": "dict",
+      "module": null,
+      "qualname": null
     },
     "BaseDecisionCallback": {
       "kind": "class",
@@ -388,6 +402,12 @@
       "module": "chainweaver.checkpoint",
       "qualname": "ExecutionSnapshot"
     },
+    "FaultConfig": {
+      "kind": "class",
+      "module": "chainweaver.fuzz",
+      "qualname": "FaultConfig",
+      "signature": "(output_fault_probability: float = 0.0) -> None"
+    },
     "FileCheckpointer": {
       "kind": "class",
       "module": "chainweaver.checkpoint",
@@ -496,11 +516,23 @@
       "qualname": "FlowExecutorMiddleware",
       "signature": "(*args, **kwargs)"
     },
+    "FlowFuzzer": {
+      "kind": "class",
+      "module": "chainweaver.fuzz",
+      "qualname": "FlowFuzzer",
+      "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, properties: list[FlowProperty], fault_config: FaultConfig = <factory>, fault_hook: FaultHook | None = None) -> None"
+    },
     "FlowNotFoundError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
       "qualname": "FlowNotFoundError",
       "signature": "(flow_name: str, *, version: str | None = None) -> None"
+    },
+    "FlowProperty": {
+      "kind": "class",
+      "module": "chainweaver.fuzz",
+      "qualname": "FlowProperty",
+      "signature": "(name: str, check: PropertyCheck, description: str = '') -> None"
     },
     "FlowRegistry": {
       "kind": "class",
@@ -551,6 +583,45 @@
       },
       "module": "chainweaver.flow",
       "qualname": "FlowStep"
+    },
+    "FuzzCase": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "index": "int",
+        "initial_input": "dict[str, Any]"
+      },
+      "module": "chainweaver.fuzz",
+      "qualname": "FuzzCase"
+    },
+    "FuzzConfigError": {
+      "kind": "class",
+      "module": "chainweaver.fuzz",
+      "qualname": "FuzzConfigError",
+      "signature": "(detail: str) -> None"
+    },
+    "FuzzFailure": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "case_index": "int",
+        "check_error": "str | NoneType",
+        "initial_input": "dict[str, Any]",
+        "property_name": "str",
+        "result": "chainweaver.executor.ExecutionResult"
+      },
+      "module": "chainweaver.fuzz",
+      "qualname": "FuzzFailure"
+    },
+    "FuzzReport": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "failures": "list[chainweaver.fuzz.FuzzFailure]",
+        "flow_name": "str",
+        "property_names": "list[str]",
+        "runs": "int",
+        "seed": "int"
+      },
+      "module": "chainweaver.fuzz",
+      "qualname": "FuzzReport"
     },
     "InMemoryCheckpointer": {
       "kind": "class",
@@ -969,6 +1040,12 @@
       "module": "chainweaver.contracts",
       "qualname": "merge_safety",
       "signature": "(contracts: Iterable[ToolSafetyContract], *, default: ToolSafetyContract | None = None) -> ToolSafetyContract"
+    },
+    "minimize_failure": {
+      "kind": "function",
+      "module": "chainweaver.fuzz",
+      "qualname": "minimize_failure",
+      "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, failing_input: dict[str, Any], prop: FlowProperty, *, max_rounds: int = 50) -> dict[str, Any]"
     },
     "result_to_mermaid": {
       "kind": "function",
