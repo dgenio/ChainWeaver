@@ -354,9 +354,15 @@ class FlowFuzzer:
 
     Args:
         executor: A :class:`~chainweaver.executor.FlowExecutor` with the flow's
-            tools registered.  When fault injection is active a *fresh* executor
-            is built per case (sharing this one's registry) so the caller's
-            executor is never mutated.
+            tools registered.  When fault injection is active, a per-case
+            executor is created via
+            :meth:`~chainweaver.executor.FlowExecutor.with_replaced_tools`,
+            preserving this executor's full configuration (middleware,
+            step_cache, cost_profile, redaction_policy, decision_callback) while
+            swapping in fault-wrapped tools, so the caller's executor is never
+            mutated.  Note: if a ``step_cache`` is configured, cached tool
+            outputs may be returned instead of re-running the fault-wrapped
+            tool, which can mask per-case faults for repeated inputs.
         flow: The flow to fuzz.  Its ``input_schema`` drives input generation
             when no ``base_input`` is supplied to :meth:`run`.
         properties: Invariants to check against every result (at least one).
