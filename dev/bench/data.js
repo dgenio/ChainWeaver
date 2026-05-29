@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780032963876,
+  "lastUpdate": 1780088867303,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -1152,6 +1152,78 @@ window.BENCHMARK_DATA = {
             "value": 0.2412840000260985,
             "unit": "ms",
             "extra": "min=0.23ms max=0.31ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3e3ac00af8637f60e3b40172012174b6250872b7",
+          "message": "Merge pull request #223 from dgenio/claude/github-issues-triage-YrEz0\n\nfeat: add property-based fuzzing harness, trace minimization, and CLI (#220, #221, #222, #217)",
+          "timestamp": "2026-05-29T22:06:37+01:00",
+          "tree_id": "212ed202f18af50309e95731e4c7e9df0c7c852e",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/3e3ac00af8637f60e3b40172012174b6250872b7"
+        },
+        "date": 1780088866969,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.14003100000081758,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.25ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.08146199999714554,
+            "unit": "ms",
+            "extra": "min=0.07ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.2745909999930518,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.45ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.14781499999116932,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.94664000000841,
+            "unit": "ms",
+            "extra": "min=101.83ms max=101.98ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.35057200004473543,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.36ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.03791199998682,
+            "unit": "ms",
+            "extra": "min=250.96ms max=251.11ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2267619999827275,
+            "unit": "ms",
+            "extra": "min=0.22ms max=0.24ms repeats=5"
           }
         ]
       }
