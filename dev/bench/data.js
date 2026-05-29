@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780007416750,
+  "lastUpdate": 1780032963876,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -1080,6 +1080,78 @@ window.BENCHMARK_DATA = {
             "value": 0.32328000003190027,
             "unit": "ms",
             "extra": "min=0.28ms max=0.40ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "distinct": true,
+          "id": "6fd70ffe4e5994bd5b5cda193ad3fb6267d508ad",
+          "message": "Release 0.11.0: framework recipes and workflow examples\n\n- Add framework recipes and workflow-template examples (#204-#213)\n- LangGraph and OpenAI Agents integration examples\n- Release readiness and policy evaluation DAG flows\n- Enhanced cookbook with smoke tests\n- Version bump: 0.10.0 -> 0.11.0",
+          "timestamp": "2026-05-29T06:34:43+01:00",
+          "tree_id": "5595de7757a7cea191107af4e4aa63fa2974c4dd",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/6fd70ffe4e5994bd5b5cda193ad3fb6267d508ad"
+        },
+        "date": 1780032963097,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.17184000000725064,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.23ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.10865300009754719,
+            "unit": "ms",
+            "extra": "min=0.09ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.21816100002070016,
+            "unit": "ms",
+            "extra": "min=0.21ms max=0.38ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.12229499998284155,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.30087599998205,
+            "unit": "ms",
+            "extra": "min=101.25ms max=102.31ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.2736400000458161,
+            "unit": "ms",
+            "extra": "min=0.25ms max=0.61ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.02954100009356,
+            "unit": "ms",
+            "extra": "min=250.94ms max=251.32ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2412840000260985,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.31ms repeats=5"
           }
         ]
       }
