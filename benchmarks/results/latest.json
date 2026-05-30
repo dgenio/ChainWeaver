@@ -1,0 +1,349 @@
+{
+  "environment": {
+    "python_version": "3.11.15",
+    "chainweaver_version": "0.11.0",
+    "os": "Linux 6.18.5",
+    "commit_sha": "044fdc09a0bb27ff53a6793c696ed2356aa75413"
+  },
+  "parameters": {
+    "latency_cases": [
+      {
+        "n_steps": 2,
+        "llm_delay_ms": 100.0,
+        "tool_delay_ms": 0.0
+      },
+      {
+        "n_steps": 5,
+        "llm_delay_ms": 200.0,
+        "tool_delay_ms": 0.0
+      },
+      {
+        "n_steps": 10,
+        "llm_delay_ms": 200.0,
+        "tool_delay_ms": 10.0
+      }
+    ],
+    "latency_repeats": 3,
+    "correctness_runs": 100,
+    "cost_provider": "anthropic",
+    "cost_model": "claude-sonnet-4-6"
+  },
+  "latency": {
+    "repeats": 3,
+    "cases": [
+      {
+        "n_steps": 2,
+        "llm_delay_ms": 100.0,
+        "tool_delay_ms": 0.0,
+        "naive": {
+          "total_duration_ms": {
+            "median": 100.33625199992002,
+            "min": 100.3220270000611,
+            "max": 100.3820570000471
+          },
+          "tool_execution_ms": {
+            "median": 0.1406369999585877,
+            "min": 0.12475500000164175,
+            "max": 0.16047500002969173
+          },
+          "overhead_ms": {
+            "median": 100.19727200005946,
+            "min": 100.17577699989033,
+            "max": 100.24142000008851
+          },
+          "approach": "naive",
+          "n_steps": 2,
+          "llm_delay_ms": 100.0,
+          "tool_delay_ms": 0.0,
+          "llm_calls_count": 1,
+          "final_value": 2
+        },
+        "compiled": {
+          "total_duration_ms": {
+            "median": 0.24631600001612242,
+            "min": 0.19137900005716801,
+            "max": 0.29109800004789577
+          },
+          "tool_execution_ms": {
+            "median": 0.07747300003302371,
+            "min": 0.06532299994432833,
+            "max": 0.08131799995680922
+          },
+          "overhead_ms": {
+            "median": 0.1649980000593132,
+            "min": 0.12605600011283968,
+            "max": 0.21362500001487206
+          },
+          "approach": "compiled",
+          "n_steps": 2,
+          "llm_delay_ms": 0.0,
+          "tool_delay_ms": 0.0,
+          "llm_calls_count": 0,
+          "final_value": 2
+        },
+        "median_speedup_factor": 407.3476834365311,
+        "llm_calls_avoided": 1
+      },
+      {
+        "n_steps": 5,
+        "llm_delay_ms": 200.0,
+        "tool_delay_ms": 0.0,
+        "naive": {
+          "total_duration_ms": {
+            "median": 801.1177260000295,
+            "min": 800.939484999958,
+            "max": 801.1715019999883
+          },
+          "tool_execution_ms": {
+            "median": 0.433605000011994,
+            "min": 0.3993699998545708,
+            "max": 0.460211999893545
+          },
+          "overhead_ms": {
+            "median": 800.6841210000175,
+            "min": 800.5401150001035,
+            "max": 800.7112900000948
+          },
+          "approach": "naive",
+          "n_steps": 5,
+          "llm_delay_ms": 200.0,
+          "tool_delay_ms": 0.0,
+          "llm_calls_count": 4,
+          "final_value": 5
+        },
+        "compiled": {
+          "total_duration_ms": {
+            "median": 0.34732500000700384,
+            "min": 0.2752489999693353,
+            "max": 0.44986900002186303
+          },
+          "tool_execution_ms": {
+            "median": 0.12399099989579554,
+            "min": 0.10317700025552767,
+            "max": 0.1387490001434344
+          },
+          "overhead_ms": {
+            "median": 0.2233340001112083,
+            "min": 0.1720719997138076,
+            "max": 0.31111999987842864
+          },
+          "approach": "compiled",
+          "n_steps": 5,
+          "llm_delay_ms": 0.0,
+          "tool_delay_ms": 0.0,
+          "llm_calls_count": 0,
+          "final_value": 5
+        },
+        "median_speedup_factor": 2306.536316083999,
+        "llm_calls_avoided": 4
+      },
+      {
+        "n_steps": 10,
+        "llm_delay_ms": 200.0,
+        "tool_delay_ms": 10.0,
+        "naive": {
+          "total_duration_ms": {
+            "median": 1904.359129999989,
+            "min": 1904.0812000000642,
+            "max": 1904.5752910000147
+          },
+          "tool_execution_ms": {
+            "median": 102.77336500018919,
+            "min": 102.65210400007163,
+            "max": 102.90038600010121
+          },
+          "overhead_ms": {
+            "median": 1801.5857649997997,
+            "min": 1801.4290959999926,
+            "max": 1801.6749049999135
+          },
+          "approach": "naive",
+          "n_steps": 10,
+          "llm_delay_ms": 200.0,
+          "tool_delay_ms": 10.0,
+          "llm_calls_count": 9,
+          "final_value": 10
+        },
+        "compiled": {
+          "total_duration_ms": {
+            "median": 102.94998300003044,
+            "min": 102.77997499997582,
+            "max": 103.11211800001274
+          },
+          "tool_execution_ms": {
+            "median": 102.4561880001329,
+            "min": 102.30855499980862,
+            "max": 102.56801399998494
+          },
+          "overhead_ms": {
+            "median": 0.4937949998975455,
+            "min": 0.47142000016719976,
+            "max": 0.5441040000278008
+          },
+          "approach": "compiled",
+          "n_steps": 10,
+          "llm_delay_ms": 0.0,
+          "tool_delay_ms": 10.0,
+          "llm_calls_count": 0,
+          "final_value": 10
+        },
+        "median_speedup_factor": 18.497906211401958,
+        "llm_calls_avoided": 9
+      }
+    ]
+  },
+  "decisions_avoided": 14,
+  "cost": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6",
+    "price_as_of": "2026-05-01",
+    "priced_steps": 10,
+    "llm_calls_avoided": 9,
+    "cost_saved_usd": 0.06075
+  },
+  "correctness": {
+    "runs": 100,
+    "profile": {
+      "hallucination_rate": 0.05,
+      "data_loss_rate": 0.1,
+      "type_corruption_rate": 0.03,
+      "schema_drift_rate": 0.02,
+      "routing_variance_rate": 0.08,
+      "seed": 1234
+    },
+    "cases": [
+      {
+        "scenario": "numeric_pipeline",
+        "n_steps": 4,
+        "naive": {
+          "approach": "naive",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 (4 steps)",
+          "total_runs": 100,
+          "successful_runs": 62,
+          "field_hallucinations": 20,
+          "data_loss_events": 29,
+          "type_corruptions": 7,
+          "schema_drift_events": 2,
+          "routing_inconsistencies": 16,
+          "corruption_rate": 0.61,
+          "determinism_rate": 0.53,
+          "data_integrity_score": 0.39
+        },
+        "compiled": {
+          "approach": "compiled",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 (4 steps)",
+          "total_runs": 100,
+          "successful_runs": 100,
+          "field_hallucinations": 0,
+          "data_loss_events": 0,
+          "type_corruptions": 0,
+          "schema_drift_events": 0,
+          "routing_inconsistencies": 0,
+          "corruption_rate": 0.0,
+          "determinism_rate": 1.0,
+          "data_integrity_score": 1.0
+        },
+        "corruption_eliminated": 0.61
+      },
+      {
+        "scenario": "data_enrichment",
+        "n_steps": 4,
+        "naive": {
+          "approach": "naive",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 (4 steps)",
+          "total_runs": 100,
+          "successful_runs": 62,
+          "field_hallucinations": 20,
+          "data_loss_events": 29,
+          "type_corruptions": 7,
+          "schema_drift_events": 2,
+          "routing_inconsistencies": 16,
+          "corruption_rate": 0.61,
+          "determinism_rate": 0.53,
+          "data_integrity_score": 0.39
+        },
+        "compiled": {
+          "approach": "compiled",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 (4 steps)",
+          "total_runs": 100,
+          "successful_runs": 100,
+          "field_hallucinations": 0,
+          "data_loss_events": 0,
+          "type_corruptions": 0,
+          "schema_drift_events": 0,
+          "routing_inconsistencies": 0,
+          "corruption_rate": 0.0,
+          "determinism_rate": 1.0,
+          "data_integrity_score": 1.0
+        },
+        "corruption_eliminated": 0.61
+      },
+      {
+        "scenario": "long_chain",
+        "n_steps": 10,
+        "naive": {
+          "approach": "naive",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 -> inc_4 -> inc_5 -> inc_6 -> inc_7 -> inc_8 -> inc_9 (10 steps)",
+          "total_runs": 100,
+          "successful_runs": 24,
+          "field_hallucinations": 26,
+          "data_loss_events": 54,
+          "type_corruptions": 19,
+          "schema_drift_events": 3,
+          "routing_inconsistencies": 31,
+          "corruption_rate": 0.96,
+          "determinism_rate": 0.16,
+          "data_integrity_score": 0.04
+        },
+        "compiled": {
+          "approach": "compiled",
+          "chain": "inc_0 -> inc_1 -> inc_2 -> inc_3 -> inc_4 -> inc_5 -> inc_6 -> inc_7 -> inc_8 -> inc_9 (10 steps)",
+          "total_runs": 100,
+          "successful_runs": 100,
+          "field_hallucinations": 0,
+          "data_loss_events": 0,
+          "type_corruptions": 0,
+          "schema_drift_events": 0,
+          "routing_inconsistencies": 0,
+          "corruption_rate": 0.0,
+          "determinism_rate": 1.0,
+          "data_integrity_score": 1.0
+        },
+        "corruption_eliminated": 0.96
+      }
+    ],
+    "compounding": [
+      {
+        "n_steps": 2,
+        "naive_corruption_rate": 0.34,
+        "naive_success_rate": 0.72
+      },
+      {
+        "n_steps": 4,
+        "naive_corruption_rate": 0.61,
+        "naive_success_rate": 0.62
+      },
+      {
+        "n_steps": 6,
+        "naive_corruption_rate": 0.75,
+        "naive_success_rate": 0.39
+      },
+      {
+        "n_steps": 8,
+        "naive_corruption_rate": 0.88,
+        "naive_success_rate": 0.26
+      },
+      {
+        "n_steps": 10,
+        "naive_corruption_rate": 0.96,
+        "naive_success_rate": 0.24
+      }
+    ]
+  },
+  "caveats": [
+    "Tools are synthetic and LLM round-trips are simulated with time.sleep \u2014 the latency figures are a proxy for model-delay only, not a real provider measurement.",
+    "Cost-avoided dollars are an estimate priced against a dated PROVIDER_PRICES snapshot; they scale with the assumed tokens-per-call.",
+    "Corruption rates come from a configurable, seeded model, not from live LLM behaviour.",
+    "No cross-framework comparison is implied; these benchmarks measure compiled vs naive chaining only."
+  ]
+}

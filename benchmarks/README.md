@@ -143,3 +143,70 @@ python benchmarks/bench_naive_vs_compiled.py --repeats 5 --output benchmarks/bas
 
 Absolute numbers vary across machines; the baseline is a relative
 reference, not a CI gate.
+
+---
+
+## Correctness benchmark (`bench_correctness.py`, issue #103)
+
+Where the latency benchmark argues compiled flows are *faster*, this one
+argues they are *safer*. When an LLM mediates the data handed between
+tools it introduces structural corruption that schema-validated compiled
+execution eliminates by construction:
+
+| Corruption type | What the naive simulation does |
+|-----------------|--------------------------------|
+| Field hallucination | Adds a fabricated field the source never produced |
+| Data loss | Drops a required field |
+| Type corruption | Changes a field's type (`int` → `str`) |
+| Schema drift | Renames a field (`value` → `Value`, snake → camel) |
+| Routing inconsistency | Picks a different next tool on some runs |
+
+```bash
+# Default: 3 scenarios (numeric, data-enrichment, long-chain) × 100 runs
+python benchmarks/bench_correctness.py
+
+# Reproducible with an explicit seed; write the machine-readable JSON
+python benchmarks/bench_correctness.py --runs 500 --seed 7 \
+    --output results/correctness.json
+```
+
+The corruption model is **fully seeded** (`LLMCorruptionProfile.seed`) so
+runs are reproducible; no real LLM is called. Per-event rates are
+configurable and documented as estimates, not measurements. The compiled
+path runs the identical chain through `FlowExecutor` and reports **zero**
+corruption across every run. The report also includes a
+"corruption compounds" table showing how the naive corruption rate grows
+with chain length.
+
+---
+
+## Aggregate report (`report.py`, issue #207)
+
+Packages the latency, decisions-avoided, cost-avoided, and correctness
+numbers into versioned artifacts so README/docs claims cite generated
+output instead of hand-written figures:
+
+```bash
+python benchmarks/report.py                       # writes benchmarks/results/
+python benchmarks/report.py --output-dir docs/_bench --correctness-runs 200
+```
+
+Outputs:
+
+| Artifact | Purpose |
+|----------|---------|
+| `results/latest.json` | Machine-readable aggregate (latency + cost + correctness + environment metadata + caveats). |
+| `results/latest.md` | Human-readable report for docs/README inclusion. |
+
+Cost-avoided dollars are priced against the maintained
+`chainweaver.cost.PROVIDER_PRICES` table (issue #156); the report records
+the snapshot's `as_of` date. Every report embeds environment metadata
+(Python version, ChainWeaver version, OS, commit SHA) and an explicit
+caveats list — reproducibility matters more than impressive numbers, and
+no benchmark requires network access, API keys, or paid LLM calls.
+
+`results/latest.{json,md}` record the commit they were generated against;
+regenerate them whenever the numbers should be refreshed and commit the
+result. The report format is guarded by
+`tests/test_benchmark_artifacts.py`, so a shape change that breaks
+`latest.json` fails CI.

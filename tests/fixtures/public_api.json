@@ -18,6 +18,7 @@
     "ConditionalEdge",
     "ContribError",
     "CostProfile",
+    "CostProfileError",
     "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
@@ -69,8 +70,10 @@
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "PROVIDER_PRICES",
     "PluginDiscoveryError",
     "PredicateSyntaxError",
+    "PriceSnap",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
@@ -113,6 +116,7 @@
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "lookup_price",
     "merge_safety",
     "minimize_failure",
     "result_to_mermaid",
@@ -251,10 +255,19 @@
       "model_fields": {
         "avg_llm_latency_ms": "float",
         "avg_tokens_per_call": "float",
-        "cost_per_token_usd": "float"
+        "cost_per_token_usd": "float",
+        "model": "str | NoneType",
+        "price_as_of": "str | NoneType",
+        "provider": "str | NoneType"
       },
       "module": "chainweaver.cost",
       "qualname": "CostProfile"
+    },
+    "CostProfileError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "CostProfileError",
+      "signature": "(provider: str, model: str, detail: str) -> None"
     },
     "CostReport": {
       "kind": "pydantic-model",
@@ -701,6 +714,11 @@
       "module": "chainweaver.observation",
       "qualname": "ObservedTrace"
     },
+    "PROVIDER_PRICES": {
+      "kind": "mappingproxy",
+      "module": null,
+      "qualname": null
+    },
     "PluginDiscoveryError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -712,6 +730,16 @@
       "module": "chainweaver.exceptions",
       "qualname": "PredicateSyntaxError",
       "signature": "(predicate: str, detail: str) -> None"
+    },
+    "PriceSnap": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "as_of": "str",
+        "input_per_mtok": "float",
+        "output_per_mtok": "float"
+      },
+      "module": "chainweaver.cost",
+      "qualname": "PriceSnap"
     },
     "RedactionPolicy": {
       "kind": "pydantic-model",
@@ -1034,6 +1062,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_to_yaml",
       "signature": "(flow: AnyFlow) -> str"
+    },
+    "lookup_price": {
+      "kind": "function",
+      "module": "chainweaver.cost",
+      "qualname": "lookup_price",
+      "signature": "(provider: str, model: str) -> PriceSnap"
     },
     "merge_safety": {
       "kind": "function",
