@@ -95,6 +95,11 @@ class CorrectnessReport:
     routing_inconsistencies: int
 
     corruption_rate: float
+    # Consistency, not correctness: the frequency of the single most common
+    # (final_value, routing) outcome across runs (max(outcomes) / runs). 1.0
+    # means every run produced the same outcome; lower means the approach is
+    # non-reproducible. Compiled is always 1.0; naive degrades as the LLM
+    # corruption profile introduces divergent outcomes.
     determinism_rate: float
     data_integrity_score: float
 
@@ -298,14 +303,15 @@ def _build_executor(scenario: Scenario) -> tuple[FlowExecutor, str]:
 def benchmark_compiled_correctness(scenario: Scenario, *, runs: int) -> CorrectnessReport:
     """Execute the chain through :class:`FlowExecutor`; corruption is impossible."""
     executor, flow_name = _build_executor(scenario)
-    truth = scenario.initial_input[scenario.field_name] + scenario.n_steps
 
     successful = 0
     for _ in range(runs):
         result = executor.execute_flow(flow_name, dict(scenario.initial_input))
-        # Compiled execution never corrupts, so success implies the correct
-        # truth value; we still gate on it to keep the invariant explicit.
-        if result.success and (result.final_output or {}).get(scenario.field_name) == truth:
+        # successful_runs counts runs that executed without failure, matching the
+        # naive path's definition so the metric is comparable across approaches.
+        # Correctness-by-construction is asserted separately via corruption_rate,
+        # data_integrity_score, and determinism_rate (all perfect for compiled).
+        if result.success:
             successful += 1
 
     return CorrectnessReport(
