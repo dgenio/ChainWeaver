@@ -21,6 +21,8 @@ auto-merged).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,7 +61,14 @@ class PriceSnap(BaseModel):
 
         Returns:
             The blended USD cost of a single token.
+
+        Raises:
+            ValueError: When ``output_fraction`` is outside ``[0.0, 1.0]``;
+                out-of-range values would yield a negative or inflated blended
+                cost.
         """
+        if not 0.0 <= output_fraction <= 1.0:
+            raise ValueError(f"'output_fraction' must be in [0.0, 1.0], got {output_fraction}.")
         input_fraction = 1.0 - output_fraction
         per_mtok = self.input_per_mtok * input_fraction + self.output_per_mtok * output_fraction
         return per_mtok / 1_000_000.0
@@ -73,32 +82,34 @@ class PriceSnap(BaseModel):
 # and ``.github/workflows/update-prices.yml`` open a maintainer-reviewed PR.
 #
 # Sources: each provider's public pricing page as of the ``as_of`` date.
-PROVIDER_PRICES: dict[tuple[str, str], PriceSnap] = {
-    ("openai", "gpt-4o"): PriceSnap(
-        input_per_mtok=2.50, output_per_mtok=10.00, as_of="2026-05-01"
-    ),
-    ("openai", "gpt-4o-mini"): PriceSnap(
-        input_per_mtok=0.15, output_per_mtok=0.60, as_of="2026-05-01"
-    ),
-    ("anthropic", "claude-opus-4-7"): PriceSnap(
-        input_per_mtok=15.00, output_per_mtok=75.00, as_of="2026-05-01"
-    ),
-    ("anthropic", "claude-sonnet-4-6"): PriceSnap(
-        input_per_mtok=3.00, output_per_mtok=15.00, as_of="2026-05-01"
-    ),
-    ("anthropic", "claude-haiku-4-5"): PriceSnap(
-        input_per_mtok=0.80, output_per_mtok=4.00, as_of="2026-05-01"
-    ),
-    ("google", "gemini-2.5-pro"): PriceSnap(
-        input_per_mtok=1.25, output_per_mtok=10.00, as_of="2026-05-01"
-    ),
-    ("google", "gemini-2.5-flash"): PriceSnap(
-        input_per_mtok=0.30, output_per_mtok=2.50, as_of="2026-05-01"
-    ),
-    ("aws-bedrock", "claude-opus-4-7"): PriceSnap(
-        input_per_mtok=15.00, output_per_mtok=75.00, as_of="2026-05-01"
-    ),
-}
+PROVIDER_PRICES: Mapping[tuple[str, str], PriceSnap] = MappingProxyType(
+    {
+        ("openai", "gpt-4o"): PriceSnap(
+            input_per_mtok=2.50, output_per_mtok=10.00, as_of="2026-05-01"
+        ),
+        ("openai", "gpt-4o-mini"): PriceSnap(
+            input_per_mtok=0.15, output_per_mtok=0.60, as_of="2026-05-01"
+        ),
+        ("anthropic", "claude-opus-4-7"): PriceSnap(
+            input_per_mtok=15.00, output_per_mtok=75.00, as_of="2026-05-01"
+        ),
+        ("anthropic", "claude-sonnet-4-6"): PriceSnap(
+            input_per_mtok=3.00, output_per_mtok=15.00, as_of="2026-05-01"
+        ),
+        ("anthropic", "claude-haiku-4-5"): PriceSnap(
+            input_per_mtok=0.80, output_per_mtok=4.00, as_of="2026-05-01"
+        ),
+        ("google", "gemini-2.5-pro"): PriceSnap(
+            input_per_mtok=1.25, output_per_mtok=10.00, as_of="2026-05-01"
+        ),
+        ("google", "gemini-2.5-flash"): PriceSnap(
+            input_per_mtok=0.30, output_per_mtok=2.50, as_of="2026-05-01"
+        ),
+        ("aws-bedrock", "claude-opus-4-7"): PriceSnap(
+            input_per_mtok=15.00, output_per_mtok=75.00, as_of="2026-05-01"
+        ),
+    }
+)
 
 
 def lookup_price(provider: str, model: str) -> PriceSnap:
@@ -240,7 +251,11 @@ class CostReport(BaseModel):
             f"Est. cost saved:         ${self.cost_saved_usd:.4f}",
             f"Actual execution time:   {self.actual_execution_ms:.1f}ms",
         ]
-        if self.profile.provider is not None and self.profile.model is not None:
+        if (
+            self.profile.provider is not None
+            and self.profile.model is not None
+            and self.profile.price_as_of is not None
+        ):
             lines.append(
                 f"Priced against:          {self.profile.provider}/{self.profile.model} "
                 f"(as of {self.profile.price_as_of})"
@@ -277,10 +292,15 @@ def compute_cost_report(
         A populated :class:`CostReport`.
 
     Raises:
+        ValueError: When exactly one of ``provider`` / ``model`` is supplied
+            (without an explicit ``profile``); the two must be given together
+            or not at all.
         CostProfileError: When ``provider`` / ``model`` are supplied (without an
             explicit ``profile``) but the pair is unknown.
     """
     if profile is None:
+        if (provider is None) != (model is None):
+            raise ValueError("'provider' and 'model' must be supplied together or not at all.")
         if provider is not None and model is not None:
             profile = CostProfile.from_provider(provider, model)
         else:

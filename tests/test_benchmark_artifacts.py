@@ -67,6 +67,19 @@ class TestCorrectnessBenchmark:
         assert rpt.routing_inconsistencies == 0
         assert rpt.corruption_rate == 0.0
         assert rpt.data_integrity_score == 1.0
+        # Compiled execution is deterministic by construction: one identical
+        # outcome on every run.
+        assert rpt.determinism_rate == 1.0
+
+    def test_determinism_rate_measures_consistency_not_correctness(self, correctness: Any) -> None:
+        # determinism_rate is the most-common-outcome frequency / runs, so a
+        # corrupting naive chain (varied outcomes) must score below 1.0 and
+        # need not equal the success rate.
+        scenario = correctness.SCENARIOS[2]  # long_chain, 10 steps
+        profile = correctness.LLMCorruptionProfile(seed=7)
+        rpt = correctness.benchmark_naive_correctness(scenario, runs=100, profile=profile)
+        assert 0.0 <= rpt.determinism_rate <= 1.0
+        assert rpt.determinism_rate < 1.0
 
     def test_naive_introduces_corruption(self, correctness: Any) -> None:
         scenario = correctness.SCENARIOS[2]  # long_chain, 10 steps

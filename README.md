@@ -732,7 +732,6 @@ dollar estimate, and the maintained `PROVIDER_PRICES` table (dated snapshots,
 no live HTTP lookup) lets you price it against a real model:
 
 ```python
-from chainweaver import CostProfile
 from chainweaver.cost import compute_cost_report
 
 # Build a profile straight from the maintained price table.

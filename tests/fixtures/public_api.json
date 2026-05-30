@@ -715,7 +715,7 @@
       "qualname": "ObservedTrace"
     },
     "PROVIDER_PRICES": {
-      "kind": "dict",
+      "kind": "mappingproxy",
       "module": null,
       "qualname": null
     },

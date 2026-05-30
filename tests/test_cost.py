@@ -250,6 +250,22 @@ class TestProviderPriceTable:
         # All-input: 2 / 1e6.
         assert snap.blended_cost_per_token_usd(output_fraction=0.0) == 2.0 / 1_000_000.0
 
+    def test_blended_cost_rejects_out_of_range_fraction(self) -> None:
+        snap = PriceSnap(input_per_mtok=2.0, output_per_mtok=10.0, as_of="2026-05-01")
+        # Out-of-range fractions would yield negative/inflated blended costs.
+        with pytest.raises(ValueError, match="output_fraction"):
+            snap.blended_cost_per_token_usd(output_fraction=1.5)
+        with pytest.raises(ValueError, match="output_fraction"):
+            snap.blended_cost_per_token_usd(output_fraction=-0.1)
+
+    def test_table_is_immutable(self) -> None:
+        # PROVIDER_PRICES is public; callers must not be able to corrupt the
+        # shared snapshot table in-process (MappingProxyType, not dict).
+        with pytest.raises(TypeError):
+            PROVIDER_PRICES[("openai", "gpt-4o")] = PriceSnap(  # type: ignore[index]
+                input_per_mtok=0.0, output_per_mtok=0.0, as_of="2026-05-01"
+            )
+
 
 class TestCostProfileFromProvider:
     def test_from_provider_records_source_and_as_of(self) -> None:
@@ -311,3 +327,20 @@ class TestComputeCostReportWithProvider:
                 provider="openai",
                 model="ghost-model",
             )
+
+    def test_partial_provider_only_raises(self) -> None:
+        # Supplying provider without model must not silently fall back to an
+        # unpriced default report.
+        with pytest.raises(ValueError, match="together or not at all"):
+            compute_cost_report(steps_executed=2, actual_execution_ms=1.0, provider="openai")
+
+    def test_partial_model_only_raises(self) -> None:
+        with pytest.raises(ValueError, match="together or not at all"):
+            compute_cost_report(steps_executed=2, actual_execution_ms=1.0, model="gpt-4o")
+
+    def test_str_omits_priced_against_when_as_of_missing(self) -> None:
+        # A profile can carry provider/model without a maintained snapshot date;
+        # the report must not render a misleading "(as of None)" line.
+        profile = CostProfile(provider="custom", model="local", price_as_of=None)
+        report = compute_cost_report(steps_executed=3, actual_execution_ms=5.0, profile=profile)
+        assert "Priced against:" not in str(report)
