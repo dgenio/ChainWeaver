@@ -683,6 +683,7 @@ All errors are typed and traceable:
 | `ContribError` | A `chainweaver.contrib.tools` tool hits a contract violation (missing JSON-pointer key, wrong predicate shape, assertion mismatch) |
 | `FixtureStaleError` | A `record_then_replay` replay invocation cannot be matched to a recording (missing/stale fixture) |
 | `FuzzConfigError` | A property-based fuzzing run is misconfigured (no properties, `runs < 1`, a flow with no `input_schema` and no base input, or an unsupported input-field type) |
+| `CostProfileError` | A cost estimate is requested for a `(provider, model)` pair absent from the maintained `PROVIDER_PRICES` table |
 
 All exceptions inherit from `ChainWeaverError`.
 
@@ -720,6 +721,48 @@ Install with `pip install 'chainweaver[contrib]'`.
 
 Runnable examples: [`examples/contrib_pluck_and_set.py`](examples/contrib_pluck_and_set.py),
 [`examples/contrib_map_filter.py`](examples/contrib_map_filter.py).
+
+---
+
+## Cost-avoided reporting
+
+Every inter-step transition a naive agent delegates to an LLM is a routing
+call ChainWeaver eliminates. `CostProfile` / `CostReport` turn that into a
+dollar estimate, and the maintained `PROVIDER_PRICES` table (dated snapshots,
+no live HTTP lookup) lets you price it against a real model:
+
+```python
+from chainweaver import CostProfile
+from chainweaver.cost import compute_cost_report
+
+# Build a profile straight from the maintained price table.
+report = compute_cost_report(
+    steps_executed=6,                 # a six-tool flow
+    actual_execution_ms=4.2,
+    provider="anthropic",
+    model="claude-opus-4-7",
+)
+print(report)
+```
+
+```text
+Cost Avoided Report (estimate)
+──────────────────────────────
+Steps executed:          6
+LLM calls avoided:       5
+Est. latency saved:      1500.0ms
+Est. cost saved:         $0.1688
+Actual execution time:   4.2ms
+Priced against:          anthropic/claude-opus-4-7 (as of 2026-05-01)
+```
+
+Every report built from the table carries the snapshot's `as_of` date so
+stale prices are visible. Unknown `(provider, model)` pairs raise
+`CostProfileError` rather than guessing. Pass an explicit
+`profile=CostProfile(...)` when you have better per-call numbers, or set
+`cost_profile=` on `FlowExecutor` to attach a report to every
+`ExecutionResult`. Prices are refreshed by a maintainer-reviewed PR
+(`.github/workflows/update-prices.yml`) — never auto-merged.
 
 ---
 

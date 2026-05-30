@@ -359,6 +359,30 @@ class KernelInvocationError(ChainWeaverError):
         )
 
 
+class CostProfileError(ChainWeaverError):
+    """Raised when a cost estimate is requested for an unknown provider/model (issue #156).
+
+    :func:`~chainweaver.cost.lookup_price` and
+    :meth:`~chainweaver.cost.CostProfile.from_provider` consult the maintained
+    :data:`~chainweaver.cost.PROVIDER_PRICES` snapshot table.  A
+    ``(provider, model)`` pair that is not present in the table raises this
+    exception rather than silently returning a zero or guessed price.
+
+    Attributes:
+        provider: The provider key that was looked up (e.g. ``"anthropic"``).
+        model: The model key that was looked up (e.g. ``"claude-opus-4-7"``).
+        detail: Human-readable explanation, including the known providers.
+    """
+
+    def __init__(self, provider: str, model: str, detail: str) -> None:
+        self.provider = provider
+        self.model = model
+        self.detail = detail
+        super().__init__(
+            f"No maintained price for provider '{provider}' model '{model}': {detail}."
+        )
+
+
 class PredicateSyntaxError(ChainWeaverError):
     """Raised when a conditional-branch predicate cannot be parsed or evaluated.
 

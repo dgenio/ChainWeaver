@@ -82,7 +82,7 @@ chainweaver/
 ├── plugins.py         discover_tools() + discover_flows() over importlib.metadata entry points (#130)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
-├── cost.py            CostProfile + CostReport for cost-avoided estimation
+├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
@@ -111,7 +111,9 @@ mkdocs.yml                   MkDocs Material site config (#133)
 .readthedocs.yaml            Read the Docs build config (#133)
 pytest_chainweaver.py        Top-level pytest plugin module (#132); registered via [project.entry-points.pytest11]. Deliberately outside the chainweaver/ package so pytest's entry-point loader does not transitively import chainweaver before pytest-cov starts coverage measurement.
 pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
-.github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), and publish (publish.yml) workflows
+scripts/                     Maintenance scripts run from CI, not shipped in the package — refresh_prices.py keeps cost.py PROVIDER_PRICES fresh (#156)
+benchmarks/                  Standalone benchmark scripts (not coverage-gated): bench_naive_vs_compiled.py (#29), bench_correctness.py (#103), report.py (#207); results/ holds generated latest.{json,md}
+.github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), publish (publish.yml), and update-prices.yml (#156) workflows
 ```
 
 ### Key entry points

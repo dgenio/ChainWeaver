@@ -11,7 +11,7 @@ Public API
         ExecutionPlan, ExecutionResult, ReplayMode, ReplayResult,
         StepDiff, StepPlan, StepRecord,
         RedactionPolicy, TraceRecorder, ObservedStep, ObservedTrace,
-        CostProfile, CostReport,
+        CostProfile, CostReport, PriceSnap, PROVIDER_PRICES, lookup_price,
         validate_dag_topology,
         schema_fingerprint, check_flow_compatibility, CompatibilityIssue,
         compile_flow, CompilationResult, CompilationError, CompilationWarning,
@@ -65,7 +65,13 @@ from chainweaver.contracts import (
     evaluate_predicate,
     merge_safety,
 )
-from chainweaver.cost import CostProfile, CostReport
+from chainweaver.cost import (
+    PROVIDER_PRICES,
+    CostProfile,
+    CostReport,
+    PriceSnap,
+    lookup_price,
+)
 from chainweaver.decisions import (
     BaseDecisionCallback,
     DecisionCallable,
@@ -81,6 +87,7 @@ from chainweaver.exceptions import (
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     ContribError,
+    CostProfileError,
     DAGDefinitionError,
     DecisionCallbackError,
     FlowAlreadyExistsError,
@@ -179,6 +186,7 @@ __version__ = "0.11.0"
 
 __all__ = [
     "BUILTIN_PROPERTIES",
+    "PROVIDER_PRICES",
     "AttestationInputError",
     "AttestationReport",
     "BaseDecisionCallback",
@@ -196,6 +204,7 @@ __all__ = [
     "ConditionalEdge",
     "ContribError",
     "CostProfile",
+    "CostProfileError",
     "CostReport",
     "DAGDefinitionError",
     "DAGFlow",
@@ -249,6 +258,7 @@ __all__ = [
     "ObservedTrace",
     "PluginDiscoveryError",
     "PredicateSyntaxError",
+    "PriceSnap",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
@@ -291,6 +301,7 @@ __all__ = [
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "lookup_price",
     "merge_safety",
     "minimize_failure",
     "result_to_mermaid",
