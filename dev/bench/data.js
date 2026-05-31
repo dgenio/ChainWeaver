@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780178959034,
+  "lastUpdate": 1780260046214,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -1296,6 +1296,78 @@ window.BENCHMARK_DATA = {
             "value": 0.31881099999964135,
             "unit": "ms",
             "extra": "min=0.29ms max=0.38ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fbeb500f059e30e7e97f3b85319044a6fb0667c6",
+          "message": "Merge pull request #235 from dgenio/claude/github-issues-triage-yqaJj\n\nfeat: README/landing-page conversion overhaul (#225, #227, #228, #229, #232)",
+          "timestamp": "2026-05-31T21:39:06+01:00",
+          "tree_id": "50e59bd62504089cb5215d22f9d7835d1c4e455f",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/fbeb500f059e30e7e97f3b85319044a6fb0667c6"
+        },
+        "date": 1780260045489,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.14522099999680904,
+            "unit": "ms",
+            "extra": "min=0.13ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.08283600004688196,
+            "unit": "ms",
+            "extra": "min=0.07ms max=0.14ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.3035569999951804,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.35ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.16020900002899907,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.21ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.01200200003768,
+            "unit": "ms",
+            "extra": "min=101.72ms max=102.06ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.36058400007732416,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.37ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.10891600002105,
+            "unit": "ms",
+            "extra": "min=251.08ms max=251.13ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2460480001218457,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.28ms repeats=5"
           }
         ]
       }
