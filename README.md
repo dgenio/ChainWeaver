@@ -19,10 +19,10 @@ and `FlowExecutor` *replaces* the per-step LLM round-trips with deterministic,
 schema-validated execution — no model in the loop. You compile the path the
 analyzer surfaces instead of hand-wiring it.
 
-**Governance for tool pipelines.** Typed I/O at every step, file-serializable
+**Governance for tool flows.** Typed I/O at every step, file-serializable
 flows, schema-drift detection, determinism *attestation*, property fuzzing, and
 structured audit traces — disciplined, auditable, portable deterministic
-pipelines.
+execution.
 
 > **Quantified and reproducible.** In the repo's
 > [benchmark report](benchmarks/results/latest.md), compiled flows show **0%

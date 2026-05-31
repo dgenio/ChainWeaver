@@ -9,11 +9,23 @@ change) and check for stable anchors instead.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 
 _REPO = Path(__file__).resolve().parents[1]
 _README = (_REPO / "README.md").read_text(encoding="utf-8")
+
+
+def _load_gen_demo_cast() -> ModuleType:
+    """Import scripts/gen_demo_cast.py (not a package) for direct testing."""
+    path = _REPO / "scripts" / "gen_demo_cast.py"
+    spec = importlib.util.spec_from_file_location("gen_demo_cast", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_demo_svg_committed_and_animated() -> None:
@@ -30,7 +42,9 @@ def test_demo_svg_committed_and_animated() -> None:
 def test_readme_embeds_demo_as_first_visual() -> None:
     """README embeds the demo SVG (#228) above the first prose section."""
     assert "docs/assets/quickstart.svg" in _README
-    assert _README.index("docs/assets/quickstart.svg") < _README.index("## See it in 30 seconds")
+    anchor = "## See it in 30 seconds"
+    assert anchor in _README, f"expected README section heading {anchor!r}"
+    assert _README.index("docs/assets/quickstart.svg") < _README.index(anchor)
 
 
 def test_readme_has_colab_badge_to_notebook() -> None:
@@ -81,3 +95,29 @@ def test_readme_no_longer_leads_with_demoted_hero() -> None:
     """The old 'save LLM calls' hero tagline is demoted, not the lead (#225)."""
     stale = "Compile deterministic tool flows into LLM-free executable runs."
     assert stale not in _README
+
+
+def test_gen_demo_cast_builds_valid_asciinema_v2() -> None:
+    """scripts/gen_demo_cast.py assembles a valid asciinema v2 cast (#228)."""
+    gen = _load_gen_demo_cast()
+    fake_output = "Executing flow 'double_add_format'\r\nFinal value: 20\r\n"
+    cast = gen.build_cast(fake_output)
+    lines = cast.splitlines()
+
+    # First line is the asciinema v2 header.
+    header = json.loads(lines[0])
+    assert header["version"] == 2
+    assert header["width"] > 0 and header["height"] > 0
+
+    # Remaining lines are [timestamp, "o", text] events with non-decreasing time.
+    events = [json.loads(line) for line in lines[1:]]
+    assert events, "cast has no events"
+    prev = 0.0
+    for timestamp, code, _text in events:
+        assert code == "o"
+        assert timestamp >= prev
+        prev = timestamp
+
+    # The real run output is embedded, and the recording ends on a terminal hold.
+    assert any("Final value" in text for _ts, _code, text in events)
+    assert events[-1][2] == "", "cast should end with a terminal hold event"

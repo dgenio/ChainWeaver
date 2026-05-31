@@ -6,7 +6,7 @@
 worth keeping into typed `Flow` objects; and `FlowExecutor` runs them as a graph runner,
 not a reasoning engine — zero LLM calls, zero network I/O, zero randomness between steps,
 by design. Every step is Pydantic-validated, drift-detected, determinism-*attested*, and
-emits a structured audit trace, so the result is a disciplined, auditable pipeline rather
+emits a structured audit trace, so the result is a disciplined, auditable flow rather
 than an opaque sequence of calls. (Saving LLM calls is a *consequence* — see the
 [reproducible benchmark](https://github.com/dgenio/ChainWeaver/blob/main/benchmarks/results/latest.md).)
 
