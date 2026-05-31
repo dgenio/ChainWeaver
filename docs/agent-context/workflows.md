@@ -34,7 +34,8 @@ python -m pytest tests/ -v
 
 | Workflow | Trigger | Steps |
 |----------|---------|-------|
-| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13}` |
+| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13}`; `nbmake` runs `notebooks/` on the `ubuntu-latest` / 3.12 lane (issue #229) |
+| `docs.yml` | Push/PR to `main` | `mkdocs build --strict` |
 | `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
 | `bench.yml` | Push/PR to `main` | Naive-vs-compiled benchmark on `ubuntu-22.04`; fails PRs whose median `total_duration_ms` regresses beyond 125 % of `gh-pages` baseline |
 

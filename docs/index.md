@@ -1,10 +1,14 @@
 # ChainWeaver
 
-**Deterministic orchestration layer for MCP-based agents.**
+**Observe the tool paths your agent repeats. Compile them into typed, deterministic flows. Replace the LLM-in-the-loop with governed, auditable execution.**
 
-ChainWeaver compiles multi-tool flows into executable sequences that run **without any
-LLM involvement between steps**. The executor is a graph runner, not a reasoning engine:
-zero LLM calls, zero network I/O, zero randomness — by design.
+`ChainAnalyzer` maps the schema-compatible chains among your tools; you compile the ones
+worth keeping into typed `Flow` objects; and `FlowExecutor` runs them as a graph runner,
+not a reasoning engine — zero LLM calls, zero network I/O, zero randomness between steps,
+by design. Every step is Pydantic-validated, drift-detected, determinism-*attested*, and
+emits a structured audit trace, so the result is a disciplined, auditable flow rather
+than an opaque sequence of calls. (Saving LLM calls is a *consequence* — see the
+[reproducible benchmark](https://github.com/dgenio/ChainWeaver/blob/main/benchmarks/results/latest.md).)
 
 ```mermaid
 flowchart LR
