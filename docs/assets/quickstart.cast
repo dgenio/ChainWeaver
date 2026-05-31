@@ -1,0 +1,6 @@
+{"version": 2, "width": 92, "height": 26, "title": "ChainWeaver quick start", "env": {"TERM": "xterm-256color", "SHELL": "/bin/bash"}}
+[0.5, "o", "\u001b[1;32m$\u001b[0m pip install 'chainweaver[yaml]'\r\n"]
+[1.7, "o", "Successfully installed chainweaver-0.11.0\r\n\r\n"]
+[2.7, "o", "\u001b[1;32m$\u001b[0m python examples/simple_linear_flow.py\r\n"]
+[3.7, "o", "\r\nExecuting flow 'double_add_format' with input: {'number': 5}\r\n\r\n\r\n--- Execution Summary ---\r\nFlow      : double_add_format\r\nSuccess   : True\r\nOutput    : {'number': 5, 'value': 20, 'result': 'Final value: 20'}\r\n\r\n--- Step Log ---\r\n  [OK] Step 0 | double | inputs={'number': 5} \u2192 outputs={'value': 10}\r\n  [OK] Step 1 | add_ten | inputs={'value': 10} \u2192 outputs={'value': 20}\r\n  [OK] Step 2 | format_result | inputs={'value': 20} \u2192 outputs={'result': 'Final value: 20'}\r\n\r\n\u2713 Result verified: 'Final value: 20'\r\n"]
+[4.7, "o", "\r\n\u001b[2m# 3 tools, 0 LLM calls, fully reproducible.\u001b[0m\r\n"]

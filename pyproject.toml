@@ -19,6 +19,7 @@ keywords = [
     "tools",
     "pydantic",
     "flow",
+    "weaver-stack",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -117,6 +118,11 @@ dev = [
     "langgraph>=0.2",
     "openai-agents>=0.1",
     "mcp>=1.0,<2",
+    # Notebook execution gate (issue #229): nbmake runs notebooks/ in CI so the
+    # "Open in Colab" quickstart cannot silently rot; ipykernel is the kernel it
+    # executes against.
+    "nbmake>=1.5",
+    "ipykernel>=6.29",
 ]
 
 [project.urls]

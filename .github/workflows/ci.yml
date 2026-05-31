@@ -54,6 +54,14 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
         run: python -m pytest tests/ -m property --no-cov --hypothesis-show-statistics -v
 
+      # Execute the "Open in Colab" quickstart notebook (issue #229) so the
+      # zero-install on-ramp can't silently rot. Run once on the canonical
+      # ubuntu / 3.12 lane (3.12 matches Colab's runtime); --no-cov because the
+      # notebook isn't part of the package coverage gate.
+      - name: Run notebooks (nbmake)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        run: python -m pytest --nbmake notebooks/ --no-cov -v
+
   conformance:
     name: weaver-spec conformance (#91)
     runs-on: ubuntu-latest

@@ -1,21 +1,35 @@
 # ChainWeaver
 
-**Compile deterministic tool flows into LLM-free executable runs.**
+**Observe the tool paths your agent repeats. Compile them into typed, deterministic flows. Replace the LLM-in-the-loop with governed, auditable execution.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
 [![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/pypi/pyversions/chainweaver)](https://pypi.org/project/chainweaver/)
 [![License](https://img.shields.io/github/license/dgenio/ChainWeaver)](LICENSE)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/ChainWeaver/blob/main/notebooks/quickstart.ipynb)
 
-```mermaid
-flowchart LR
-    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
-        R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
-    end
-    subgraph after ["✅ ChainWeaver · 0 LLM calls"]
-        R2([Request]) --> E[FlowExecutor] --> U1[Tool A] --> U2[Tool B] --> U3[Tool C]
-    end
-```
+<p align="center">
+  <img src="docs/assets/quickstart.svg" alt="ChainWeaver quick start: pip install, run a flow, and see the LLM-free step log" width="760">
+</p>
+
+**The moat — observe → compile → replace.** Point ChainWeaver at the tool paths
+your agent already repeats. `ChainAnalyzer` maps every schema-compatible chain
+among your tools; you compile the ones worth keeping into typed `Flow` objects;
+and `FlowExecutor` *replaces* the per-step LLM round-trips with deterministic,
+schema-validated execution — no model in the loop. You compile the path the
+analyzer surfaces instead of hand-wiring it.
+
+**Governance for tool pipelines.** Typed I/O at every step, file-serializable
+flows, schema-drift detection, determinism *attestation*, property fuzzing, and
+structured audit traces — disciplined, auditable, portable deterministic
+pipelines.
+
+> **Quantified and reproducible.** In the repo's
+> [benchmark report](benchmarks/results/latest.md), compiled flows show **0%
+> data corruption** versus **61–96%** for naive LLM-in-the-loop chaining, and
+> avoid **~$0.06** of LLM spend per 10-step flow. Regenerate it yourself with
+> `python benchmarks/report.py`. Saving LLM calls is a *consequence* — not the
+> headline.
 
 ```python
 from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
@@ -221,14 +235,32 @@ on each minor release of any of the projects above.
 For the correctness argument behind the design, see
 [docs/data-integrity.md](docs/data-integrity.md).
 
-### Where ChainWeaver fits in the Weaver Stack
+### Part of the Weaver Stack
 
-ChainWeaver is the **deterministic multi-step tool execution** seam of
-the broader [Weaver Stack](https://github.com/dgenio/weaver-spec): the
-loose family of SDKs that share `weaver-spec`'s `SelectableItem`
-contract for capability routing.  In one line: the agent or the host's
-router decides *which* capability to invoke, and ChainWeaver runs the
-deterministic tool path *behind* that capability.
+ChainWeaver is the **deterministic multi-step tool execution** layer of the
+[Weaver Stack](https://github.com/dgenio/weaver-spec) — a family of small,
+composable SDKs that share `weaver-spec`'s `SelectableItem` routing contract.
+On the request path a router picks *which* capability to invoke, ChainWeaver
+runs the deterministic tool path *behind* it, and downstream layers gate and
+guard the call:
+
+```mermaid
+flowchart LR
+    req([Request]) --> ctx[contextweaver<br/>context assembly]
+    ctx --> cw[<b>ChainWeaver</b><br/>deterministic flow execution]
+    cw --> ak[agent-kernel<br/>capability gating]
+    ak --> af[agentfence<br/>runtime guardrails]
+    subgraph adjacent [Adjacent · use any subset]
+        vg[vibeguard]
+        lw[lessonweaver]
+        se[skdr-eval]
+    end
+```
+
+**Use standalone or together.** Each layer stands on its own — ChainWeaver has
+**no hard dependency** on any sibling and works fully standalone. The
+`chainweaver[weaver-stack]` extra is a placeholder that will pin the siblings
+once they ship on PyPI.
 
 | Layer | What it owns | Sibling project |
 |-------|--------------|-----------------|
@@ -242,9 +274,7 @@ ChainWeaver does **not** replace an agent framework.  It is meant to be
 called *from* one — see the [LangGraph
 recipe](docs/cookbook/langgraph-node.md) (issue #205) and the [OpenAI Agents
 SDK recipe](docs/cookbook/openai-agents-tool.md) (issue #206) for
-the canonical integration patterns.  None of the sibling packages above
-is a hard dependency; the `chainweaver[weaver-stack]` extra is a
-placeholder that will pin them when they ship on PyPI.
+the canonical integration patterns.
 
 For host-level expectations (when to invoke, how to store traces,
 side-effect tools, MCP parity), see the
