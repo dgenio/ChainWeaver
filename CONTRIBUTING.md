@@ -97,7 +97,7 @@ python -m mypy chainweaver/
 python -m pytest tests/ -v
 ```
 
-CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.13.
+CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.14.
 
 ---
 
@@ -125,10 +125,28 @@ Hook versions are pinned in `.pre-commit-config.yaml`. Bumping a hook is a delib
 - **Type annotations are required** on all function signatures.
 - **Pydantic `BaseModel`** for all data schemas (tool I/O, `Flow`, `FlowStep`).
 - `from __future__ import annotations` at the top of every module.
-- Single runtime dependency: `pydantic>=2.0`. Add new runtime dependencies judiciously — only when they deliver clear value and are well-maintained. Always update `pyproject.toml` `[project.dependencies]`.
+- Lean runtime core (`deepdiff`, `packaging`, `pydantic`, `tenacity`, `typer`). Add new runtime dependencies judiciously — only when they deliver clear value and are well-maintained. Always update `pyproject.toml` `[project.dependencies]`.
 - All public symbols must be exported in `chainweaver/__init__.py` `__all__`.
 - All exceptions must inherit from `ChainWeaverError`.
 - Ruff is the linter and formatter — run `ruff check` and `ruff format --check` before committing.
+
+### Dependency-constraint policy
+
+ChainWeaver is a library, so its install requirements constrain dependencies
+as loosely as correctness allows (exact pins and speculative caps belong in
+applications and lockfiles, not here):
+
+- **Lower bounds only (`>=`)** on every runtime dependency and extra, set to
+  the lowest version the test suite actually passes on — never an exact pin
+  (`==`).
+- **No speculative upper-bound caps** (`<X`). Any retained cap must carry an
+  inline comment citing the specific incompatibility that justifies it.
+- The floors are *proven, not guessed*: the `floor-deps` CI job installs the
+  minimums via `uv pip install --resolution lowest-direct` and runs the full
+  suite on Python 3.10, and a weekly `latest-deps` job runs against the newest
+  (incl. pre-release) versions on Python 3.14 so a breaking upstream release
+  is caught early. If you raise a dependency floor, run the floor job locally
+  first: `uv pip install --resolution lowest-direct -e ".[dev]" && pytest tests/ --no-cov`.
 
 ### Vocabulary
 

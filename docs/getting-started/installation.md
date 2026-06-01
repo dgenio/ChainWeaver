@@ -1,6 +1,6 @@
 # Installation
 
-ChainWeaver is published on PyPI and supports Python 3.10+.
+ChainWeaver is published on PyPI and supports Python 3.10 through 3.14 (inclusive).
 
 ## From PyPI
 

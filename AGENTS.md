@@ -303,7 +303,12 @@ python -m pytest tests/ -v
 
 CI runs lint + format + mypy on Python 3.10 / `ubuntu-latest` only; tests
 run across `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
-3.12, 3.13}` (12 jobs in total). A separate `bench.yml` workflow runs
+3.12, 3.13, 3.14}` (15 jobs in total). A `floor-deps` job additionally
+installs the minimum declared dependency versions
+(`uv pip install --resolution lowest-direct`) and runs the full suite on
+Python 3.10, and a weekly scheduled `latest-deps` job runs the suite
+against the newest (incl. pre-release) dependencies on Python 3.14
+(issue #236). A separate `bench.yml` workflow runs
 the naive-vs-compiled benchmark on `ubuntu-22.04` and fails PRs whose
 median `total_duration_ms` regresses beyond 125 % of the `gh-pages`
 baseline (see [benchmarks/README.md](benchmarks/README.md)).

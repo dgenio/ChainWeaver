@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Official Python 3.14 support** (#215): `pyproject.toml` classifiers and the
+  CI test matrix now cover Python 3.10–3.14 inclusive.
+- **Library-grade dependency hygiene** (#236): a `floor-deps` CI job installs
+  the minimum declared dependency versions (`uv pip install --resolution
+  lowest-direct`) and runs the full suite on Python 3.10, proving every `>=`
+  floor; a weekly scheduled `latest-deps` job runs the suite against the newest
+  (incl. pre-release) dependencies on Python 3.14 as an early-warning canary.
+  The dependency-constraint policy is documented in `CONTRIBUTING.md`.
+
+### Changed
+
+- **Dependency floors are now proven, not aspirational** (#236): bumped to the
+  lowest versions the suite actually passes on — `deepdiff>=9.0` (was `>=8.0`;
+  8.x imported `numpy` unconditionally and emitted a different tree-view diff
+  shape), `typer>=0.24` (was `>=0.9`; needed for `click>=8.2` stderr capture),
+  and `pydantic>=2.11` (was `>=2.0`). Removed the speculative `mcp<2` upper-bound
+  cap (now `mcp>=1.0`), per the no-caps policy.
+
 - **Property-based fuzzing harness for flows** (#220): a new `chainweaver.fuzz`
   module exposing `FlowFuzzer`, `FlowProperty`, `FaultConfig`, `FuzzCase`,
   `FuzzFailure`, `FuzzReport`, and `BUILTIN_PROPERTIES`. The fuzzer generates or
