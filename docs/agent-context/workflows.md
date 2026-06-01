@@ -30,7 +30,7 @@ python -m pytest tests/ -v
 
 ---
 
-## CI pipeline
+## CI
 
 | Workflow | Trigger | Steps |
 |----------|---------|-------|
@@ -166,7 +166,7 @@ When adding a new module to `chainweaver/`:
 |---------|-----------------|
 | Add/remove/rename module | Update AGENTS.md repo map + architecture.md boundaries |
 | Change coding conventions | Update workflows.md code style section |
-| Change CI pipeline | Update workflows.md CI section |
+| Change CI config | Update workflows.md CI section |
 | Add a new exception | Update AGENTS.md common tasks + README error table |
 | Discover a recurring agent mistake | Record in lessons-learned.md |
 | Change review expectations | Update review-checklist.md |
