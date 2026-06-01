@@ -705,6 +705,7 @@ All errors are typed and traceable:
 | `FlowNotFoundError` | The requested flow is not registered |
 | `FlowAlreadyExistsError` | Registering a flow that already exists (without `overwrite=True`) |
 | `FlowStatusError` | Executing a flow whose status is not `ACTIVE` (without `force=True`) |
+| `FlowCancelledError` | A `deadline` passed or a `CancellationToken` was cancelled at a step boundary (carries the partial result) |
 | `InvalidFlowVersionError` | A flow is registered with a version string that is not valid PEP 440 |
 | `FlowSerializationError` | A flow file (YAML/JSON) is malformed, has an unknown discriminator, or references an unresolvable class |
 | `SchemaValidationError` | Input or output fails Pydantic validation |

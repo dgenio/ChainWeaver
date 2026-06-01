@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
+from chainweaver.cancellation import CancellationToken
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
 from chainweaver.contracts import evaluate_predicate
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
@@ -44,6 +45,7 @@ from chainweaver.exceptions import (
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     DecisionCallbackError,
+    FlowCancelledError,
     FlowExecutionError,
     FlowStatusError,
     InputMappingError,
@@ -1101,6 +1103,8 @@ class FlowExecutor:
         *,
         version: str | None = None,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
 
@@ -1116,6 +1120,19 @@ class FlowExecutor:
                 always recorded on :attr:`ExecutionResult.flow_version`.
             force: When ``True``, bypass the status guard and execute even if
                 the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional absolute wall-clock deadline in
+                :func:`time.time` seconds (issue #142).  Checked **between**
+                steps (and between DAG levels) — never inside a tool — so an
+                in-flight step always completes.  When the deadline has
+                passed at a step boundary the executor raises
+                :class:`~chainweaver.exceptions.FlowCancelledError` carrying
+                the partial result.
+            cancel_token: Optional :class:`CancellationToken` (issue #142).
+                Calling :meth:`CancellationToken.cancel` from another thread
+                requests that the flow stop at its next step boundary, again
+                raising :class:`~chainweaver.exceptions.FlowCancelledError`.
+                Cancellation is cooperative: a tool that never returns cannot
+                be force-stopped.
 
         Returns:
             An :class:`ExecutionResult` describing the outcome and containing
@@ -1128,6 +1145,8 @@ class FlowExecutor:
                 not registered.
             FlowStatusError: When the flow's status is not ``ACTIVE`` and
                 *force* is ``False``.
+            FlowCancelledError: When *deadline* has passed or *cancel_token*
+                is cancelled at a step boundary.
         """
         flow = self._registry.get_flow(flow_name, version=version)
         self._active_flow_version = flow.version
@@ -1136,7 +1155,9 @@ class FlowExecutor:
             raise FlowStatusError(flow_name, flow.status.value)
 
         if isinstance(flow, DAGFlow):
-            return self._execute_dag_flow(flow, initial_input)
+            return self._execute_dag_flow(
+                flow, initial_input, deadline=deadline, cancel_token=cancel_token
+            )
 
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
@@ -1189,6 +1210,20 @@ class FlowExecutor:
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
+            # Cooperative cancellation check at the step boundary (issue #142):
+            # an in-flight step always finishes; we only stop *before* the
+            # next one. Pure clock/boolean reads — invariants preserved.
+            self._check_cancellation(
+                flow_name=flow_name,
+                next_step_index=idx,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             record = self._execute_step(idx, step, context, flow_name, trace_id)
             log.append(record)
 
@@ -1308,6 +1343,8 @@ class FlowExecutor:
         *,
         version: str | None = None,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Asynchronously execute a registered flow (issue #80).
 
@@ -1347,9 +1384,17 @@ class FlowExecutor:
                 :meth:`execute_flow`.
             force: When ``True``, bypass the status guard and execute even
                 if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional wall-clock deadline (issue #142); checked
+                between steps / DAG levels, mirroring :meth:`execute_flow`.
+            cancel_token: Optional :class:`CancellationToken` (issue #142);
+                checked between steps / DAG levels.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
+
+        Raises:
+            FlowCancelledError: When *deadline* has passed or *cancel_token*
+                is cancelled at a step boundary.
         """
         flow = self._registry.get_flow(flow_name, version=version)
 
@@ -1359,8 +1404,12 @@ class FlowExecutor:
         self._assert_async_lane_supported(flow)
 
         if isinstance(flow, DAGFlow):
-            return await self._execute_dag_flow_async(flow, initial_input)
-        return await self._execute_linear_flow_async(flow, initial_input)
+            return await self._execute_dag_flow_async(
+                flow, initial_input, deadline=deadline, cancel_token=cancel_token
+            )
+        return await self._execute_linear_flow_async(
+            flow, initial_input, deadline=deadline, cancel_token=cancel_token
+        )
 
     @staticmethod
     def _assert_async_lane_supported(flow: Any) -> None:
@@ -1407,6 +1456,9 @@ class FlowExecutor:
         self,
         flow: Any,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Async-native counterpart to the linear branch of :meth:`execute_flow`."""
         self._active_flow_version = flow.version
@@ -1456,6 +1508,18 @@ class FlowExecutor:
         context: dict[str, Any] = dict(initial_input)
         log: list[StepRecord] = []
         for idx, step in enumerate(flow.steps):
+            # Cooperative cancellation at the step boundary (issue #142).
+            self._check_cancellation(
+                flow_name=flow_name,
+                next_step_index=idx,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
             log.append(record)
             if not record.success:
@@ -1511,6 +1575,9 @@ class FlowExecutor:
         self,
         flow: DAGFlow,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Async-native counterpart to :meth:`_execute_dag_flow`.
 
@@ -1518,6 +1585,7 @@ class FlowExecutor:
         level run sequentially (concurrent intra-level execution is a
         follow-up — see issue #80 acceptance criteria), and outputs are
         merged with sibling-key-conflict detection between levels.
+        Cancellation (issue #142) is checked between levels.
         """
         self._active_flow_version = flow.version
         trace_id = _new_trace_id()
@@ -1562,6 +1630,18 @@ class FlowExecutor:
         levels = self._compute_dag_levels(flow)
 
         for level_steps in levels:
+            # Cooperative cancellation between topological levels (issue #142).
+            self._check_cancellation(
+                flow_name=flow.name,
+                next_step_index=flat_index,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             level_outputs: dict[str, Any] = {}
             for step in level_steps:
                 if step.step_type != "tool":
@@ -2073,6 +2153,57 @@ class FlowExecutor:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _check_cancellation(
+        self,
+        *,
+        flow_name: str,
+        next_step_index: int,
+        deadline: float | None,
+        cancel_token: CancellationToken | None,
+        execution_log: list[StepRecord],
+        trace_id: str,
+        started_at: datetime,
+        perf_start: float,
+        initial_input: dict[str, Any],
+    ) -> None:
+        """Raise :class:`FlowCancelledError` if cancellation is due (issue #142).
+
+        Invoked only at step boundaries (between linear steps and between DAG
+        levels).  The check is a pure :func:`time.time` read plus a pure
+        boolean token read, so it never touches the network, an LLM, or a
+        randomness source — the three hard executor invariants hold.
+
+        No-op when neither ``deadline`` nor ``cancel_token`` is supplied, or
+        when neither has fired.  When one (or both) has fired it builds the
+        partial :class:`ExecutionResult` from the records gathered so far
+        (``success=False``) and raises, so the partial trace survives on the
+        error and the crash-resume snapshot is preserved.
+        """
+        if deadline is None and cancel_token is None:
+            return
+        deadline_exceeded = deadline is not None and time.time() >= deadline
+        token_cancelled = cancel_token is not None and cancel_token.is_cancelled
+        if not (deadline_exceeded or token_cancelled):
+            return
+        partial = self._make_result(
+            flow_name=flow_name,
+            success=False,
+            final_output=None,
+            execution_log=execution_log,
+            trace_id=trace_id,
+            started_at=started_at,
+            perf_start=perf_start,
+            initial_input=initial_input,
+            tool_step_count=len(execution_log),
+        )
+        raise FlowCancelledError(
+            flow_name,
+            next_step_index,
+            result=partial,
+            deadline_exceeded=deadline_exceeded,
+            token_cancelled=token_cancelled,
+        )
 
     def _make_result(
         self,
@@ -3211,6 +3342,9 @@ class FlowExecutor:
         self,
         flow: DAGFlow,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Execute a :class:`~chainweaver.flow.DAGFlow`.
 
@@ -3224,6 +3358,10 @@ class FlowExecutor:
         Args:
             flow: The :class:`~chainweaver.flow.DAGFlow` to execute.
             initial_input: Initial key/value context.
+            deadline: Optional wall-clock deadline (issue #142), checked
+                between topological levels — in-flight level steps complete.
+            cancel_token: Optional :class:`CancellationToken` (issue #142),
+                checked between topological levels.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
@@ -3315,6 +3453,20 @@ class FlowExecutor:
                 dependents_map[dep].add(s.step_id)
 
         for relative_level_idx, level_steps in enumerate(levels[start_level:]):
+            # Cooperative cancellation between topological levels (issue #142):
+            # steps already dispatched in the previous level have completed;
+            # we stop before starting the next one. Pure clock/boolean reads.
+            self._check_cancellation(
+                flow_name=flow.name,
+                next_step_index=flat_index,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []

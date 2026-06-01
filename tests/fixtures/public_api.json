@@ -5,6 +5,7 @@
     "BUILTIN_PROPERTIES",
     "BaseDecisionCallback",
     "BaseMiddleware",
+    "CancellationToken",
     "ChainAnalyzer",
     "ChainWeaverError",
     "CheckpointDriftError",
@@ -41,6 +42,7 @@
     "FlowAlreadyExistsError",
     "FlowBuilder",
     "FlowBuilderError",
+    "FlowCancelledError",
     "FlowEndContext",
     "FlowEvent",
     "FlowExecutionError",
@@ -174,6 +176,12 @@
       "module": "chainweaver.middleware",
       "qualname": "BaseMiddleware",
       "signature": "()"
+    },
+    "CancellationToken": {
+      "kind": "class",
+      "module": "chainweaver.cancellation",
+      "qualname": "CancellationToken",
+      "signature": "() -> None"
     },
     "ChainAnalyzer": {
       "kind": "class",
@@ -482,6 +490,12 @@
       "module": "chainweaver.builder",
       "qualname": "FlowBuilderError",
       "signature": "(detail: str) -> None"
+    },
+    "FlowCancelledError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "FlowCancelledError",
+      "signature": "(flow_name: str, step_index: int, *, result: ExecutionResult, deadline_exceeded: bool = False, token_cancelled: bool = False) -> None"
     },
     "FlowEndContext": {
       "kind": "pydantic-model",
