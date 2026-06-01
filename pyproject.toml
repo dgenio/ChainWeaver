@@ -30,15 +30,21 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
+# Dependency-constraint policy (issue #236): library-grade specifiers — lower
+# bounds only (``>=``), set to the lowest version the test suite actually passes
+# on, and no speculative upper-bound caps.  The ``floor-deps`` CI job installs
+# these minimums (``uv pip install --resolution lowest-direct``) and runs the
+# full suite, so every floor below is proven, not guessed.  See CONTRIBUTING.md.
 dependencies = [
-    "deepdiff>=8.0",
+    "deepdiff>=9.0",
     "packaging>=21.0",
-    "pydantic>=2.0",
+    "pydantic>=2.11",
     "tenacity>=8.0",
-    "typer>=0.9",
+    "typer>=0.24",
 ]
 
 [project.scripts]
@@ -78,7 +84,7 @@ openai-agents = [
     "openai-agents>=0.1",
 ]
 mcp = [
-    "mcp>=1.0,<2",
+    "mcp>=1.0",
 ]
 weaver-stack = [
     # Placeholder for the Weaver Stack sibling SDKs (issue #91 — weaver-spec
@@ -117,7 +123,7 @@ dev = [
     "llama-index-core>=0.10",
     "langgraph>=0.2",
     "openai-agents>=0.1",
-    "mcp>=1.0,<2",
+    "mcp>=1.0",
     # Notebook execution gate (issue #229): nbmake runs notebooks/ in CI so the
     # "Open in Colab" quickstart cannot silently rot; ipykernel is the kernel it
     # executes against.

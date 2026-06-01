@@ -95,8 +95,8 @@ guarantees apply in full.
   canonical Python 3.10 / Ubuntu leg (delivered ✅).
 - [ ] Tests pass on the full
   `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12,
-  3.13}` matrix (issue #34 ✅; **awaiting first green run on Windows
-  + macOS**).
+  3.13, 3.14}` matrix (issue #34 ✅; Python 3.14 added in #215;
+  **awaiting first green run on Windows + macOS**).
 - [ ] Test coverage stays ≥ 80% (enforced via
   `--cov-fail-under=80` in `pyproject.toml` ✅).
 - [ ] PyPI publish workflow (`.github/workflows/publish.yml`) builds

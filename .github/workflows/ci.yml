@@ -5,16 +5,21 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly latest/pre-release canary (issue #236) — Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
 
 jobs:
   test:
     name: test (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    # Push/PR gate only; the scheduled run exercises the latest-deps canary below.
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v6
@@ -66,6 +71,7 @@ jobs:
     name: weaver-spec conformance (#91)
     runs-on: ubuntu-latest
     needs: test
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v6
 
@@ -87,3 +93,57 @@ jobs:
       # only care whether the 9 conformance tests pass.
       - name: Run weaver-spec conformance suite
         run: python -m pytest tests/test_weaver_spec_conformance.py -v -m conformance --no-cov
+
+  # Floor-deps gate (issue #236): install the *minimum* declared dependency
+  # versions and run the full suite on Python 3.10.  ``--resolution
+  # lowest-direct`` pins every directly-declared dependency (the lean core plus
+  # the extras under test) to its ``>=`` floor while letting transitive deps
+  # resolve normally — proving each declared lower bound is truthful rather
+  # than aspirational.  ``--no-cov`` because the coverage gate is enforced by
+  # the ``test`` job; here we only assert behaviour at the floors.
+  floor-deps:
+    name: floor deps (min versions, Python 3.10)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Install minimum declared dependency versions
+        run: uv pip install --system --resolution lowest-direct -e ".[dev]"
+
+      - name: Run tests against floor dependencies
+        run: python -m pytest tests/ -v --no-cov
+
+  # Latest / pre-release canary (issue #236): the safety net that *justifies*
+  # shipping no upper-bound caps.  Runs weekly on the newest releases (incl.
+  # pre-releases) of every dependency on Python 3.14 so a breaking ``pydantic``
+  # / ``typer`` / ``deepdiff`` release is caught early.  Non-gating
+  # (``continue-on-error``) — it warns, it does not block.
+  latest-deps:
+    name: latest/pre-release deps (Python 3.14)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install newest (incl. pre-release) dependency versions
+        run: |
+          python -m pip install --upgrade pip
+          pip install --pre --upgrade -e ".[dev]"
+
+      - name: Run tests against latest dependencies
+        run: python -m pytest tests/ -v --no-cov

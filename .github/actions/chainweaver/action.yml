@@ -20,7 +20,7 @@ inputs:
     required: false
     default: "table"
   python-version:
-    description: "Python version to set up. Must be one of ChainWeaver's supported versions (3.10-3.13)."
+    description: "Python version to set up. Must be one of ChainWeaver's supported versions (3.10-3.14)."
     required: false
     default: "3.10"
   chainweaver-version:

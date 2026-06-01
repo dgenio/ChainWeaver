@@ -30,11 +30,11 @@ python -m pytest tests/ -v
 
 ---
 
-## CI pipeline
+## CI
 
 | Workflow | Trigger | Steps |
 |----------|---------|-------|
-| `ci.yml` | Push/PR to `main` | Ruff lint + format + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13}`; `nbmake` runs `notebooks/` on the `ubuntu-latest` / 3.12 lane (issue #229) |
+| `ci.yml` | Push/PR to `main` (+ weekly `schedule`) | Ruff lint + format `chainweaver/ tests/ examples/` + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13, 3.14}`; `nbmake` runs `notebooks/` on the `ubuntu-latest` / 3.12 lane (issue #229); `floor-deps` runs the full suite against minimum declared dependency versions on 3.10 (`uv pip install --resolution lowest-direct`), and a weekly `latest-deps` job runs it against newest/pre-release deps on 3.14 (issue #236) |
 | `docs.yml` | Push/PR to `main` | `mkdocs build --strict` |
 | `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
 | `bench.yml` | Push/PR to `main` | Naive-vs-compiled benchmark on `ubuntu-22.04`; fails PRs whose median `total_duration_ms` regresses beyond 125 % of `gh-pages` baseline |
@@ -166,7 +166,7 @@ When adding a new module to `chainweaver/`:
 |---------|-----------------|
 | Add/remove/rename module | Update AGENTS.md repo map + architecture.md boundaries |
 | Change coding conventions | Update workflows.md code style section |
-| Change CI pipeline | Update workflows.md CI section |
+| Change CI config | Update workflows.md CI section |
 | Add a new exception | Update AGENTS.md common tasks + README error table |
 | Discover a recurring agent mistake | Record in lessons-learned.md |
 | Change review expectations | Update review-checklist.md |
