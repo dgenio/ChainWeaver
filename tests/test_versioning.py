@@ -7,8 +7,13 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from chainweaver.exceptions import FlowNotFoundError, InvalidFlowVersionError
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.exceptions import (
+    FlowNotFoundError,
+    FlowStatusError,
+    InvalidFlowVersionError,
+)
+from chainweaver.executor import FlowExecutor
+from chainweaver.flow import Flow, FlowStatus, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -210,3 +215,115 @@ class TestInvalidFlowVersion:
         # Subsequent lookup should not find the flow.
         with pytest.raises(FlowNotFoundError):
             registry.get_flow("bad_ver")
+
+
+# ---------------------------------------------------------------------------
+# Version-targeted execution (issue #201)
+# ---------------------------------------------------------------------------
+
+
+def _tenx_fn(inp: DummyInput) -> dict[str, Any]:
+    return {"y": inp.x * 10}
+
+
+def _versioned_executor() -> FlowExecutor:
+    """Registry with two versions of ``vflow`` that differ observably.
+
+    ``1.0.0`` echoes ``x`` into ``y``; ``2.0.0`` multiplies it by ten.  The
+    distinct outputs let a test prove *which* version actually executed,
+    not merely that some version ran.
+    """
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="vflow",
+            version="1.0.0",
+            description="Echo x into y.",
+            steps=[FlowStep(tool_name="echo", input_mapping={"x": "x"})],
+        )
+    )
+    registry.register_flow(
+        Flow(
+            name="vflow",
+            version="2.0.0",
+            description="Multiply x by ten into y.",
+            steps=[FlowStep(tool_name="tenx", input_mapping={"x": "x"})],
+        )
+    )
+    executor = FlowExecutor(registry=registry)
+    executor.register_tool(
+        Tool(
+            name="echo",
+            description="Echo x into y.",
+            input_schema=DummyInput,
+            output_schema=DummyOutput,
+            fn=_dummy_fn,
+        )
+    )
+    executor.register_tool(
+        Tool(
+            name="tenx",
+            description="Multiply x by ten into y.",
+            input_schema=DummyInput,
+            output_schema=DummyOutput,
+            fn=_tenx_fn,
+        )
+    )
+    return executor
+
+
+class TestVersionTargetedExecution:
+    def test_default_executes_latest_version(self) -> None:
+        executor = _versioned_executor()
+        result = executor.execute_flow("vflow", {"x": 5})
+        assert result.success is True
+        assert result.flow_version == "2.0.0"
+        assert result.final_output is not None
+        assert result.final_output["y"] == 50
+
+    def test_explicit_older_version_executes_that_version(self) -> None:
+        executor = _versioned_executor()
+        result = executor.execute_flow("vflow", {"x": 5}, version="1.0.0")
+        assert result.success is True
+        assert result.flow_version == "1.0.0"
+        assert result.final_output is not None
+        assert result.final_output["y"] == 5
+
+    def test_explicit_latest_version_matches_default(self) -> None:
+        executor = _versioned_executor()
+        result = executor.execute_flow("vflow", {"x": 3}, version="2.0.0")
+        assert result.flow_version == "2.0.0"
+        assert result.final_output is not None
+        assert result.final_output["y"] == 30
+
+    def test_missing_version_raises_flow_not_found(self) -> None:
+        executor = _versioned_executor()
+        with pytest.raises(FlowNotFoundError) as exc_info:
+            executor.execute_flow("vflow", {"x": 1}, version="9.9.9")
+        assert exc_info.value.version == "9.9.9"
+
+    def test_status_guard_applies_to_targeted_version(self) -> None:
+        executor = _versioned_executor()
+        executor._registry.set_flow_status("vflow", FlowStatus.NEEDS_REVIEW, version="1.0.0")
+        # The targeted version's status is what gates execution.
+        with pytest.raises(FlowStatusError):
+            executor.execute_flow("vflow", {"x": 1}, version="1.0.0")
+        # Latest (2.0.0) is still ACTIVE and unaffected.
+        assert executor.execute_flow("vflow", {"x": 1}).success is True
+
+    def test_force_bypasses_status_guard_for_targeted_version(self) -> None:
+        executor = _versioned_executor()
+        executor._registry.set_flow_status("vflow", FlowStatus.NEEDS_REVIEW, version="1.0.0")
+        result = executor.execute_flow("vflow", {"x": 4}, version="1.0.0", force=True)
+        assert result.success is True
+        assert result.flow_version == "1.0.0"
+        assert result.final_output is not None
+        assert result.final_output["y"] == 4
+
+    @pytest.mark.asyncio
+    async def test_async_explicit_version(self) -> None:
+        executor = _versioned_executor()
+        result = await executor.execute_flow_async("vflow", {"x": 6}, version="1.0.0")
+        assert result.flow_version == "1.0.0"
+        assert result.final_output is not None
+        assert result.final_output["y"] == 6

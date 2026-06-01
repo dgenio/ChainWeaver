@@ -389,6 +389,7 @@
         "execution_log": "list[chainweaver.executor.StepRecord]",
         "final_output": "dict[str, Any] | NoneType",
         "flow_name": "str",
+        "flow_version": "str",
         "initial_input": "dict[str, Any]",
         "started_at": "datetime.datetime",
         "success": "bool",

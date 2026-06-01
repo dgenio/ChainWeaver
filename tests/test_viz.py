@@ -276,6 +276,7 @@ class TestResultMermaid:
 
         result = ExecutionResult(
             flow_name="empty",
+            flow_version="0.1.0",
             success=True,
             final_output={},
             execution_log=[],

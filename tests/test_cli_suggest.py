@@ -221,6 +221,7 @@ def _make_trace(
     ]
     return ExecutionResult(
         flow_name=flow_name,
+        flow_version="0.1.0",
         success=True,
         final_output=outputs_per_step[-1] if outputs_per_step else None,
         execution_log=log,

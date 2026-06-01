@@ -70,6 +70,7 @@ def _make_result(
         total = sum(d for _, d in durations) + 1.0
     return ExecutionResult(
         flow_name=flow_name,
+        flow_version="0.1.0",
         success=success,
         final_output={"ok": True} if success else None,
         execution_log=log,
@@ -362,6 +363,7 @@ class TestProfileReliabilitySingle:
         now = datetime(2026, 5, 16, tzinfo=timezone.utc)
         result = ExecutionResult(
             flow_name="etl",
+            flow_version="0.1.0",
             success=True,
             final_output={"ok": True},
             execution_log=log,
@@ -440,6 +442,7 @@ class TestProfileReliabilitySingle:
         now = datetime(2026, 5, 16, tzinfo=timezone.utc)
         result = ExecutionResult(
             flow_name="etl",
+            flow_version="0.1.0",
             success=False,
             final_output=None,
             execution_log=log,
@@ -496,6 +499,7 @@ class TestProfileReliabilityMulti:
             ]
             return ExecutionResult(
                 flow_name="etl",
+                flow_version="0.1.0",
                 success=True,
                 final_output={"ok": True},
                 execution_log=log,

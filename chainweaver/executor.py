@@ -397,6 +397,12 @@ class ExecutionResult(BaseModel):
 
     Attributes:
         flow_name: Name of the flow that was executed.
+        flow_version: The exact registered version of the flow that
+            executed (issue #201).  When :meth:`FlowExecutor.execute_flow`
+            is called with ``version=...`` this is that version; otherwise
+            it is the latest registered version that was resolved.  Audit,
+            replay, and external-routing feedback loops use this to
+            correlate a result with the precise flow definition that ran.
         success: ``True`` when all steps completed without error.
         final_output: The merged execution context (initial input combined
             with all step outputs), or ``None`` on failure.
@@ -436,6 +442,7 @@ class ExecutionResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     flow_name: str
+    flow_version: str
     success: bool
     final_output: dict[str, Any] | None
     execution_log: list[StepRecord] = Field(default_factory=list)
@@ -566,6 +573,15 @@ class FlowExecutor:
         # invoking the relevant ``_execute_*`` path so the loops know
         # where to start and which records to prepend.
         self._resume_snapshot: ExecutionSnapshot | None = None
+        # Version of the flow currently executing (issue #201).  Set at the
+        # top of every result-producing path so ``_make_result`` can stamp
+        # ``ExecutionResult.flow_version`` without threading the value
+        # through ~30 call sites.  Sub-flow composition (issue #75) recurses
+        # through ``execute_flow``; ``_execute_step`` save/restores this
+        # around the recursive call so the parent's value is not clobbered.
+        # Like ``_in_replay`` / ``_resume_snapshot`` this assumes the
+        # documented "one executor per concurrent run" contract.
+        self._active_flow_version: str = ""
         # Plugin discovery (issue #130).  When ``True``, every Tool
         # advertised under the ``chainweaver.tools`` entry-point group
         # is registered eagerly so end-users don't have to call
@@ -881,6 +897,7 @@ class FlowExecutor:
         """Re-run *flow* starting at index *resume_from_step* with a
         context seeded from the original execution log.
         """
+        self._active_flow_version = flow.version
         if resume_from_step > len(flow.steps):
             raise ValueError(
                 f"resume_from_step={resume_from_step} exceeds step count {len(flow.steps)}."
@@ -1082,6 +1099,7 @@ class FlowExecutor:
         flow_name: str,
         initial_input: dict[str, Any],
         *,
+        version: str | None = None,
         force: bool = False,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
@@ -1089,6 +1107,13 @@ class FlowExecutor:
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
+            version: When provided, execute that exact registered flow
+                version (issue #201).  When ``None`` (the default), execute
+                the latest registered version for *flow_name* — preserving
+                the historical behaviour.  External routers and audit/replay
+                systems use this to correlate a routing decision with the
+                precise flow version that ran; the version that executed is
+                always recorded on :attr:`ExecutionResult.flow_version`.
             force: When ``True``, bypass the status guard and execute even if
                 the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
 
@@ -1099,11 +1124,13 @@ class FlowExecutor:
             reported via ``ExecutionResult.success`` instead of being raised.
 
         Raises:
-            FlowNotFoundError: When *flow_name* is not registered.
+            FlowNotFoundError: When *flow_name* (at *version*, when given) is
+                not registered.
             FlowStatusError: When the flow's status is not ``ACTIVE`` and
                 *force* is ``False``.
         """
-        flow = self._registry.get_flow(flow_name)
+        flow = self._registry.get_flow(flow_name, version=version)
+        self._active_flow_version = flow.version
 
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
@@ -1279,6 +1306,7 @@ class FlowExecutor:
         flow_name: str,
         initial_input: dict[str, Any],
         *,
+        version: str | None = None,
         force: bool = False,
     ) -> ExecutionResult:
         """Asynchronously execute a registered flow (issue #80).
@@ -1313,13 +1341,17 @@ class FlowExecutor:
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
+            version: When provided, execute that exact registered flow
+                version (issue #201); when ``None`` (the default), execute
+                the latest registered version.  Mirrors the synchronous
+                :meth:`execute_flow`.
             force: When ``True``, bypass the status guard and execute even
                 if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
-        flow = self._registry.get_flow(flow_name)
+        flow = self._registry.get_flow(flow_name, version=version)
 
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
@@ -1377,6 +1409,7 @@ class FlowExecutor:
         initial_input: dict[str, Any],
     ) -> ExecutionResult:
         """Async-native counterpart to the linear branch of :meth:`execute_flow`."""
+        self._active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -1486,6 +1519,7 @@ class FlowExecutor:
         follow-up — see issue #80 acceptance criteria), and outputs are
         merged with sibling-key-conflict detection between levels.
         """
+        self._active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -2078,6 +2112,7 @@ class FlowExecutor:
             )
         result = ExecutionResult(
             flow_name=flow_name,
+            flow_version=self._active_flow_version,
             success=success,
             final_output=final_output,
             execution_log=execution_log,
@@ -2250,6 +2285,7 @@ class FlowExecutor:
         snapshot: ExecutionSnapshot,
     ) -> ExecutionResult:
         """Continue a linear execution from *snapshot.completed_steps*."""
+        self._active_flow_version = flow.version
         trace_id = snapshot.trace_id
         flow_name = snapshot.flow_name
         flow_started_at = snapshot.started_at
@@ -3192,6 +3228,7 @@ class FlowExecutor:
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
+        self._active_flow_version = flow.version
         # Resume support (issue #128): when _resume_snapshot is set,
         # reuse its trace_id / started_at / context / log and skip the
         # already-completed DAG levels.

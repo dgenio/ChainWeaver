@@ -602,6 +602,13 @@ An in-memory catalogue of flows.
 executor = FlowExecutor(registry=registry)
 executor.register_tool(tool_a)
 result = executor.execute_flow("my_flow", {"key": "value"})
+
+# Version-targeted execution: run an exact registered version instead of the
+# latest. Omitting `version` keeps the default (latest) behaviour. The version
+# that actually ran is always recorded on `result.flow_version`, so routing,
+# audit, and replay can correlate a result with the precise flow definition.
+result = executor.execute_flow("my_flow", {"key": "value"}, version="1.2.0")
+assert result.flow_version == "1.2.0"
 ```
 
 Runs a flow step-by-step with full schema validation and structured logging.
