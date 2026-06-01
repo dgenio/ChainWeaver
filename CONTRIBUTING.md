@@ -145,8 +145,13 @@ applications and lockfiles, not here):
   minimums via `uv pip install --resolution lowest-direct` and runs the full
   suite on Python 3.10, and a weekly `latest-deps` job runs against the newest
   (incl. pre-release) versions on Python 3.14 so a breaking upstream release
-  is caught early. If you raise a dependency floor, run the floor job locally
-  first: `uv pip install --resolution lowest-direct -e ".[dev]" && pytest tests/ --no-cov`.
+  is caught early. Note that `--resolution lowest-direct` pins each *directly*
+  declared dependency to its floor; where a heavier extra's transitive
+  requirement lifts one above its declared floor (currently `pydantic`, which
+  the framework extras in `[dev]` pull to `>=2.12`), that floor is verified in a
+  standalone run rather than by the combined `.[dev]` floor job. If you raise a
+  dependency floor, run the floor job locally first:
+  `uv pip install --resolution lowest-direct -e ".[dev]" && pytest tests/ --no-cov`.
 
 ### Vocabulary
 
