@@ -198,6 +198,18 @@
           "title": "Depends On",
           "type": "array"
         },
+        "flow_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flow Name"
+        },
         "input_contract": {
           "anyOf": [
             {
@@ -257,12 +269,19 @@
           "type": "string"
         },
         "tool_name": {
-          "title": "Tool Name",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
         }
       },
       "required": [
-        "tool_name",
         "step_id"
       ],
       "title": "DAGFlowStep",
@@ -402,7 +421,7 @@
       "type": "string"
     },
     "FlowStep": {
-      "description": "A single step inside a :class:`Flow`.\n\nAttributes:\n    tool_name: The name of the :class:`~chainweaver.tools.Tool` to invoke.\n    input_mapping: Maps keys expected by the tool's *input_schema* to keys\n        present in the accumulated execution context (initial input merged\n        with all previous step outputs).\n\n        If a value is a string it is treated as a key lookup in the context.\n        If a value is any other type (int, float, bool, \u2026) it is used as a\n        literal constant.\n\n        An empty mapping (the default) means the tool receives the full\n        current context as-is.\n    decision_candidates: Optional list of tool names that an external\n        :class:`~chainweaver.decisions.DecisionCallback` may pick from\n        at execution time (issue #102).  When ``None`` (the default)\n        the step always invokes ``tool_name``.  When set, the executor\n        calls the registered ``decision_callback`` with the candidate\n        list and the current context, and runs whichever tool the\n        callback selects.  The callback's return value must be a\n        member of ``decision_candidates``; if no callback is\n        registered the executor falls back to ``tool_name``.\n    retry: Optional :class:`RetryPolicy` driving the executor's retry\n        behaviour for this step.\n    on_error: How the executor reacts when all retry attempts are\n        exhausted: ``\"fail\"`` (the default), ``\"skip\"``, or\n        ``\"fallback:<tool_name>\"``.  Step-contract failures\n        (:attr:`input_contract` / :attr:`output_contract`) intentionally\n        bypass this policy and always abort the step \u2014 contract\n        mismatches are wiring bugs rather than transient errors.\n    input_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the *resolved* step inputs **before** the\n        tool is invoked (issue #172).  This is independent from the\n        tool's own ``input_schema``: it expresses a step-level\n        contract that the wiring (``input_mapping`` + accumulated\n        context) must satisfy, surfacing mapping mistakes with a\n        schema-shaped error rather than waiting for the tool's own\n        validation to fail.\n    output_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the tool's outputs **after** the tool has\n        run (issue #172).  Use this when the step has a tighter\n        output contract than the tool's own ``output_schema`` \u2014 e.g.\n        a tool that returns a superset of fields but this step only\n        promises a subset.\n\nExample::\n\n    # Pass the \"value\" from the previous step as \"value\" to this tool\n    step = FlowStep(tool_name=\"add_ten\", input_mapping={\"value\": \"value\"})\n\n    # Mix a context lookup with a literal constant\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n    )\n\n    # Hybrid execution: let an external callback pick a tool\n    step = FlowStep(\n        tool_name=\"summarize_short\",   # default if no callback set\n        decision_candidates=[\"summarize_short\", \"summarize_long\"],\n    )\n\n    # Add typed step contracts (issue #172)\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n        input_contract=FlowStep.contract_ref_from(ScaleInput),\n        output_contract=FlowStep.contract_ref_from(ScaleOutput),\n    )",
+      "description": "A single step inside a :class:`Flow`.\n\nAttributes:\n    tool_name: The name of the :class:`~chainweaver.tools.Tool` to invoke.\n        Mutually exclusive with :attr:`flow_name`; exactly one must be set.\n    flow_name: The name of a registered sub-:class:`Flow` to execute in\n        place of a tool (issue #75 \u2014 flow composition).  When set, the\n        executor resolves the named flow from the registry, runs it with\n        this step's resolved inputs as its initial input, and merges the\n        sub-flow's final output back into the parent context.  Mutually\n        exclusive with :attr:`tool_name`.  Sub-flow references are checked\n        for cycles and a configurable maximum nesting depth before\n        execution (raising\n        :class:`~chainweaver.exceptions.FlowCompositionError`).\n    input_mapping: Maps keys expected by the tool's *input_schema* to keys\n        present in the accumulated execution context (initial input merged\n        with all previous step outputs).\n\n        If a value is a string it is treated as a key lookup in the context.\n        If a value is any other type (int, float, bool, \u2026) it is used as a\n        literal constant.\n\n        An empty mapping (the default) means the tool receives the full\n        current context as-is.\n    decision_candidates: Optional list of tool names that an external\n        :class:`~chainweaver.decisions.DecisionCallback` may pick from\n        at execution time (issue #102).  When ``None`` (the default)\n        the step always invokes ``tool_name``.  When set, the executor\n        calls the registered ``decision_callback`` with the candidate\n        list and the current context, and runs whichever tool the\n        callback selects.  The callback's return value must be a\n        member of ``decision_candidates``; if no callback is\n        registered the executor falls back to ``tool_name``.\n    retry: Optional :class:`RetryPolicy` driving the executor's retry\n        behaviour for this step.\n    on_error: How the executor reacts when all retry attempts are\n        exhausted: ``\"fail\"`` (the default), ``\"skip\"``, or\n        ``\"fallback:<tool_name>\"``.  Step-contract failures\n        (:attr:`input_contract` / :attr:`output_contract`) intentionally\n        bypass this policy and always abort the step \u2014 contract\n        mismatches are wiring bugs rather than transient errors.\n    input_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the *resolved* step inputs **before** the\n        tool is invoked (issue #172).  This is independent from the\n        tool's own ``input_schema``: it expresses a step-level\n        contract that the wiring (``input_mapping`` + accumulated\n        context) must satisfy, surfacing mapping mistakes with a\n        schema-shaped error rather than waiting for the tool's own\n        validation to fail.\n    output_contract: Optional ``\"module:qualname\"`` reference to a\n        :class:`~pydantic.BaseModel` subclass that the executor\n        validates against the tool's outputs **after** the tool has\n        run (issue #172).  Use this when the step has a tighter\n        output contract than the tool's own ``output_schema`` \u2014 e.g.\n        a tool that returns a superset of fields but this step only\n        promises a subset.\n\nExample::\n\n    # Pass the \"value\" from the previous step as \"value\" to this tool\n    step = FlowStep(tool_name=\"add_ten\", input_mapping={\"value\": \"value\"})\n\n    # Mix a context lookup with a literal constant\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n    )\n\n    # Hybrid execution: let an external callback pick a tool\n    step = FlowStep(\n        tool_name=\"summarize_short\",   # default if no callback set\n        decision_candidates=[\"summarize_short\", \"summarize_long\"],\n    )\n\n    # Add typed step contracts (issue #172)\n    step = FlowStep(\n        tool_name=\"scale\",\n        input_mapping={\"number\": \"value\", \"factor\": 3},\n        input_contract=FlowStep.contract_ref_from(ScaleInput),\n        output_contract=FlowStep.contract_ref_from(ScaleOutput),\n    )",
       "properties": {
         "decision_candidates": {
           "anyOf": [
@@ -418,6 +437,18 @@
           ],
           "default": null,
           "title": "Decision Candidates"
+        },
+        "flow_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flow Name"
         },
         "input_contract": {
           "anyOf": [
@@ -465,13 +496,18 @@
           "default": null
         },
         "tool_name": {
-          "title": "Tool Name",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
         }
       },
-      "required": [
-        "tool_name"
-      ],
       "title": "FlowStep",
       "type": "object"
     },

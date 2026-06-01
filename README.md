@@ -584,6 +584,36 @@ An ordered sequence of steps. See [AGENTS.md](AGENTS.md) §5 for the full
 field table (`status`, `tool_schema_hashes`, and the `input_schema_ref` /
 `output_schema_ref` string fields with their resolved-property accessors).
 
+A `FlowStep` runs **either** a tool (`tool_name`) **or** a registered
+sub-flow (`flow_name`) — exactly one, never both. Referencing a sub-flow lets
+you compose reusable pipelines (issue #75):
+
+```python
+fetch_validate = Flow(
+    name="fetch_validate",
+    description="Fetch and validate.",
+    steps=[
+        FlowStep(tool_name="fetch", input_mapping={"url": "url"}),
+        FlowStep(tool_name="validate", input_mapping={"data": "data"}),
+    ],
+)
+pipeline = Flow(
+    name="pipeline",
+    description="Reuse fetch_validate, then transform.",
+    steps=[
+        FlowStep(flow_name="fetch_validate", input_mapping={"url": "url"}),  # sub-flow
+        FlowStep(tool_name="transform", input_mapping={"data": "data"}),
+    ],
+)
+```
+
+The executor runs the sub-flow with the step's resolved inputs, merges its
+output back into the parent context, and attaches the sub-flow's
+`ExecutionResult` to the parent `StepRecord.sub_result`. Sub-flow references
+are checked for cycles and a configurable max nesting depth
+(`FlowExecutor(max_composition_depth=...)`, default 10) before execution,
+raising `FlowCompositionError` otherwise.
+
 #### `FlowRegistry`
 
 ```python
@@ -713,6 +743,7 @@ All errors are typed and traceable:
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 | `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
+| `FlowCompositionError` | A composed flow has a sub-flow cycle, exceeds `max_composition_depth`, or references an unregistered sub-flow |
 | `ToolTimeoutError` | A `Tool` with `timeout_seconds` set exceeds the configured wall-clock cap |
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |

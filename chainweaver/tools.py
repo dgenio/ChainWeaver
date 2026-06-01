@@ -434,6 +434,16 @@ class Tool:
                 ) from exc
         else:
             first_step = flow.steps[0]
+            if first_step.tool_name is None:
+                # Composed sub-flow first step (issue #75): there is no tool to
+                # read a schema from. Require an explicit declaration rather
+                # than guessing across the sub-flow boundary.
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot derive input schema: first step runs sub-flow "
+                    f"'{first_step.flow_name}'. Set Flow.input_schema_ref or "
+                    "pass input_schema=... explicitly.",
+                )
             try:
                 first_tool = executor.get_tool(first_step.tool_name)
             except ToolNotFoundError as exc:
@@ -458,6 +468,16 @@ class Tool:
                 ) from exc
         else:
             terminal_step = _terminal_step(flow)
+            if terminal_step.tool_name is None:
+                # Composed sub-flow terminal step (issue #75): require an
+                # explicit output schema rather than guessing across the
+                # sub-flow boundary.
+                raise ToolDefinitionError(
+                    flow.name,
+                    f"Cannot derive output schema: terminal step runs sub-flow "
+                    f"'{terminal_step.flow_name}'. Set Flow.output_schema_ref or "
+                    "pass output_schema=... explicitly.",
+                )
             try:
                 terminal_tool = executor.get_tool(terminal_step.tool_name)
             except ToolNotFoundError as exc:
@@ -505,6 +525,10 @@ class Tool:
         else:
             constituent_contracts: list[ToolSafetyContract] = []
             for step in flow.steps:
+                if step.tool_name is None:
+                    # Composed sub-flow step (issue #75): its safety contract is
+                    # the sub-flow's own; skip here (callers can pass safety=...).
+                    continue
                 try:
                     inner_tool = executor.get_tool(step.tool_name)
                 except ToolNotFoundError:

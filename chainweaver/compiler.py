@@ -163,6 +163,11 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
             context_fields[name] = _get_field_type(finfo)
 
     for idx, step in enumerate(flow.steps):
+        # Composed sub-flow steps (issue #75) reference a flow, not a tool;
+        # their wiring is validated by the executor's composition check, so
+        # the tool-centric static checks below do not apply.
+        if step.tool_name is None:
+            continue
         # 1. Tool existence.
         if step.tool_name not in tools:
             errors.append(

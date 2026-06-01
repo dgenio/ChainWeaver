@@ -380,6 +380,10 @@ def _suggest_parallelizable_pairs(
     for idx in range(len(flow.steps) - 1):
         a = flow.steps[idx]
         b = flow.steps[idx + 1]
+        # Composed sub-flow steps (issue #75) have no tool schema, so they do
+        # not participate in tool-to-tool schema-compatibility suggestions.
+        if a.tool_name is None or b.tool_name is None:
+            continue
         tool_a = tools.get(a.tool_name)
         tool_b = tools.get(b.tool_name)
         if tool_a is None or tool_b is None:
@@ -432,14 +436,14 @@ def _suggest_dead_steps(flow: Flow, tools: dict[str, Tool] | None) -> list[Sugge
         if not step.input_mapping:
             # Empty mapping = full-context passthrough; the step
             # implicitly reads its declared input_schema fields.
-            tool = tools.get(step.tool_name)
+            tool = tools.get(step.tool_name) if step.tool_name is not None else None
             if tool is not None:
                 accum |= set(tool.input_schema.model_fields)
         else:
             accum |= _step_reads(step)
     downstream_reads.reverse()
     for idx, step in enumerate(flow.steps[:-1]):
-        tool = tools.get(step.tool_name)
+        tool = tools.get(step.tool_name) if step.tool_name is not None else None
         if tool is None:
             continue
         produced = set(tool.output_schema.model_fields)

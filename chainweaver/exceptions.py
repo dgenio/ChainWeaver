@@ -202,6 +202,32 @@ class FlowCancelledError(ChainWeaverError):
         super().__init__(f"Flow '{flow_name}' cancelled before step {step_index} ({reason}).")
 
 
+class FlowCompositionError(ChainWeaverError):
+    """Raised when a composed flow's sub-flow references are invalid (issue #75).
+
+    Flow composition lets a :class:`~chainweaver.flow.FlowStep` reference a
+    registered sub-flow by ``flow_name`` instead of a tool.  Before executing,
+    the executor walks the composition graph and rejects:
+
+    * **cycles** — e.g. ``A`` references ``B`` which references ``A``;
+    * **excessive nesting** — chains deeper than the executor's configured
+      ``max_composition_depth``;
+    * **dangling references** — a ``flow_name`` that is not registered.
+
+    Attributes:
+        flow_name: Name of the flow whose composition is invalid.
+        reason: Machine-readable reason code — one of ``"cycle"``,
+            ``"max_depth_exceeded"``, or ``"unknown_flow"``.
+        detail: Human-readable explanation (includes the offending chain).
+    """
+
+    def __init__(self, flow_name: str, reason: str, detail: str) -> None:
+        self.flow_name = flow_name
+        self.reason = reason
+        self.detail = detail
+        super().__init__(f"Invalid flow composition for '{flow_name}' ({reason}): {detail}")
+
+
 class InvalidFlowVersionError(ChainWeaverError):
     """Raised when a flow's version string cannot be parsed as a PEP 440 version."""
 

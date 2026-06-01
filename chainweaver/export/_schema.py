@@ -59,6 +59,14 @@ def derive_flow_input_schema(
             return resolved
 
     first_step = flow.steps[0]
+    if first_step.tool_name is None:
+        # Composed sub-flow first step (issue #75): no single tool schema to
+        # derive from — require an explicit declaration on the flow.
+        raise ToolDefinitionError(
+            flow.name,
+            f"Cannot derive input schema: first step runs sub-flow "
+            f"'{first_step.flow_name}'. Set Flow.input_schema_ref explicitly.",
+        )
     try:
         first_tool = executor.get_tool(first_step.tool_name)
     except ToolNotFoundError as exc:
@@ -107,6 +115,10 @@ def derive_flow_output_schema(
     else:
         terminal_step_tool = flow.steps[-1].tool_name
 
+    if terminal_step_tool is None:
+        # Composed sub-flow terminal step (issue #75): output schema is not
+        # derivable from a tool — treat as ambiguous (best-effort returns None).
+        return None
     try:
         terminal_tool = executor.get_tool(terminal_step_tool)
     except ToolNotFoundError:

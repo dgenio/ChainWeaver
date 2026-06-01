@@ -56,7 +56,7 @@ def flow_to_ascii(flow: Flow | DAGFlow) -> str:
     if isinstance(flow, DAGFlow):
         return _dag_to_ascii(flow)
 
-    parts = [f"[{step.tool_name}]" for step in flow.steps]
+    parts = [f"[{step.tool_name or step.flow_name}]" for step in flow.steps]
     return " → ".join(parts)
 
 
@@ -111,7 +111,9 @@ def flow_to_mermaid(
         # Use step_id as node id, fall back to flat indexing.
         id_lookup = {dag_step.step_id: f"S_{dag_step.step_id}" for dag_step in flow.steps}
         for dag_step in flow.steps:
-            label = _node_label(dag_step.tool_name, show_schemas=show_schemas, schema_fields=None)
+            label = _node_label(
+                dag_step.display_name, show_schemas=show_schemas, schema_fields=None
+            )
             lines.append(f"  {id_lookup[dag_step.step_id]}[{label}]")
         for dag_step in flow.steps:
             for dep in dag_step.depends_on:
@@ -119,7 +121,11 @@ def flow_to_mermaid(
     else:
         node_ids = [_node_id("S", i) for i in range(len(flow.steps))]
         for nid, lin_step in zip(node_ids, flow.steps, strict=True):
-            label = _node_label(lin_step.tool_name, show_schemas=show_schemas, schema_fields=None)
+            label = _node_label(
+                lin_step.tool_name or lin_step.flow_name or "?",
+                show_schemas=show_schemas,
+                schema_fields=None,
+            )
             lines.append(f"  {nid}[{label}]")
         for prev, nxt in pairwise(node_ids):
             lines.append(f"  {prev} --> {nxt}")
@@ -202,7 +208,7 @@ def flow_to_dot(flow: Flow | DAGFlow) -> str:
         node_ids = {step.step_id: f"S_{_dot_identifier(step.step_id)}" for step in flow.steps}
         for dag_step in flow.steps:
             lines.append(
-                f"  {node_ids[dag_step.step_id]} [label={_dot_quote(dag_step.tool_name)}];"
+                f"  {node_ids[dag_step.step_id]} [label={_dot_quote(dag_step.display_name)}];"
             )
         for dag_step in flow.steps:
             for dep in dag_step.depends_on:
@@ -212,7 +218,8 @@ def flow_to_dot(flow: Flow | DAGFlow) -> str:
         # from step position rather than tool name.
         positional_ids = [_node_id("S", i) for i in range(len(flow.steps))]
         for nid, lin_step in zip(positional_ids, flow.steps, strict=True):
-            lines.append(f"  {nid} [label={_dot_quote(lin_step.tool_name)}];")
+            label = lin_step.tool_name or lin_step.flow_name or "?"
+            lines.append(f"  {nid} [label={_dot_quote(label)}];")
         for prev, nxt in pairwise(positional_ids):
             lines.append(f"  {prev} -> {nxt};")
 

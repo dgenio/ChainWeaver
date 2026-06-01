@@ -287,12 +287,12 @@ class KernelBackedExecutor(FlowExecutor):
                             f"Input mapping key '{source}' not found in "
                             f"context for step '{step.step_id}'.",
                         )
-                        log_step_error(_logger, step_index, step.tool_name, err)
+                        log_step_error(_logger, step_index, step.display_name, err)
                         err_type, err_msg = _exc_to_strings(err)
                         now = _now_utc()
                         return StepRecord(
                             step_index=step_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs={},
                             outputs=None,
                             error_type=err_type,
@@ -311,12 +311,12 @@ class KernelBackedExecutor(FlowExecutor):
         except KernelInvocationError as exc:
             # Refine step_index now that we know it.
             err = KernelInvocationError(exc.capability_id, step_index, exc.detail)
-            log_step_error(_logger, step_index, step.tool_name, err)
+            log_step_error(_logger, step_index, step.display_name, err)
             err_type, err_msg = _exc_to_strings(err)
             now = _now_utc()
             return StepRecord(
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=inputs,
                 outputs=None,
                 error_type=err_type,
@@ -336,12 +336,12 @@ class KernelBackedExecutor(FlowExecutor):
                 f"kernel raised {type(exc).__name__}: {exc}",
             )
             err.__cause__ = exc
-            log_step_error(_logger, step_index, step.tool_name, err)
+            log_step_error(_logger, step_index, step.display_name, err)
             err_type, err_msg = _exc_to_strings(err)
             now = _now_utc()
             return StepRecord(
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=inputs,
                 outputs=None,
                 error_type=err_type,
@@ -358,12 +358,12 @@ class KernelBackedExecutor(FlowExecutor):
                 step_index,
                 f"kernel returned non-dict outputs ({type(outputs).__name__}).",
             )
-            log_step_error(_logger, step_index, step.tool_name, err)
+            log_step_error(_logger, step_index, step.display_name, err)
             err_type, err_msg = _exc_to_strings(err)
             now = _now_utc()
             return StepRecord(
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=inputs,
                 outputs=None,
                 error_type=err_type,
@@ -377,7 +377,7 @@ class KernelBackedExecutor(FlowExecutor):
         now = _now_utc()
         return StepRecord(
             step_index=step_index,
-            tool_name=step.tool_name,
+            tool_name=step.display_name,
             inputs=inputs,
             outputs=outputs,
             error_type=None,
