@@ -28,6 +28,7 @@ base install.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -44,6 +45,12 @@ try:  # The Weaver Stack contract is an optional extra.
         selected_capability_id,
     )
 except ImportError:
+    # Only treat this as "extra absent" when ``weaver_contracts`` truly is not
+    # installed.  Otherwise the import failed for a real reason (a bug in
+    # ``weaver_spec`` or a broken ChainWeaver install) — re-raise rather than
+    # mask it behind a misleading "install the extra" notice.
+    if importlib.util.find_spec("weaver_contracts") is not None:
+        raise
     print(
         "[weaver-stack] skipped: install the extra with "
         "`pip install 'chainweaver[weaver-stack]'` to run the golden path."

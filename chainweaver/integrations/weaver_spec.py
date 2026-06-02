@@ -286,8 +286,10 @@ class SpecCompatibilityReport(BaseModel):
     Attributes:
         spec_version: The ``weaver-contracts`` version ChainWeaver
             consumes.
-        contract_types: Sorted tuple of contract type names this module
-            re-exports.
+        contract_types: Sorted tuple of the core contract type names
+            tracked for conformance (the routing/token types whose shape
+            ChainWeaver depends on) — not the full re-export set in
+            ``__all__``.
         exporter_present: ``True`` when :func:`flow_to_selectable_item`
             is importable from this module (the contract for #107).
     """
