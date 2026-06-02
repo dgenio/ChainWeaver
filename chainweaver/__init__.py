@@ -156,6 +156,7 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.observer import ChainObserver, FlowSuggestion
 from chainweaver.optimizer import (
     OptimizationStrategy,
     ToolDescriptionProposal,
@@ -204,6 +205,7 @@ __all__ = [
     "BaseMiddleware",
     "CancellationToken",
     "ChainAnalyzer",
+    "ChainObserver",
     "ChainWeaverError",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
@@ -255,6 +257,7 @@ __all__ = [
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "FlowSuggestion",
     "FuzzCase",
     "FuzzConfigError",
     "FuzzFailure",
