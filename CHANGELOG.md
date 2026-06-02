@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Offline LLM-assisted flow compiler** (#28): a new `chainweaver.compiler_llm`
+  module exposing `LLMProposal`, `llm_propose_flows()`, and `write_proposals()`.
+  It proposes deterministic `Flow` definitions from tool metadata using an LLM
+  reached only through a provider-agnostic `llm_fn(prompt) -> completion`
+  callable — **offline, at build time, never in the executor**. Proposals are
+  returned as reviewable data (and optionally written as PR-ready `.flow.yaml`
+  files plus a `PROPOSALS.md`); they are never auto-registered. Proposed flow
+  names are validated as safe filenames before `write_proposals()` writes them,
+  so a malformed completion cannot escape the target directory (path traversal).
+- **Offline tool-description optimizer** (#100): a new `chainweaver.optimizer`
+  module exposing `OptimizationStrategy`, `ToolDescriptionProposal`,
+  `optimize_tool_descriptions()`, and `optimize_new_tool_description()`. It
+  rewrites tool descriptions for ecosystem-wide discriminability (or
+  conciseness / structure) via the same offline `llm_fn` seam, returning
+  proposals with an approximate `token_delta` for human review.
+  Both modules share a private `chainweaver._offline_llm` helper and a new
+  typed `OfflineLLMError`; a guard test keeps `executor.py` free of any LLM
+  import (core invariant #1). YAML parsing uses the existing `chainweaver[yaml]`
+  extra, so the base install is unaffected.
 - **Official Python 3.14 support** (#215): `pyproject.toml` classifiers and the
   CI test matrix now cover Python 3.10–3.14 inclusive.
 - **Library-grade dependency hygiene** (#236): a `floor-deps` CI job installs

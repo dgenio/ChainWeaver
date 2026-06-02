@@ -462,6 +462,28 @@ class CostProfileError(ChainWeaverError):
         )
 
 
+class OfflineLLMError(ChainWeaverError):
+    """Raised when an offline, build-time LLM-assisted proposer cannot use a completion.
+
+    Shared by :mod:`chainweaver.compiler_llm` (issue #28) and
+    :mod:`chainweaver.optimizer` (issue #100).  These modules run the LLM
+    *offline, at build time* — never inside :mod:`chainweaver.executor` — and
+    turn its completion into reviewable proposals.  This error surfaces a
+    clear, typed failure when the completion is blank, is not valid YAML, is
+    structurally malformed, or references tools/flows that do not exist —
+    rather than leaking a raw ``yaml.YAMLError`` or ``KeyError`` to the
+    caller.  It is also raised when ``pyyaml`` (the ``chainweaver[yaml]``
+    extra) is needed to parse a completion but is not installed.
+
+    Attributes:
+        detail: Human-readable explanation of what failed.
+    """
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
 class PredicateSyntaxError(ChainWeaverError):
     """Raised when a conditional-branch predicate cannot be parsed or evaluated.
 

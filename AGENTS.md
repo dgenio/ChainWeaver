@@ -37,6 +37,9 @@ chainweaver/
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
 ├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
+├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal + llm_propose_flows() + write_proposals() (#28); banned from executor.py
+├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() (#100); banned from executor.py
+├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml() + render_tool_catalogue() (#28, #100)
 ├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + safety vocabulary (#19, #125, #9, #8)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)

@@ -27,6 +27,8 @@ deterministic workflow engine. The two framework recipes need an optional extra
 | [OpenAI Agents SDK tool](openai-agents-tool.md) | A compiled flow exposed as one agent tool (dry-run). | `chainweaver[openai-agents]` |
 | [Release-readiness workflow](release-readiness.md) | A deterministic pre-release gate with branching. | — |
 | [Offline policy evaluation (skdr-eval)](policy-eval-skdr.md) | A fixture-based policy-eval flow with a deterministic gate. | — |
+| [Offline LLM-assisted flow proposals](offline-llm-flow-proposals.md) | An LLM proposing reviewable flows at build time. | — |
+| [Offline tool-description optimizer](offline-description-optimizer.md) | Set-level description rewrites for discriminability. | — |
 
 ## Conventions used in the cookbook
 
