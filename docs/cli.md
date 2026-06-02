@@ -195,6 +195,36 @@ chainweaver run flows/etl.flow.yaml --tools my_package.tools --input input.json 
 
 ---
 
+### `serve`
+
+Expose a flow as **MCP tools** over a chosen transport. Loads a flow file and its tool modules (exactly like `run`), mounts the flow on a [`FlowServer`](mcp-server.md), and serves it so MCP-aware agents call the whole compiled flow as a single deterministic tool. Requires the `mcp` extra (`pip install 'chainweaver[mcp]'`).
+
+```
+chainweaver serve <flow_file> [--tools module] [--transport stdio|sse|streamable-http] [--name NAME] [--prefix PREFIX]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tools` / `-t` | (none) | Python module path to import tools from (repeatable) |
+| `--transport` | `stdio` | MCP transport: `stdio`, `sse`, or `streamable-http` |
+| `--name` | `chainweaver` | Server name advertised to MCP clients |
+| `--prefix` | (none) | Prefix for exposed tool names (e.g. `cw` → `cw__my_flow`) |
+
+The startup banner is written to **stderr**, keeping stdout a clean MCP wire channel under `stdio`. The process blocks serving the transport until interrupted (Ctrl-C).
+
+**Exit codes**: `0` = clean shutdown, `1` = malformed flow file or missing `mcp` extra, `2` = flow file not found or tools module not importable.
+
+**Example**:
+
+```bash
+# Runnable from the repository root — flow file and tools both ship in examples/:
+chainweaver serve examples/double_add_format.flow.yaml --tools examples.simple_linear_flow
+```
+
+See [Use ChainWeaver as an MCP server](mcp-server.md) for the full guide.
+
+---
+
 ### `profile`
 
 Analyze one or more `ExecutionResult` JSON files. For a single file, surfaces per-step duration and bottlenecks. For multiple files, adds p50/p95/p99 statistics across runs. Every output (single or multi) also carries per-step and per-tool **reliability aggregates** — retries, skips, fallbacks, failures, and cache hits — so you can see at a glance which step or tool is responsible for instability.

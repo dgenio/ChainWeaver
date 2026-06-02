@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`chainweaver serve` — first-class MCP server** (#230): a new CLI command that
+  loads a flow file plus its `--tools` modules and exposes the compiled flow as MCP
+  tools over `stdio` / `sse` / `streamable-http`, so MCP-aware agents call a whole
+  flow as one deterministic tool. Wraps the existing `chainweaver.mcp.FlowServer`
+  (#72); the MCP SDK stays behind the `chainweaver[mcp]` extra via a guarded lazy
+  import, so the base CLI is unaffected. New docs page
+  [`docs/mcp-server.md`](docs/mcp-server.md), a ready-to-submit MCP registry manifest
+  (`server.json`), and a distribution/listing checklist
+  ([`docs/distribution.md`](docs/distribution.md)).
+- **README Integrations section + verified recipe matrix** (#231): a consolidated
+  README "Integrations" section surfacing the MCP server, MCP adapter, and the
+  LangGraph / OpenAI Agents SDK / LangChain / LlamaIndex entry points. Recipes and
+  the MCP server verified runnable against current framework versions (mcp 1.27.2,
+  langgraph 1.2.4, openai-agents 0.17.4, langchain-core 1.4.0, llama-index-core
+  0.14.22), recorded in `docs/distribution.md`.
 - **Real Weaver Stack interop** (#233, #234): `chainweaver.integrations.weaver_spec`
   now consumes the published [`weaver-contracts`](https://pypi.org/project/weaver-contracts/)
   package directly (behind the `chainweaver[weaver-stack]` extra, pinned

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.dgenio/chainweaver",
+  "description": "Deterministic orchestration layer for MCP agents. Compiles tool chains into schema-validated flows and exposes each flow as a single MCP tool — no LLM at build or run time.",
+  "version": "0.11.0",
+  "repository": {
+    "url": "https://github.com/dgenio/ChainWeaver",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "chainweaver",
+      "version": "0.11.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "serve"
+        },
+        {
+          "type": "positional",
+          "valueHint": "flow_file",
+          "description": "Path to a .flow.yaml/.flow.json file to expose as MCP tools.",
+          "isRequired": true
+        },
+        {
+          "type": "named",
+          "name": "--tools",
+          "description": "Python module path exposing Tool instances at top level. Repeatable.",
+          "isRepeated": true
+        }
+      ]
+    }
+  ]
+}

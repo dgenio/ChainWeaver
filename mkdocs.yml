@@ -117,6 +117,9 @@ nav:
           - Offline policy evaluation (skdr-eval): cookbook/policy-eval-skdr.md
           - Offline LLM-assisted flow proposals: cookbook/offline-llm-flow-proposals.md
           - Offline tool-description optimizer: cookbook/offline-description-optimizer.md
+  - Integrations:
+      - Use ChainWeaver as an MCP server: mcp-server.md
+      - Distribution & ecosystem listings: distribution.md
   - Reference:
       - CLI: cli.md
       - Error table: reference/error-table.md
