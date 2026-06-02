@@ -455,6 +455,43 @@ chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace run_a.json 
 
 ---
 
+### `record`
+
+Mine candidate flows from a recorded JSONL tool trace (issue #226). Replays the trace through `ChainObserver`, detects repeated tool sequences **offline (no LLM)**, and emits candidate `.flow.yaml` files ranked by projected LLM calls avoided (`len(tools) * occurrences`). Without `--output-dir` the command is a dry run that only reports candidates.
+
+Each non-blank line of the trace file is a JSON object describing one tool call. Calls are grouped into traces by `trace_id` (file order preserved); lines without a `trace_id` join a single default trace:
+
+```json
+{"trace_id": "req-1", "tool": "fetch", "inputs": {"url": "..."}, "outputs": {"body": "..."}}
+```
+
+`tool` (or its alias `tool_name`) is required; `inputs` defaults to `{}` and `outputs` to `null`.
+
+```
+chainweaver record <trace.jsonl> [--output-dir DIR] [--min-occurrences N] [--min-length N] [--max-length N] [--format table|json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output-dir` / `-o` | (none) | Directory to write candidate `.flow.yaml` files into. Omit for a dry run. |
+| `--min-occurrences` | `3` | Minimum contiguous appearances for a pattern to be suggested. |
+| `--min-length` | `2` | Minimum pattern length (number of tools). |
+| `--max-length` | (none) | Maximum pattern length. Omit for no upper bound. |
+| `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON. |
+
+**Exit codes**: `0` = ran successfully (regardless of candidate count), `1` = malformed trace or serialization error, `2` = file not found.
+
+**Example**:
+
+```bash
+chainweaver record examples/agent_tool_trace.jsonl
+chainweaver record examples/agent_tool_trace.jsonl --output-dir candidates/ --format json
+```
+
+The emitted files are ordinary flow files — review them, then register and run them like any other flow. Suggested flows ship as version `0.0.0` to signal they are auto-generated and should be reviewed before promotion.
+
+---
+
 ### `dump-schema`
 
 Emit the JSON Schema for `.flow.json` / `.flow.yaml` files, derived from the Pydantic models in `chainweaver.flow`. Editors that consume JSON Schema (VS Code via `redhat.vscode-yaml`, JetBrains, …) get autocomplete, hover docs, and inline validation once they point `yaml.schemas` at the published schema.
@@ -541,6 +578,35 @@ chainweaver fuzz flows/my_flow.flow.yaml \
   --minimize --save-failures failures/
 # exits non-zero when a property is violated, failing the CI job;
 # minimized, redacted reproducers land in failures/ as build artifacts.
+```
+
+---
+
+### `service`
+
+Run one `ChainWeaverService` analysis pass and report the proposals it would queue (issue #101). The service ties together the static schema analyzer (`--tools`) and the runtime observer (`--trace`), surfaces candidate flows as **pending proposals**, and prints service metrics. Proposals are reported, never auto-registered — promotion stays a governed, in-process action.
+
+A long-running daemon with cross-invocation `approve` / `reject` requires proposal persistence (#16) and is intentionally out of scope for the CLI; drive that loop via the `ChainWeaverService` Python API instead.
+
+```
+chainweaver service [--tools module...] [--trace trace.jsonl] [--min-occurrences N] [--min-length N] [--format table|json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tools` / `-t` | (none) | Python module path exposing `Tool` instances at top level. Enables the static-analysis pass. Repeatable. |
+| `--trace` | (none) | JSONL tool-trace file (same format as `chainweaver record`) feeding the runtime-observation pass. |
+| `--min-occurrences` | `3` | Minimum runtime occurrences before an observed pattern is proposed. |
+| `--min-length` | `2` | Minimum pattern / flow length (number of tools). |
+| `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON. |
+
+**Exit codes**: `0` = ran successfully, `1` = malformed trace / input, `2` = trace file not found.
+
+**Example**:
+
+```bash
+chainweaver service --tools examples.simple_linear_flow
+chainweaver service --trace examples/agent_tool_trace.jsonl --min-occurrences 2 --format json
 ```
 
 ---

@@ -41,6 +41,8 @@ and tools, the same flow produces the same output every time.
 | `log_utils.py` | Per-step structured logging | Library-safe (NullHandler only); no handler config |
 | `cost.py` | `CostProfile` + `CostReport` for cost-avoided estimation | Pure data + a single ``compute_cost_report`` helper; no execution logic |
 | `observation.py` | `TraceRecorder` + `ObservedTrace` for ad-hoc tool sequence capture | In-memory storage only; persistence deferred |
+| `observer.py` | `ChainObserver` + `FlowSuggestion`: record runtime tool calls, mine repeated contiguous sub-sequences, propose flows (#78) | Pure n-gram counting: no LLM, no network, no randomness; suggestions are proposals, never auto-registered |
+| `service.py` | `ChainWeaverService` + `ServiceConfig` + `ServiceMetrics` + `ServiceEvent`: continuous analyze→observe→propose→govern loop (#101) | Ties analyzer + observer + an in-service proposal gate; LLM hooks opt-in; full `GovernanceManager` (#13) integration deferred |
 | `viz.py` | `flow_to_ascii`, `flow_to_mermaid`, `result_to_mermaid` pure renderers | No external dependencies — string generation only |
 | `serialization.py` | YAML + JSON encode/decode for `Flow` and `DAGFlow` (`flow_to_json`, `flow_from_yaml`, etc.) | JSON path is dep-free; YAML requires `pyyaml` (optional extra `chainweaver[yaml]`); schema/exception refs round-trip as `"module:qualname"` strings |
 | `cli.py` | typer-based CLI hosting the full command surface: `inspect`, `viz`, `validate`, `check`, `run`, `profile`, `diff`, `attest`, `suggest`, `dump-schema`, `doctor` | `inspect` / `viz` read from a process-scoped default registry installed via `cli.set_default_registry`; the file-oriented commands (`validate`, `check`, `run`, `profile`, `diff`, `attest`, `suggest`, `doctor`) read directly from disk |
@@ -168,7 +170,7 @@ files that conflict with these names:
 |---------------|-------|---------|
 | ~~`analyzer.py`~~ | #77 ✅ | Offline schema-compatibility analyzer (delivered) |
 | ~~`decisions.py`~~ | #102 ✅ | `DecisionCallback` Protocol (delivered) |
-| `observer.py` | #78 | Runtime flow observer |
+| ~~`observer.py`~~ | #78 ✅ | Runtime flow observer + flow suggestion (delivered) |
 | ~~`viz.py`~~ | #79 ✅ | Flow visualization (delivered) |
 | ~~`cli.py`~~ | #44 ✅ | CLI interface (delivered) |
 | ~~`schemas.py`~~ | #135 ✅ | JSON Schema export for flow files (delivered) |

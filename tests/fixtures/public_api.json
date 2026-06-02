@@ -7,7 +7,9 @@
     "BaseMiddleware",
     "CancellationToken",
     "ChainAnalyzer",
+    "ChainObserver",
     "ChainWeaverError",
+    "ChainWeaverService",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
     "Checkpointer",
@@ -58,6 +60,7 @@
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "FlowSuggestion",
     "FuzzCase",
     "FuzzConfigError",
     "FuzzFailure",
@@ -80,12 +83,17 @@
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
+    "ProposalStatus",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "ServiceConfig",
+    "ServiceEvent",
+    "ServiceMetrics",
+    "ServiceProposal",
     "SideEffectLevel",
     "StabilityLevel",
     "StepCache",
@@ -198,11 +206,23 @@
       "qualname": "ChainAnalyzer",
       "signature": "(tools: Iterable[Tool]) -> None"
     },
+    "ChainObserver": {
+      "kind": "class",
+      "module": "chainweaver.observer",
+      "qualname": "ChainObserver",
+      "signature": "(*, max_traces: int | None = None) -> None"
+    },
     "ChainWeaverError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
       "qualname": "ChainWeaverError",
       "signature": null
+    },
+    "ChainWeaverService": {
+      "kind": "class",
+      "module": "chainweaver.service",
+      "qualname": "ChainWeaverService",
+      "signature": "(*, registry: FlowRegistry, observer: ChainObserver | None = None, config: ServiceConfig | None = None, llm_fn: LLMFn | None = None) -> None"
     },
     "CheckpointDriftError": {
       "kind": "class",
@@ -629,6 +649,19 @@
       "module": "chainweaver.flow",
       "qualname": "FlowStep"
     },
+    "FlowSuggestion": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "confidence": "float",
+        "example_trace": "chainweaver.observation.ObservedTrace",
+        "flow": "chainweaver.flow.Flow",
+        "occurrences": "int",
+        "tools": "tuple[str, Ellipsis]",
+        "traces_with_pattern": "int"
+      },
+      "module": "chainweaver.observer",
+      "qualname": "FlowSuggestion"
+    },
     "FuzzCase": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -790,6 +823,11 @@
       "module": "chainweaver.cost",
       "qualname": "PriceSnap"
     },
+    "ProposalStatus": {
+      "kind": "enum",
+      "module": "chainweaver.service",
+      "qualname": "ProposalStatus"
+    },
     "RedactionPolicy": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -841,6 +879,55 @@
       "module": "chainweaver.exceptions",
       "qualname": "SchemaValidationError",
       "signature": "(tool_name: str, step_index: int, detail: str, *, context: str = 'tool') -> None"
+    },
+    "ServiceConfig": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "analyze_interval_seconds": "float | NoneType",
+        "analyze_on_tool_change": "bool",
+        "auto_approve_deterministic": "bool",
+        "enable_llm_proposals": "bool",
+        "max_llm_proposals": "int",
+        "max_pending_proposals": "int",
+        "min_determinism_score": "float",
+        "min_pattern_length": "int",
+        "min_trace_occurrences": "int"
+      },
+      "module": "chainweaver.service",
+      "qualname": "ServiceConfig"
+    },
+    "ServiceEvent": {
+      "kind": "enum",
+      "module": "chainweaver.service",
+      "qualname": "ServiceEvent"
+    },
+    "ServiceMetrics": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "flows_promoted": "int",
+        "flows_proposed": "int",
+        "patterns_detected": "int",
+        "tools_monitored": "int",
+        "total_llm_calls_avoided": "int",
+        "traces_recorded": "int"
+      },
+      "module": "chainweaver.service",
+      "qualname": "ServiceMetrics"
+    },
+    "ServiceProposal": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "confidence": "float",
+        "created_at": "datetime.datetime",
+        "estimated_llm_calls_avoided": "int",
+        "flow": "chainweaver.flow.Flow",
+        "id": "str",
+        "occurrences": "int",
+        "source": "str",
+        "status": "chainweaver.service.ProposalStatus"
+      },
+      "module": "chainweaver.service",
+      "qualname": "ServiceProposal"
     },
     "SideEffectLevel": {
       "kind": "enum",

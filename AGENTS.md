@@ -87,10 +87,12 @@ chainweaver/
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
+├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
+├── service.py         ChainWeaverService: continuous analyze→observe→propose→govern loop tying analyzer + observer + a proposal gate (#101); banned from executor.py
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, doctor, dump-schema
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, doctor, dump-schema, service
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)

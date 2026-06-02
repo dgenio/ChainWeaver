@@ -156,6 +156,7 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.observer import ChainObserver, FlowSuggestion
 from chainweaver.optimizer import (
     OptimizationStrategy,
     ToolDescriptionProposal,
@@ -172,6 +173,14 @@ from chainweaver.serialization import (
     flow_to_dict,
     flow_to_json,
     flow_to_yaml,
+)
+from chainweaver.service import (
+    ChainWeaverService,
+    ProposalStatus,
+    ServiceConfig,
+    ServiceEvent,
+    ServiceMetrics,
+    ServiceProposal,
 )
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
@@ -204,7 +213,9 @@ __all__ = [
     "BaseMiddleware",
     "CancellationToken",
     "ChainAnalyzer",
+    "ChainObserver",
     "ChainWeaverError",
+    "ChainWeaverService",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
     "Checkpointer",
@@ -255,6 +266,7 @@ __all__ = [
     "FlowStatus",
     "FlowStatusError",
     "FlowStep",
+    "FlowSuggestion",
     "FuzzCase",
     "FuzzConfigError",
     "FuzzFailure",
@@ -276,12 +288,17 @@ __all__ = [
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
+    "ProposalStatus",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "ServiceConfig",
+    "ServiceEvent",
+    "ServiceMetrics",
+    "ServiceProposal",
     "SideEffectLevel",
     "StabilityLevel",
     "StepCache",
