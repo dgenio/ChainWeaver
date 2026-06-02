@@ -156,6 +156,18 @@ def test_non_list_payload_raises() -> None:
         optimize_tool_descriptions([SEARCH], llm_fn=_FakeLLM("just a string"))
 
 
+def test_non_string_list_similarity_group_raises() -> None:
+    completion = """
+    proposals:
+      - tool_name: search
+        proposed_description: Web search.
+        rationale: x
+        similarity_group: "not-a-list"
+    """
+    with pytest.raises(OfflineLLMError, match="non-string-list 'similarity_group'"):
+        optimize_tool_descriptions([SEARCH], llm_fn=_FakeLLM(completion))
+
+
 def test_incremental_mode_optimizes_new_and_flags_existing() -> None:
     new_tool = _tool("semantic_search", "Find things using embeddings.")
     completion = """

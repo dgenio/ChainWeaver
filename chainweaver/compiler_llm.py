@@ -38,7 +38,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from chainweaver._offline_llm import LLMFn, parse_llm_yaml, render_tool_catalogue
+from chainweaver._offline_llm import (
+    LLMFn,
+    coerce_proposal_list,
+    parse_llm_yaml,
+    render_tool_catalogue,
+)
 from chainweaver.exceptions import FlowSerializationError, OfflineLLMError
 from chainweaver.flow import Flow
 from chainweaver.serialization import flow_from_dict, flow_to_yaml
@@ -135,7 +140,7 @@ def llm_propose_flows(
         max_proposals=max_proposals,
     )
     raw = llm_fn(prompt)
-    entries = _proposal_entries(parse_llm_yaml(raw))
+    entries = coerce_proposal_list(parse_llm_yaml(raw))
 
     proposals: list[LLMProposal] = []
     for entry in entries[:max_proposals]:
@@ -240,23 +245,6 @@ def _render_hints(static_candidates: Iterable[Flow] | None) -> str:
         return ""
     header = "\nKnown schema-valid chains (hints you may refine or extend):\n"
     return header + "\n".join(lines) + "\n"
-
-
-def _proposal_entries(parsed: Any) -> list[dict[str, Any]]:
-    """Normalise a parsed YAML document into a list of proposal mappings."""
-    if isinstance(parsed, dict):
-        parsed = parsed.get("proposals", [])
-    if not isinstance(parsed, list):
-        raise OfflineLLMError(
-            "Expected a YAML list of proposals (or a mapping with a 'proposals' "
-            f"key); got {type(parsed).__name__}."
-        )
-    entries: list[dict[str, Any]] = []
-    for item in parsed:
-        if not isinstance(item, dict):
-            raise OfflineLLMError(f"Each proposal must be a mapping; got {type(item).__name__}.")
-        entries.append(item)
-    return entries
 
 
 def _build_proposal(entry: dict[str, Any], known_names: set[str]) -> LLMProposal:

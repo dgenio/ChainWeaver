@@ -228,6 +228,27 @@ def test_invalid_flow_payload_raises() -> None:
         llm_propose_flows([SEARCH], llm_fn=_FakeLLM(completion))
 
 
+def test_non_linear_dag_flow_payload_raises() -> None:
+    # An LLM-supplied `type: DAGFlow` overrides the default linear discriminator;
+    # the compiler only proposes linear Flow objects, so it must reject this.
+    completion = (
+        "proposals:\n"
+        "  - flow:\n"
+        "      type: DAGFlow\n"
+        "      name: diamond\n"
+        '      version: "1.0.0"\n'
+        "      description: A DAG, not a linear flow.\n"
+        "      steps:\n"
+        "        - tool_name: search\n"
+        "          step_id: A\n"
+        "          depends_on: []\n"
+        "    rationale: dag\n"
+        "    confidence: 0.5\n"
+    )
+    with pytest.raises(OfflineLLMError, match="not a linear Flow"):
+        llm_propose_flows([SEARCH, SUMMARIZE], llm_fn=_FakeLLM(completion))
+
+
 def test_non_string_rationale_raises() -> None:
     completion = _VALID_YAML.replace(
         "rationale: A summary naturally follows a search.", "rationale: [not, a, string]"

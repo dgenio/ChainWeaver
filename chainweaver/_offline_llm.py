@@ -66,6 +66,38 @@ def parse_llm_yaml(raw: str) -> Any:
         raise OfflineLLMError(f"LLM completion is not valid YAML: {exc}") from exc
 
 
+def coerce_proposal_list(parsed: Any) -> list[dict[str, Any]]:
+    """Normalise a parsed YAML document into a list of proposal mappings.
+
+    Both offline proposers ask the LLM for the same envelope — a top-level
+    list, or a mapping with a ``proposals`` key — so they share this coercion
+    instead of reimplementing it with subtly different error messages.
+
+    Args:
+        parsed: The object returned by :func:`parse_llm_yaml`.
+
+    Returns:
+        The list of proposal mappings.
+
+    Raises:
+        OfflineLLMError: When *parsed* is neither a list nor a mapping with a
+            ``proposals`` list, or when any entry is not a mapping.
+    """
+    if isinstance(parsed, dict):
+        parsed = parsed.get("proposals", [])
+    if not isinstance(parsed, list):
+        raise OfflineLLMError(
+            "Expected a YAML list of proposals (or a mapping with a 'proposals' "
+            f"key); got {type(parsed).__name__}."
+        )
+    entries: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise OfflineLLMError(f"Each proposal must be a mapping; got {type(item).__name__}.")
+        entries.append(item)
+    return entries
+
+
 def render_tool_catalogue(tools: Iterable[Tool]) -> str:
     """Render a compact, prompt-ready catalogue of *tools*.
 

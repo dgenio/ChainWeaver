@@ -33,7 +33,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from chainweaver._offline_llm import LLMFn, parse_llm_yaml, render_tool_catalogue
+from chainweaver._offline_llm import (
+    LLMFn,
+    coerce_proposal_list,
+    parse_llm_yaml,
+    render_tool_catalogue,
+)
 from chainweaver.exceptions import OfflineLLMError
 from chainweaver.tools import Tool
 
@@ -204,19 +209,10 @@ def _parse_proposals(
     originals: dict[str, str],
 ) -> list[ToolDescriptionProposal]:
     """Parse an LLM completion into validated description proposals."""
-    parsed = parse_llm_yaml(raw)
-    if isinstance(parsed, dict):
-        parsed = parsed.get("proposals", [])
-    if not isinstance(parsed, list):
-        raise OfflineLLMError(
-            "Expected a YAML list of proposals (or a mapping with a 'proposals' "
-            f"key); got {type(parsed).__name__}."
-        )
+    entries = coerce_proposal_list(parse_llm_yaml(raw))
 
     proposals: list[ToolDescriptionProposal] = []
-    for item in parsed:
-        if not isinstance(item, dict):
-            raise OfflineLLMError(f"Each proposal must be a mapping; got {type(item).__name__}.")
+    for item in entries:
         tool_name = item.get("tool_name")
         if not isinstance(tool_name, str) or tool_name not in originals:
             raise OfflineLLMError(
