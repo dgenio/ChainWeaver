@@ -597,7 +597,7 @@ chainweaver service [--tools module...] [--trace trace.jsonl] [--min-occurrences
 | `--tools` / `-t` | (none) | Python module path exposing `Tool` instances at top level. Enables the static-analysis pass. Repeatable. |
 | `--trace` | (none) | JSONL tool-trace file (same format as `chainweaver record`) feeding the runtime-observation pass. |
 | `--min-occurrences` | `3` | Minimum runtime occurrences before an observed pattern is proposed. |
-| `--min-length` | `2` | Minimum pattern / chain length (number of tools). |
+| `--min-length` | `2` | Minimum pattern / flow length (number of tools). |
 | `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON. |
 
 **Exit codes**: `0` = ran successfully, `1` = malformed trace / input, `2` = trace file not found.

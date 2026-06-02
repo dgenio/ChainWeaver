@@ -1,4 +1,4 @@
-"""Tests for the runtime chain observer and auto-flow suggestion (issue #78)."""
+"""Tests for the runtime flow observer and auto-flow suggestion (issue #78)."""
 
 from __future__ import annotations
 
@@ -59,6 +59,38 @@ class TestRecording:
         snapshot = observer.traces
         snapshot.clear()
         assert len(observer) == 1
+
+
+class TestFromTraces:
+    def test_from_traces_seeds_completed_traces(self) -> None:
+        source = ChainObserver()
+        _record_trace(source, "a", "b")
+        _record_trace(source, "c")
+        rebuilt = ChainObserver.from_traces(source.traces)
+        assert len(rebuilt) == 2
+        assert [t.steps[0].tool_name for t in rebuilt.traces] == ["a", "c"]
+
+    def test_from_traces_mines_equivalently(self) -> None:
+        source = ChainObserver()
+        for _ in range(3):
+            _record_trace(source, "a", "b")
+        rebuilt = ChainObserver.from_traces(source.traces)
+        assert [s.tools for s in rebuilt.suggest_flows()] == [
+            s.tools for s in source.suggest_flows()
+        ]
+
+    def test_from_traces_respects_ring_buffer(self) -> None:
+        source = ChainObserver()
+        _record_trace(source, "a")
+        _record_trace(source, "b")
+        _record_trace(source, "c")
+        rebuilt = ChainObserver.from_traces(source.traces, max_traces=2)
+        assert len(rebuilt) == 2
+        assert [t.steps[0].tool_name for t in rebuilt.traces] == ["b", "c"]
+
+    def test_from_traces_rejects_invalid_max_traces(self) -> None:
+        with pytest.raises(ValueError, match="max_traces must be >= 1"):
+            ChainObserver.from_traces([], max_traces=0)
 
 
 class TestMaxTraces:

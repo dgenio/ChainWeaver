@@ -2478,7 +2478,7 @@ _SERVICE_MIN_OCC_OPTION = typer.Option(
 _SERVICE_MIN_LEN_OPTION = typer.Option(
     2,
     "--min-length",
-    help="Minimum pattern / chain length (number of tools).",
+    help="Minimum pattern / flow length (number of tools).",
 )
 _SERVICE_FORMAT_OPTION = typer.Option(
     OutputFormat.TABLE,

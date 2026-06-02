@@ -170,6 +170,36 @@ class ChainObserver:
                 self._completed = self._completed[-self._max_traces :]
         return trace
 
+    @classmethod
+    def from_traces(
+        cls,
+        traces: list[ObservedTrace],
+        *,
+        max_traces: int | None = None,
+    ) -> ChainObserver:
+        """Build an observer pre-loaded with already-completed traces.
+
+        Useful for mining a snapshot of traces off the hot path — a caller
+        holding a lock can copy the closed (immutable) traces, release the
+        lock, then run :meth:`suggest_flows` on a detached observer without
+        blocking concurrent :meth:`record` / :meth:`end_trace` — and for
+        offline analysis of persisted traces.
+
+        Empty traces (no steps) are ignored, mirroring :meth:`end_trace`.
+
+        Args:
+            traces: Completed traces to seed the observer with, oldest first.
+            max_traces: Optional ring-buffer cap (see :class:`ChainObserver`).
+
+        Raises:
+            ValueError: If ``max_traces`` is not ``None`` and ``< 1``.
+        """
+        observer = cls(max_traces=max_traces)
+        observer._completed = [trace for trace in traces if trace.steps]
+        if max_traces is not None and len(observer._completed) > max_traces:
+            observer._completed = observer._completed[-max_traces:]
+        return observer
+
     @property
     def traces(self) -> list[ObservedTrace]:
         """Return a copy of the retained completed traces, oldest first."""

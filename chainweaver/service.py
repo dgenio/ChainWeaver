@@ -288,13 +288,16 @@ class ChainWeaverService:
         return created
 
     def _observer_pass(self) -> list[ServiceProposal]:
-        # ``ChainObserver`` is not thread-safe; hold the lock while reading it
-        # so this never races with concurrent ``record`` / ``end_trace`` calls.
+        # ``ChainObserver`` is not thread-safe. Take a snapshot of the closed
+        # (immutable) traces under the lock, then mine the detached copy
+        # outside it: ``suggest_flows`` is O(traces x length^2) and must not
+        # block concurrent ``record`` / ``end_trace`` on the agent thread.
         with self._lock:
-            suggestions = self.observer.suggest_flows(
-                min_occurrences=self.config.min_trace_occurrences,
-                min_length=self.config.min_pattern_length,
-            )
+            snapshot = self.observer.traces
+        suggestions = ChainObserver.from_traces(snapshot).suggest_flows(
+            min_occurrences=self.config.min_trace_occurrences,
+            min_length=self.config.min_pattern_length,
+        )
         out: list[ServiceProposal] = []
         for suggestion in suggestions:
             proposal = self._queue_proposal(

@@ -37,9 +37,9 @@ def main() -> None:
     suggestions = observer.suggest_flows(min_occurrences=3, min_length=2)
     print(f"Suggested {len(suggestions)} flow(s):")
     for suggestion in suggestions:
-        chain = " -> ".join(suggestion.tools)
+        arrow = " -> ".join(suggestion.tools)
         print(f"\n  {suggestion.flow.name}")
-        print(f"    pattern:     {chain}")
+        print(f"    pattern:     {arrow}")
         print(f"    occurrences: {suggestion.occurrences}")
         print(f"    confidence:  {suggestion.confidence}")
         print(f"    est. LLM calls avoided: {suggestion.estimated_llm_calls_avoided}")
