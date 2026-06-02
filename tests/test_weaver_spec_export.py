@@ -1,120 +1,82 @@
-"""Tests for the weaver-spec SelectableItem exporter (issue #107)."""
+"""Tests for the weaver-contracts exporter and routing resolvers (issues #107, #233)."""
 
 from __future__ import annotations
 
 import pytest
+
+pytest.importorskip("weaver_contracts")
+
 from helpers import NumberInput, ValueInput, ValueOutput, _double_fn
 
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.integrations.weaver_spec import (
-    CapabilityToken,
-    RoutingDecision,
     SelectableItem,
     flow_to_selectable_item,
+    is_compatible,
+    make_routing_decision,
+    resolve_flow_from_routing_decision,
+    selected_capability_id,
 )
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
 
-def test_capability_token_is_frozen() -> None:
-    from pydantic import ValidationError
-
-    tok = CapabilityToken(capability_id="data.ingest", token="abc")
-    with pytest.raises(ValidationError):
-        tok.token = "xyz"
-
-
-def test_capability_token_round_trip_json() -> None:
-    tok = CapabilityToken(
-        capability_id="data.ingest", version="1.0.0", token="secret", scopes=("read",)
-    )
-    restored = CapabilityToken.model_validate_json(tok.model_dump_json())
-    assert restored == tok
+def _flow(name: str = "ingest_data", **kwargs: object) -> Flow:
+    base: dict[str, object] = {
+        "name": name,
+        "version": "1.0.0",
+        "description": "Ingest data.",
+        "steps": [FlowStep(tool_name="double", input_mapping={"number": "number"})],
+    }
+    base.update(kwargs)
+    return Flow(**base)  # type: ignore[arg-type]
 
 
-def test_routing_decision_requires_non_empty_candidates() -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        RoutingDecision(selected_capability_id="x", candidates=())
-
-
-def test_routing_decision_rejects_out_of_range_confidence() -> None:
-    with pytest.raises(ValueError, match="confidence"):
-        RoutingDecision(selected_capability_id="x", candidates=("x",), confidence=1.5)
-
-
-def test_routing_decision_rejects_selection_outside_candidates() -> None:
-    with pytest.raises(ValueError, match="must be one of candidates"):
-        RoutingDecision(selected_capability_id="ghost", candidates=("x", "y"))
-
-
-def test_routing_decision_round_trip_json() -> None:
-    rd = RoutingDecision(
-        selected_capability_id="x",
-        candidates=("x", "y"),
-        rationale="x is shorter",
-        confidence=0.5,
-    )
-    restored = RoutingDecision.model_validate_json(rd.model_dump_json())
-    assert restored == rd
+# ---------------------------------------------------------------------------
+# flow_to_selectable_item (issue #107) — upstream SelectableItem shape
+# ---------------------------------------------------------------------------
 
 
 def test_flow_to_selectable_item_uses_flow_name_as_default_id() -> None:
-    flow = Flow(
-        name="ingest_data",
-        version="1.0.0",
-        description="Ingest data.",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
-    )
-    item = flow_to_selectable_item(flow)
+    item = flow_to_selectable_item(_flow())
+    assert item.id == "ingest_data"
     assert item.capability_id == "ingest_data"
-    assert item.name == "ingest_data"
+    assert item.label == "ingest_data"
     assert item.description == "Ingest data."
-    assert item.version == "1.0.0"
-    assert item.deterministic is True
+    assert item.metadata["version"] == "1.0.0"
+    assert item.metadata["deterministic"] is True
 
 
 def test_flow_to_selectable_item_uses_flow_capability_id_when_set() -> None:
-    flow = Flow(
-        name="raw_name",
-        version="1.0.0",
-        description="d",
-        capability_id="data.ingest",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
-    )
-    item = flow_to_selectable_item(flow)
+    item = flow_to_selectable_item(_flow(name="raw_name", capability_id="data.ingest"))
+    assert item.id == "data.ingest"
     assert item.capability_id == "data.ingest"
-    assert item.name == "raw_name"
+    assert item.label == "raw_name"
 
 
 def test_flow_to_selectable_item_explicit_override_wins() -> None:
-    flow = Flow(
-        name="raw",
-        version="1.0.0",
-        description="d",
-        capability_id="cap.from_field",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+    item = flow_to_selectable_item(
+        _flow(name="raw", capability_id="cap.from_field"), capability_id="cap.override"
     )
-    item = flow_to_selectable_item(flow, capability_id="cap.override")
     assert item.capability_id == "cap.override"
+    assert item.id == "cap.override"
 
 
-def test_flow_to_selectable_item_pulls_json_schema_from_schema_refs() -> None:
-    flow = Flow(
+def test_flow_to_selectable_item_pulls_json_schema_into_metadata() -> None:
+    flow = _flow(
         name="ingest",
-        version="1.0.0",
-        description="d",
         capability_id="data.ingest",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
         input_schema_ref=Flow.schema_ref_from(NumberInput),
         output_schema_ref=Flow.schema_ref_from(ValueOutput),
     )
     item = flow_to_selectable_item(flow, tags=("data", "ingest"))
-    assert item.input_schema is not None
-    assert "number" in item.input_schema["properties"]
-    assert item.output_schema is not None
-    assert "value" in item.output_schema["properties"]
-    assert item.tags == ("data", "ingest")
+    assert item.metadata["input_schema"] is not None
+    assert "number" in item.metadata["input_schema"]["properties"]
+    assert item.metadata["output_schema"] is not None
+    assert "value" in item.metadata["output_schema"]["properties"]
+    assert item.metadata["tags"] == ["data", "ingest"]
+    _ = ValueInput  # imported for symmetry with other suites
 
 
 def test_flow_to_selectable_item_supports_dagflow() -> None:
@@ -123,50 +85,131 @@ def test_flow_to_selectable_item_supports_dagflow() -> None:
         version="0.1.0",
         description="DAG capability.",
         capability_id="dag.cap",
-        steps=[
-            DAGFlowStep(
-                tool_name="double",
-                step_id="d",
-                input_mapping={"number": "number"},
-            )
-        ],
+        steps=[DAGFlowStep(tool_name="double", step_id="d", input_mapping={"number": "number"})],
     )
     item = flow_to_selectable_item(dag)
     assert item.capability_id == "dag.cap"
-    assert item.version == "0.1.0"
+    assert item.metadata["version"] == "0.1.0"
 
 
 def test_flow_to_selectable_item_rejects_empty_flow() -> None:
     with pytest.raises(ValueError, match="no steps"):
-        # construct via model_construct to bypass step validation
         bad = Flow.model_construct(name="empty", version="0.1.0", description="d", steps=[])
         flow_to_selectable_item(bad)
 
 
-def test_selectable_item_round_trip_json() -> None:
-    flow = Flow(
-        name="rt",
-        version="2.3.4",
-        description="round trip",
-        capability_id="cap.rt",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
-        input_schema_ref=Flow.schema_ref_from(NumberInput),
-        output_schema_ref=Flow.schema_ref_from(ValueOutput),
-    )
-    item = flow_to_selectable_item(flow, tags=("alpha",))
-    restored = SelectableItem.model_validate_json(item.model_dump_json())
-    assert restored == item
+def test_selectable_item_is_upstream_contract_type() -> None:
+    import dataclasses
+
+    from weaver_contracts import SelectableItem as UpstreamSelectableItem
+
+    assert SelectableItem is UpstreamSelectableItem
+    assert dataclasses.is_dataclass(flow_to_selectable_item(_flow()))
 
 
-def test_executor_integration_smoke() -> None:
-    """End-to-end: register flow, export, verify round-trip via executor."""
-    flow = Flow(
-        name="exec_cap",
-        version="0.1.0",
-        description="smoke",
-        capability_id="exec.cap",
-        steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+# ---------------------------------------------------------------------------
+# Routing consumption (issue #233)
+# ---------------------------------------------------------------------------
+
+
+def test_make_routing_decision_round_trips_selection() -> None:
+    rd = make_routing_decision(
+        decision_id="rd-1",
+        selected_capability_id="data.ingest",
+        candidates=("data.ingest", "data.export"),
+        context_summary="picked ingest",
     )
+    assert selected_capability_id(rd) == "data.ingest"
+    assert rd.selected_item_id == "data.ingest"
+    assert rd.context_summary == "picked ingest"
+    # All candidates land in a single choice card.
+    ids = {item.id for card in rd.choice_cards for item in card.items}
+    assert ids == {"data.ingest", "data.export"}
+
+
+def test_make_routing_decision_rejects_empty_candidates() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        make_routing_decision(decision_id="x", selected_capability_id="a", candidates=())
+
+
+def test_make_routing_decision_rejects_selection_outside_candidates() -> None:
+    with pytest.raises(ValueError, match="must be one of candidates"):
+        make_routing_decision(
+            decision_id="x", selected_capability_id="ghost", candidates=("a", "b")
+        )
+
+
+def test_selected_capability_id_requires_a_selection() -> None:
+    from datetime import datetime, timezone
+
+    from weaver_contracts import ChoiceCard, RoutingDecision
+
+    rd = RoutingDecision(
+        id="rd",
+        choice_cards=[
+            ChoiceCard(
+                id="c",
+                items=[SelectableItem(id="a", label="a", description="a", capability_id="a")],
+            )
+        ],
+        timestamp=datetime.now(timezone.utc),
+        selected_item_id=None,
+    )
+    with pytest.raises(ValueError, match="no selected_item_id"):
+        selected_capability_id(rd)
+
+
+def test_selected_capability_id_rejects_unknown_item() -> None:
+    rd = make_routing_decision(decision_id="rd", selected_capability_id="a", candidates=("a", "b"))
+    # Tamper with the verdict to point at an item that isn't in the cards.
+    object.__setattr__(rd, "selected_item_id", "ghost")
+    with pytest.raises(ValueError, match="matches no item"):
+        selected_capability_id(rd)
+
+
+def test_resolve_flow_matches_capability_id() -> None:
+    reg = FlowRegistry()
+    reg.register_flow(_flow(name="raw_name", capability_id="data.ingest"))
+    rd = make_routing_decision(
+        decision_id="rd", selected_capability_id="data.ingest", candidates=("data.ingest",)
+    )
+    resolved = resolve_flow_from_routing_decision(rd, reg)
+    assert resolved.name == "raw_name"
+    assert resolved.capability_id == "data.ingest"
+
+
+def test_resolve_flow_falls_back_to_flow_name() -> None:
+    reg = FlowRegistry()
+    reg.register_flow(_flow(name="ingest_data"))  # no capability_id set
+    rd = make_routing_decision(
+        decision_id="rd", selected_capability_id="ingest_data", candidates=("ingest_data",)
+    )
+    assert resolve_flow_from_routing_decision(rd, reg).name == "ingest_data"
+
+
+def test_resolve_flow_raises_when_no_flow_matches() -> None:
+    reg = FlowRegistry()
+    reg.register_flow(_flow(name="ingest_data", capability_id="data.ingest"))
+    rd = make_routing_decision(
+        decision_id="rd", selected_capability_id="missing.cap", candidates=("missing.cap",)
+    )
+    with pytest.raises(LookupError, match=r"missing\.cap"):
+        resolve_flow_from_routing_decision(rd, reg)
+
+
+def test_is_compatible_tracks_major_version() -> None:
+    assert is_compatible("0.6.0") is True
+    assert is_compatible("0.4.0") is True  # same major (0)
+    assert is_compatible("1.0.0") is False
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: export, route, resolve, execute
+# ---------------------------------------------------------------------------
+
+
+def test_export_route_resolve_execute_smoke() -> None:
+    flow = _flow(name="exec_cap", capability_id="exec.cap")
     reg = FlowRegistry()
     reg.register_flow(flow)
     ex = FlowExecutor(registry=reg)
@@ -180,10 +223,12 @@ def test_executor_integration_smoke() -> None:
         )
     )
     item = flow_to_selectable_item(reg.get_flow("exec_cap"))
-    assert item.capability_id == "exec.cap"
-    # Executor still runs the flow
-    result = ex.execute_flow("exec_cap", {"number": 3})
+    rd = make_routing_decision(
+        decision_id="rd",
+        selected_capability_id=item.capability_id,
+        candidates=(item.capability_id, "other.cap"),
+    )
+    resolved = resolve_flow_from_routing_decision(rd, reg)
+    result = ex.execute_flow(resolved.name, {"number": 3})
     assert result.success is True
     assert result.final_output == {"number": 3, "value": 6}
-    # Suppress unused-import lint
-    _ = ValueInput

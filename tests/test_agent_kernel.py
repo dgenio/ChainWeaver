@@ -1,10 +1,14 @@
-"""Tests for the agent-kernel execution backend (issue #89)."""
+"""Tests for the agent-kernel execution backend (issues #89, #233)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+
+pytest.importorskip("weaver_contracts")
+
 from helpers import NumberInput, ValueOutput, _double_fn
 
 from chainweaver.exceptions import KernelInvocationError
@@ -18,6 +22,17 @@ from chainweaver.integrations.weaver_spec import CapabilityToken
 from chainweaver.middleware import StepEndContext, StepStartContext
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+
+
+def _token(*scope: str, principal: str = "tester", token_id: str = "tok-1") -> CapabilityToken:
+    """Build an upstream CapabilityToken scoped to *scope* capabilities."""
+    return CapabilityToken(
+        token_id=token_id,
+        principal=principal,
+        scope=list(scope),
+        issued_at=datetime.now(timezone.utc),
+        single_use=True,
+    )
 
 
 class _RecordingMiddleware:
@@ -34,7 +49,7 @@ class _RecordingMiddleware:
 
 
 def _ingest_capability(inputs: dict[str, Any], token: CapabilityToken) -> dict[str, Any]:
-    return {"rows": len(inputs.get("records", [])), "via": token.capability_id}
+    return {"rows": len(inputs.get("records", [])), "by": token.principal}
 
 
 def _build_capability_dag() -> DAGFlow:
@@ -61,7 +76,14 @@ def test_in_memory_kernel_satisfies_protocol() -> None:
 def test_in_memory_kernel_raises_for_unknown_capability() -> None:
     kernel = InMemoryKernel({})
     with pytest.raises(LookupError, match=r"data\.ingest"):
-        kernel.invoke(CapabilityToken(capability_id="data.ingest", token=""), {})
+        kernel.invoke("data.ingest", _token("data.ingest"), {})
+
+
+def test_in_memory_kernel_gates_on_token_scope() -> None:
+    """The kernel refuses a capability the token's scope does not authorize."""
+    kernel = InMemoryKernel({"data.ingest": _ingest_capability})
+    with pytest.raises(PermissionError, match="does not authorize"):
+        kernel.invoke("data.ingest", _token("other.cap"), {})
 
 
 def test_kernel_backed_executor_rejects_non_protocol_kernel() -> None:
@@ -78,7 +100,8 @@ def test_kernel_backed_executor_runs_capability_step() -> None:
     ex = KernelBackedExecutor(registry=reg, kernel=kernel)
     result = ex.execute_flow("cap_dag", {"records": [1, 2, 3]})
     assert result.success is True
-    assert result.execution_log[0].outputs == {"rows": 3, "via": "data.ingest"}
+    # The minted token's principal is "chainweaver" (see _token_for_step).
+    assert result.execution_log[0].outputs == {"rows": 3, "by": "chainweaver"}
 
 
 def test_capability_step_emits_lifecycle_events() -> None:
@@ -99,7 +122,7 @@ def test_capability_step_emits_lifecycle_events() -> None:
     end_ctx = next(ctx for kind, ctx in recorder.events if kind == "step_end")
     assert start_ctx.tool_name == "ingest_capability_proxy"
     assert end_ctx.step_record.success is True
-    assert end_ctx.step_record.outputs == {"rows": 3, "via": "data.ingest"}
+    assert end_ctx.step_record.outputs == {"rows": 3, "by": "chainweaver"}
 
 
 def test_capability_step_failure_still_emits_step_end() -> None:
@@ -160,7 +183,7 @@ def test_kernel_backed_executor_still_runs_tool_steps() -> None:
     assert result.execution_log[0].tool_name == "double"
     assert result.execution_log[0].outputs == {"value": 8}
     # Second step ran via kernel path
-    assert result.execution_log[1].outputs == {"rows": 2, "via": "data.ingest"}
+    assert result.execution_log[1].outputs == {"rows": 2, "by": "chainweaver"}
 
 
 def test_kernel_backed_executor_wraps_kernel_exceptions() -> None:
@@ -195,7 +218,7 @@ def test_kernel_backed_executor_rejects_non_dict_kernel_output() -> None:
     assert "non-dict" in (result.execution_log[0].error_message or "")
 
 
-def test_default_token_propagates_when_capability_id_matches() -> None:
+def test_default_token_propagates_when_scope_covers_capability() -> None:
     captured: list[CapabilityToken] = []
 
     def capture_token(inputs: dict[str, Any], token: CapabilityToken) -> dict[str, Any]:
@@ -206,9 +229,7 @@ def test_default_token_propagates_when_capability_id_matches() -> None:
     reg = FlowRegistry()
     reg.register_flow(dag)
     kernel = InMemoryKernel({"data.ingest": capture_token})
-    default_tok = CapabilityToken(
-        capability_id="data.ingest", token="secret-token", scopes=("read",)
-    )
+    default_tok = _token("data.ingest", "data.export", principal="svc", token_id="default")
     ex = KernelBackedExecutor(registry=reg, kernel=kernel, default_token=default_tok)
     result = ex.execute_flow("cap_dag", {})
     assert result.success is True
@@ -216,8 +237,8 @@ def test_default_token_propagates_when_capability_id_matches() -> None:
     assert captured[0] is default_tok
 
 
-def test_default_token_ignored_when_capability_id_mismatches() -> None:
-    """A token for a different capability id is not used — a fresh token is minted."""
+def test_default_token_ignored_when_scope_excludes_capability() -> None:
+    """A token whose scope omits the capability is not used — a fresh one is minted."""
     captured: list[CapabilityToken] = []
 
     def capture_token(inputs: dict[str, Any], token: CapabilityToken) -> dict[str, Any]:
@@ -228,12 +249,13 @@ def test_default_token_ignored_when_capability_id_mismatches() -> None:
     reg = FlowRegistry()
     reg.register_flow(dag)
     kernel = InMemoryKernel({"data.ingest": capture_token})
-    wrong_tok = CapabilityToken(capability_id="other.cap", token="x")
+    wrong_tok = _token("other.cap", principal="svc", token_id="wrong")
     ex = KernelBackedExecutor(registry=reg, kernel=kernel, default_token=wrong_tok)
     result = ex.execute_flow("cap_dag", {})
     assert result.success is True
-    assert captured[0].capability_id == "data.ingest"
-    assert captured[0].token == ""
+    assert captured[0] is not wrong_tok
+    assert list(captured[0].scope) == ["data.ingest"]
+    assert captured[0].principal == "chainweaver"
 
 
 def test_input_mapping_resolves_keys_for_capability_steps() -> None:

@@ -1,15 +1,18 @@
 # Weaver-spec compatibility
 
-ChainWeaver declares conformance to a specific revision of the
-[weaver-spec](https://github.com/dgenio/weaver-spec) contract.  The
-declaration lives in source so CI fails any change that bumps the
-contract without also touching this document.
+ChainWeaver consumes a specific revision of the
+[weaver-spec](https://github.com/dgenio/weaver-spec) contract, published
+to PyPI as the [`weaver-contracts`](https://pypi.org/project/weaver-contracts/)
+distribution.  The declared version lives in source so CI fails any
+change that bumps the contract without also touching this document.
 
 ## Declared compatibility
 
-- **weaver-spec version:** `0.1.0`
+- **weaver-contracts version:** `0.6.0`
 - **Source of truth:**
   `chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION`
+  (read from the installed `weaver_contracts.version.CONTRACT_VERSION`)
+- **Optional extra:** `pip install 'chainweaver[weaver-stack]'`
 - **Conformance test suite:**
   `tests/test_weaver_spec_conformance.py`
 - **CI gate:**
@@ -19,33 +22,37 @@ contract without also touching this document.
 
 The version above must match
 `WEAVER_SPEC_VERSION`
-verbatim.  The conformance test asserts this — bumping the constant
+verbatim.  The conformance test asserts this — bumping the package
 without updating this document, or vice versa, breaks CI.
 
 ## Supported invariants
 
-ChainWeaver targets weaver-spec v0.1.0's three core invariants:
+ChainWeaver consumes `weaver-contracts` 0.6.0's three core routing /
+execution invariants directly (no internal mirror types):
 
 | Invariant | What it requires | Where it lives in ChainWeaver |
 |-----------|------------------|-------------------------------|
-| **I-03 — `SelectableItem`** | Each routable capability publishes a stable id, schema, and version. | `flow_to_selectable_item()` projects a `Flow` (or `DAGFlow`) to a `SelectableItem` for contextweaver catalog ingestion. |
-| **I-04 — `RoutingDecision`** | Routers pick from a bounded candidate set with a stable verdict shape. | `RoutingDecision` is the mirror Pydantic model; `RoutingDecisionAdapter` consumes it as a `DecisionCallback`. |
-| **I-07 — `CapabilityToken`** | Capability execution is delegated to a kernel via a bearer token. | `CapabilityToken` is the mirror type; `KernelBackedExecutor` dispatches `step_type="capability"` steps through a `KernelProtocol` with a token. |
+| **I-03 — `SelectableItem`** | Each routable capability publishes a stable id, label, and routing metadata. | `flow_to_selectable_item()` projects a `Flow` (or `DAGFlow`) to a `weaver_contracts.SelectableItem` for contextweaver catalog ingestion (schema/version/tags carried in `metadata`). |
+| **I-04 — `RoutingDecision`** | Routers pick from a bounded candidate set (choice cards) with a stable verdict shape. | `make_routing_decision()` builds a `RoutingDecision`; `selected_capability_id()` reads the verdict; `resolve_flow_from_routing_decision()` resolves it to a registered flow; `RoutingDecisionAdapter` consumes it as a `DecisionCallback`. |
+| **I-07 — `CapabilityToken`** | Capability execution is delegated to a kernel via a scoped bearer token. | `CapabilityToken` is the upstream type; `KernelBackedExecutor` dispatches `step_type="capability"` steps through a `KernelProtocol`, gating each call against the token's `scope`. |
 
-The mirror types are intentionally self-contained — ChainWeaver does
-not depend on a `weaver-spec` PyPI package because the spec lives as a
-sibling repo, not a published distribution.  When the upstream package
-ships, callers can swap the mirror types for the upstream ones with a
-one-line adapter (the field names and JSON shape are identical).
+ChainWeaver consumes the upstream dataclasses directly, so there is no
+mirror-vs-spec drift to police — the only seam is the declared version
+above.  Importing `chainweaver.integrations.weaver_spec` (or the
+`contextweaver` / `agent_kernel` adapters that build on it) requires the
+`weaver-stack` extra; the base install is unaffected.
 
 ## How to bump the declared version
 
-1. Audit ChainWeaver's mirror types against the new spec revision.
-2. Update fields and validators in
-   `chainweaver/integrations/weaver_spec.py` as needed.
-3. Bump
-   `WEAVER_SPEC_VERSION`
-   to the new value.
+1. Install the new `weaver-contracts` release and review its changelog
+   for shape changes to `SelectableItem` / `RoutingDecision` /
+   `CapabilityToken`.
+2. Update the adapters in
+   `chainweaver/integrations/weaver_spec.py`,
+   `contextweaver.py`, and `agent_kernel.py` if any consumed field
+   changed.
+3. Bump the pin in `pyproject.toml` (`weaver-stack` extra and `dev`).
+   `WEAVER_SPEC_VERSION` tracks the installed package automatically.
 4. Update this document — the "Declared compatibility" section *and*
    any invariant rows that changed.
 5. Update `tests/test_weaver_spec_conformance.py` to cover any new
@@ -59,5 +66,5 @@ the canonical CI command is::
     python -m pytest tests/test_weaver_spec_conformance.py -m conformance --no-cov
 
 ``--no-cov`` opts out of the package-wide coverage gate for this
-9-test subset — coverage is enforced by the main ``test`` job that
-runs the full suite.
+subset — coverage is enforced by the main ``test`` job that runs the
+full suite.

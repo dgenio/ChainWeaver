@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real Weaver Stack interop** (#233, #234): `chainweaver.integrations.weaver_spec`
+  now consumes the published [`weaver-contracts`](https://pypi.org/project/weaver-contracts/)
+  package directly (behind the `chainweaver[weaver-stack]` extra, pinned
+  `weaver-contracts>=0.6,<1.0`) instead of carrying internal mirror types. New
+  routing-consumption helpers — `make_routing_decision()`,
+  `selected_capability_id()`, and `resolve_flow_from_routing_decision()` — let a
+  Weaver router hand a `RoutingDecision` straight to ChainWeaver, which resolves
+  it to a registered flow for deterministic execution. A new runnable example,
+  `examples/weaver_stack_golden_path/`, wires contextweaver routing → ChainWeaver
+  execution → agent-kernel gating with a printed `weaver_contracts.TraceEvent`
+  audit trail, degrading gracefully when the extra is absent.
 - **Offline LLM-assisted flow compiler** (#28): a new `chainweaver.compiler_llm`
   module exposing `LLMProposal`, `llm_propose_flows()`, and `write_proposals()`.
   It proposes deterministic `Flow` definitions from tool metadata using an LLM
@@ -70,6 +81,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Weaver Stack types are now the upstream `weaver-contracts` dataclasses**
+  (#233, breaking): the previous internal Pydantic mirror types
+  (`SelectableItem`, `RoutingDecision`, `CapabilityToken`) are replaced by the
+  upstream contract shapes, so importing
+  `chainweaver.integrations.weaver_spec` / `contextweaver` / `agent_kernel`
+  now requires the `weaver-stack` extra. `flow_to_selectable_item()` returns the
+  upstream `SelectableItem` (flow version/schema/tags live in `metadata`), and
+  `KernelProtocol.invoke(capability_id, token, inputs)` takes the capability id
+  explicitly and gates on the token's `scope`. `WEAVER_SPEC_VERSION` now tracks
+  the installed contract (`0.6.0`). The base install is unaffected.
 - **Dependency floors are now proven, not aspirational** (#236): bumped to the
   lowest versions the suite actually passes on — `deepdiff>=9.0` (was `>=8.0`;
   8.x imported `numpy` unconditionally and emitted a different tree-view diff

@@ -26,13 +26,18 @@ Example
         InMemoryKernel,
         KernelBackedExecutor,
     )
-    from chainweaver.integrations.weaver_spec import CapabilityToken
 
     def ingest_capability(inputs, token):
         return {"rows": len(inputs.get("records", []))}
 
     kernel = InMemoryKernel({"data.ingest": ingest_capability})
     executor = KernelBackedExecutor(registry=registry, kernel=kernel)
+
+The :class:`~weaver_contracts.CapabilityToken` passed to each capability
+carries the kernel authorization (``principal``, ``scope``, expiry); the
+capability *id* being invoked is passed to
+:meth:`KernelProtocol.invoke` as a separate argument so a single broad
+token can authorize several capability steps.
 
 Capability steps record their outputs in the standard ``StepRecord``
 shape, so observability and tracing work identically to tool steps.
@@ -77,10 +82,10 @@ def _exc_to_strings(exc: Exception) -> tuple[str, str]:
 class KernelProtocol(Protocol):
     """Structural protocol for an agent-kernel runner (issue #89).
 
-    A kernel exposes a single :meth:`invoke` method that runs a
-    capability identified by a
-    :class:`~chainweaver.integrations.weaver_spec.CapabilityToken`
-    against an input dictionary, returning the capability's outputs.
+    A kernel exposes a single :meth:`invoke` method that runs the
+    capability named by *capability_id*, authorized by a
+    :class:`~weaver_contracts.CapabilityToken`, against an input
+    dictionary, returning the capability's outputs.
 
     The protocol is intentionally minimal so any transport (in-process
     callable, RPC client, HTTP wrapper) can satisfy it.  Errors should
@@ -89,11 +94,15 @@ class KernelProtocol(Protocol):
     them as a failed :class:`StepRecord`.
     """
 
-    def invoke(self, token: CapabilityToken, inputs: dict[str, Any]) -> dict[str, Any]:
-        """Execute the capability identified by *token* against *inputs*.
+    def invoke(
+        self, capability_id: str, token: CapabilityToken, inputs: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Execute *capability_id* against *inputs* under *token*.
 
         Args:
-            token: The :class:`CapabilityToken` for the target capability.
+            capability_id: The capability to run (e.g. ``"data.ingest"``).
+            token: The :class:`CapabilityToken` authorizing the call;
+                its ``scope`` should include *capability_id*.
             inputs: The resolved input dictionary for this step.
 
         Returns:
@@ -115,6 +124,13 @@ class InMemoryKernel:
     shape ``(inputs, token) -> outputs``.  No network, no async, no
     state — same semantics as :class:`~chainweaver.tools.Tool` fn but
     keyed by capability identifier rather than tool name.
+
+    The kernel *gates* each call: it rejects an invocation whose
+    *capability_id* is not covered by the supplied token's ``scope``,
+    raising :class:`PermissionError` (which
+    :class:`KernelBackedExecutor` surfaces as a failed step).  This
+    mirrors how a real agent-kernel refuses to run a capability the
+    bearer token does not authorize.
     """
 
     __slots__ = ("_capabilities",)
@@ -133,13 +149,20 @@ class InMemoryKernel:
             str, Callable[[dict[str, Any], CapabilityToken], dict[str, Any]]
         ] = dict(capabilities)
 
-    def invoke(self, token: CapabilityToken, inputs: dict[str, Any]) -> dict[str, Any]:
+    def invoke(
+        self, capability_id: str, token: CapabilityToken, inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         try:
-            fn = self._capabilities[token.capability_id]
+            fn = self._capabilities[capability_id]
         except KeyError as exc:
             raise LookupError(
-                f"InMemoryKernel has no capability registered for id='{token.capability_id}'."
+                f"InMemoryKernel has no capability registered for id='{capability_id}'."
             ) from exc
+        if capability_id not in token.scope:
+            raise PermissionError(
+                f"CapabilityToken '{token.token_id}' does not authorize "
+                f"capability '{capability_id}' (scope={list(token.scope)!r})."
+            )
         return fn(inputs, token)
 
 
@@ -152,11 +175,11 @@ class KernelBackedExecutor(FlowExecutor):
 
     1. Resolves the step's inputs against the merged context (same path
        tool steps take).
-    2. Builds a :class:`CapabilityToken` from the step's
-       ``capability_id`` (the per-token field) — or uses
-       :attr:`default_token` if the step omits a token but the
-       executor was initialised with one.
-    3. Calls ``kernel.invoke(token, inputs)``.
+    2. Builds a :class:`CapabilityToken` scoped to the step's
+       ``capability_id`` — or uses :attr:`default_token` when the
+       executor was initialised with one whose ``scope`` covers the
+       step's capability.
+    3. Calls ``kernel.invoke(capability_id, token, inputs)``.
     4. Wraps the result in a :class:`StepRecord` with the same shape
        tool steps produce, so observability and tracing are uniform.
 
@@ -182,13 +205,14 @@ class KernelBackedExecutor(FlowExecutor):
         Args:
             *args: Forwarded to :class:`FlowExecutor`.
             kernel: A :class:`KernelProtocol` implementation.
-            default_token: Optional :class:`CapabilityToken` used when a
-                step's ``capability_id`` is set but no per-step token
-                is plumbed (the common case for tests and single-tenant
-                deployments).  When ``None``, every capability step
-                must resolve its own token via
-                :meth:`_token_for_step` — subclasses can override that
-                method for richer token sourcing.
+            default_token: Optional :class:`CapabilityToken` reused for
+                every capability step whose id falls within the token's
+                ``scope`` (the common case for tests and single-tenant
+                deployments).  When ``None`` — or when a step's
+                capability is outside the token's scope — a fresh
+                single-use token scoped to that step's capability is
+                minted via :meth:`_token_for_step`; subclasses can
+                override that method for richer token sourcing.
             **kwargs: Forwarded to :class:`FlowExecutor`.
         """
         super().__init__(*args, **kwargs)
@@ -214,10 +238,9 @@ class KernelBackedExecutor(FlowExecutor):
 
         Override in subclasses to mint or fetch per-step tokens (e.g. a
         scoped token issued by an auth server).  The default
-        implementation uses the executor's :attr:`default_token` when
-        the step's ``capability_id`` matches the default token's id,
-        or mints a tokenless :class:`CapabilityToken` carrying just the
-        ``capability_id`` otherwise.
+        implementation reuses the executor's :attr:`default_token` when
+        its ``scope`` covers the step's ``capability_id``, or mints a
+        fresh single-use token scoped to just that capability otherwise.
 
         Args:
             step: The :class:`DAGFlowStep` being executed.
@@ -235,12 +258,15 @@ class KernelBackedExecutor(FlowExecutor):
                 -1,
                 f"Step '{step.step_id}' has step_type='capability' but capability_id is None.",
             )
-        if (
-            self._default_token is not None
-            and self._default_token.capability_id == step.capability_id
-        ):
+        if self._default_token is not None and step.capability_id in self._default_token.scope:
             return self._default_token
-        return CapabilityToken(capability_id=step.capability_id, token="")
+        return CapabilityToken(
+            token_id=f"cw-{step.capability_id}",
+            principal="chainweaver",
+            scope=[step.capability_id],
+            issued_at=_now_utc(),
+            single_use=True,
+        )
 
     def _execute_capability_step(
         self,
@@ -327,11 +353,16 @@ class KernelBackedExecutor(FlowExecutor):
                 duration_ms=(time.perf_counter() - t0) * 1000.0,
             )
 
+        # ``_token_for_step`` guarantees a non-None capability_id (it raises
+        # otherwise), so the cast below is safe and keeps mypy informed.
+        capability_id = step.capability_id
+        assert capability_id is not None
+
         try:
-            outputs = self._kernel.invoke(token, dict(inputs))
+            outputs = self._kernel.invoke(capability_id, token, dict(inputs))
         except Exception as exc:
             err = KernelInvocationError(
-                token.capability_id,
+                capability_id,
                 step_index,
                 f"kernel raised {type(exc).__name__}: {exc}",
             )
@@ -354,7 +385,7 @@ class KernelBackedExecutor(FlowExecutor):
 
         if not isinstance(outputs, dict):
             err = KernelInvocationError(
-                token.capability_id,
+                capability_id,
                 step_index,
                 f"kernel returned non-dict outputs ({type(outputs).__name__}).",
             )
