@@ -1,0 +1,11 @@
+{"trace_id": "req-1", "tool": "fetch", "inputs": {"url": "https://api.example.com/orders"}, "outputs": {"body": "<json>"}}
+{"trace_id": "req-1", "tool": "validate", "inputs": {"body": "<json>"}, "outputs": {"valid": true}}
+{"trace_id": "req-1", "tool": "transform", "inputs": {"body": "<json>"}, "outputs": {"records": [1, 2, 3]}}
+{"trace_id": "req-2", "tool": "fetch", "inputs": {"url": "https://api.example.com/orders"}, "outputs": {"body": "<json>"}}
+{"trace_id": "req-2", "tool": "validate", "inputs": {"body": "<json>"}, "outputs": {"valid": true}}
+{"trace_id": "req-2", "tool": "transform", "inputs": {"body": "<json>"}, "outputs": {"records": [4, 5]}}
+{"trace_id": "req-3", "tool": "fetch", "inputs": {"url": "https://api.example.com/users"}, "outputs": {"body": "<json>"}}
+{"trace_id": "req-3", "tool": "validate", "inputs": {"body": "<json>"}, "outputs": {"valid": true}}
+{"trace_id": "req-3", "tool": "transform", "inputs": {"body": "<json>"}, "outputs": {"records": [6]}}
+{"trace_id": "req-4", "tool": "fetch", "inputs": {"url": "https://api.example.com/health"}, "outputs": {"body": "ok"}}
+{"trace_id": "req-4", "tool": "summarize", "inputs": {"body": "ok"}, "outputs": {"summary": "healthy"}}

@@ -30,6 +30,9 @@ Available commands
 - ``chainweaver suggest <flow>`` — emit advisory optimization
   suggestions for a flow file, optionally informed by trace files
   (issue #155).
+- ``chainweaver record <trace.jsonl>`` — mine candidate flows from a
+  recorded JSONL tool trace and (optionally) write them as ``.flow.yaml``
+  files, ranked by projected LLM calls avoided (issue #226).
 - ``chainweaver doctor <path>`` — diagnostic command; ``--check-drift``
   reports missing tools and tool-schema fingerprint drift for one or
   more saved flow files (issue #175).
@@ -95,8 +98,9 @@ from chainweaver.exceptions import (
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor
 from chainweaver.flow import DAGFlow, Flow
+from chainweaver.observer import ChainObserver
 from chainweaver.registry import FlowRegistry
-from chainweaver.serialization import flow_from_json, flow_from_yaml
+from chainweaver.serialization import flow_from_json, flow_from_yaml, flow_to_yaml
 from chainweaver.tools import Tool
 from chainweaver.viz import _render_step_bar_chart, flow_to_ascii, flow_to_dot
 
@@ -1603,6 +1607,203 @@ def suggest_command(
         loc = f"step {s.step_index} ({s.tool_name})" if s.step_index is not None else "(flow)"
         lines.append(f"  [{s.code} {s.title}] {loc}")
         lines.append(f"    {s.message}")
+    typer.echo("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# record command (issue #226)
+# ---------------------------------------------------------------------------
+
+
+def _load_tool_trace(path: Path) -> ChainObserver:
+    """Read a JSONL tool trace into a :class:`ChainObserver`.
+
+    Each non-blank line is a JSON object describing one tool call::
+
+        {"trace_id": "t1", "tool": "fetch", "inputs": {...}, "outputs": {...}}
+
+    Calls are grouped into traces by ``trace_id`` (file order preserved);
+    lines without a ``trace_id`` join a single default trace.  ``tool`` (or
+    its alias ``tool_name``) is required; ``inputs`` defaults to ``{}`` and
+    ``outputs`` to ``null``.
+
+    Raises:
+        ValueError: On malformed JSON, a non-object line, a record missing
+            ``tool``, or a non-object ``inputs`` / ``outputs``.
+    """
+    grouped: dict[str, list[tuple[str, dict[str, Any], dict[str, Any] | None]]] = {}
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"line {lineno}: invalid JSON ({exc.msg}).") from exc
+        if not isinstance(obj, dict):
+            raise ValueError(f"line {lineno}: expected a JSON object.")
+        tool = obj.get("tool", obj.get("tool_name"))
+        if not isinstance(tool, str) or not tool:
+            raise ValueError(f"line {lineno}: missing or empty 'tool' field.")
+        inputs = obj.get("inputs") or {}
+        outputs = obj.get("outputs")
+        if not isinstance(inputs, dict):
+            raise ValueError(f"line {lineno}: 'inputs' must be a JSON object.")
+        if outputs is not None and not isinstance(outputs, dict):
+            raise ValueError(f"line {lineno}: 'outputs' must be a JSON object or null.")
+        trace_id = str(obj.get("trace_id", "__default__"))
+        grouped.setdefault(trace_id, []).append(
+            (tool, dict(inputs), dict(outputs) if outputs is not None else None)
+        )
+
+    observer = ChainObserver()
+    for steps in grouped.values():
+        for tool_name, inputs, outputs in steps:
+            observer.record(tool_name, inputs, outputs)
+        observer.end_trace()
+    return observer
+
+
+_RECORD_TRACE_ARG = typer.Argument(
+    ...,
+    help="Path to a JSONL tool-trace file (one tool call per line).",
+)
+_RECORD_OUTPUT_OPTION = typer.Option(
+    None,
+    "--output-dir",
+    "-o",
+    help=(
+        "Directory to write candidate .flow.yaml files into. "
+        "Omit for a dry run that only reports candidates."
+    ),
+)
+_RECORD_MIN_OCC_OPTION = typer.Option(
+    3,
+    "--min-occurrences",
+    help="Minimum contiguous appearances for a pattern to be suggested.",
+)
+_RECORD_MIN_LEN_OPTION = typer.Option(
+    2,
+    "--min-length",
+    help="Minimum pattern length (number of tools).",
+)
+_RECORD_MAX_LEN_OPTION = typer.Option(
+    None,
+    "--max-length",
+    help="Maximum pattern length. Omit for no upper bound.",
+)
+_RECORD_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+
+
+@app.command("record")
+def record_command(
+    trace_file: Path = _RECORD_TRACE_ARG,
+    output_dir: Path | None = _RECORD_OUTPUT_OPTION,
+    min_occurrences: int = _RECORD_MIN_OCC_OPTION,
+    min_length: int = _RECORD_MIN_LEN_OPTION,
+    max_length: int | None = _RECORD_MAX_LEN_OPTION,
+    output_format: OutputFormat = _RECORD_FORMAT_OPTION,
+) -> None:
+    """Mine candidate flows from a recorded JSONL tool trace (issue #226).
+
+    Replays the trace through :class:`~chainweaver.observer.ChainObserver`,
+    detects repeated tool sequences offline (no LLM), and emits candidate
+    ``.flow.yaml`` files ranked by projected LLM calls avoided
+    (``len(tools) * occurrences``).  With ``--output-dir`` the candidates
+    are written to disk; without it the command runs as a dry run.
+
+    Exit codes: 0 = ran successfully (regardless of candidate count),
+    1 = malformed trace or serialization error, 2 = file not found.
+    """
+    _require_existing_file(trace_file)
+    try:
+        observer = _load_tool_trace(trace_file)
+    except ValueError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        suggestions = observer.suggest_flows(
+            min_occurrences=min_occurrences,
+            min_length=min_length,
+            max_length=max_length,
+        )
+    except ValueError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    # Rank by projected savings (frequency x per-run calls avoided), then by
+    # raw occurrences, then name for a stable order.
+    ranked = sorted(
+        suggestions,
+        key=lambda s: (-s.estimated_llm_calls_avoided, -s.occurrences, s.flow.name),
+    )
+
+    written: dict[str, str] = {}
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for suggestion in ranked:
+            dest = output_dir / f"{suggestion.flow.name}.flow.yaml"
+            try:
+                dest.write_text(flow_to_yaml(suggestion.flow), encoding="utf-8")
+            except FlowSerializationError as exc:
+                typer.echo(f"chainweaver: {exc.detail}", err=True)
+                raise typer.Exit(code=1) from exc
+            written[suggestion.flow.name] = str(dest)
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(
+            {
+                "trace_file": str(trace_file),
+                "traces_analyzed": len(observer),
+                "candidate_count": len(ranked),
+                "output_dir": str(output_dir) if output_dir is not None else None,
+                "candidates": [
+                    {
+                        "flow_name": s.flow.name,
+                        "tools": list(s.tools),
+                        "occurrences": s.occurrences,
+                        "traces_with_pattern": s.traces_with_pattern,
+                        "confidence": s.confidence,
+                        "estimated_llm_calls_avoided": s.estimated_llm_calls_avoided,
+                        "output_path": written.get(s.flow.name),
+                        "flow": _flow_to_dict(s.flow),
+                    }
+                    for s in ranked
+                ],
+            }
+        )
+        return
+
+    if not ranked:
+        typer.echo(
+            f"No candidate flows from {len(observer)} trace(s) "
+            f"(min_occurrences={min_occurrences}, min_length={min_length})."
+        )
+        return
+    lines = [
+        f"Candidate flows from {len(observer)} trace(s) in '{trace_file}':",
+        "─" * 60,
+    ]
+    for rank, suggestion in enumerate(ranked, start=1):
+        lines.append(f"  {rank}. {suggestion.flow.name}")
+        lines.append(f"     tools:       {' → '.join(suggestion.tools)}")
+        lines.append(
+            f"     occurrences: {suggestion.occurrences}  "
+            f"confidence: {suggestion.confidence}  "
+            f"est. LLM calls avoided: {suggestion.estimated_llm_calls_avoided}"
+        )
+        if suggestion.flow.name in written:
+            lines.append(f"     written:     {written[suggestion.flow.name]}")
+    if output_dir is None:
+        lines.append("")
+        lines.append("(dry run — pass --output-dir to write .flow.yaml files)")
     typer.echo("\n".join(lines))
 
 
