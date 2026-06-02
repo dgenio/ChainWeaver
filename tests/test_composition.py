@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
 from chainweaver import (
+    CancellationToken,
     DAGFlow,
     DAGFlowStep,
     Flow,
@@ -16,7 +19,12 @@ from chainweaver import (
     FlowStep,
     Tool,
 )
-from chainweaver.exceptions import FlowCompositionError, FlowExecutionError
+from chainweaver.cost import CostProfile
+from chainweaver.exceptions import (
+    FlowCancelledError,
+    FlowCompositionError,
+    FlowExecutionError,
+)
 
 # ---------------------------------------------------------------------------
 # Schemas + tools
@@ -367,3 +375,188 @@ class TestDagAndAsync:
         )
         with pytest.raises(FlowExecutionError, match=r"flow_name.*steps"):
             await executor.execute_flow_async("parent_async", {"n": 1})
+
+
+# ---------------------------------------------------------------------------
+# Cancellation / deadline propagation into composed sub-flows (issue #142 ↔ #75)
+# ---------------------------------------------------------------------------
+
+
+def _slow_subflow_executor(*, sleep_a: float) -> FlowExecutor:
+    """Parent flows that compose a 2-step sub-flow whose first tool sleeps.
+
+    ``t_slow`` sleeps ``sleep_a`` seconds so a deadline or cross-thread cancel
+    lands at the boundary *inside* the sub-flow — after its first step, before
+    its second — which only the parent's forwarded ``deadline`` /
+    ``cancel_token`` can observe.
+    """
+
+    def _slow_inc(inp: _NIn) -> dict[str, Any]:
+        if sleep_a:
+            time.sleep(sleep_a)
+        return {"a": inp.n + 1}
+
+    def _plus(inp: _AIn) -> dict[str, Any]:
+        return {"b": inp.a + 1}
+
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="sub_slow",
+            version="1.0.0",
+            description="slow inc, then plus.",
+            steps=[
+                FlowStep(tool_name="t_slow", input_mapping={"n": "n"}),
+                FlowStep(tool_name="t_plus", input_mapping={"a": "a"}),
+            ],
+        )
+    )
+    registry.register_flow(
+        Flow(
+            name="parent_slow",
+            version="1.0.0",
+            description="compose sub_slow.",
+            steps=[FlowStep(flow_name="sub_slow", input_mapping={"n": "n"})],
+        )
+    )
+    registry.register_flow(
+        DAGFlow(
+            name="dag_parent_slow",
+            version="1.0.0",
+            description="compose sub_slow as the single DAG node.",
+            steps=[
+                DAGFlowStep(
+                    flow_name="sub_slow", step_id="A", depends_on=[], input_mapping={"n": "n"}
+                ),
+            ],
+        )
+    )
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        Tool(
+            name="t_slow",
+            description="slow inc",
+            input_schema=_NIn,
+            output_schema=_AOut,
+            fn=_slow_inc,
+        )
+    )
+    ex.register_tool(
+        Tool(name="t_plus", description="plus", input_schema=_AIn, output_schema=_BOut, fn=_plus)
+    )
+    return ex
+
+
+class TestCompositionCancellation:
+    def test_deadline_observed_between_subflow_steps(self) -> None:
+        ex = _slow_subflow_executor(sleep_a=0.15)
+        with pytest.raises(FlowCancelledError) as exc_info:
+            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+        err = exc_info.value
+        # The deadline fired *inside* the sub-flow, between its two steps.
+        assert err.deadline_exceeded is True
+        assert err.token_cancelled is False
+        assert err.flow_name == "sub_slow"
+        assert err.step_index == 1
+        assert len(err.result.execution_log) == 1
+        assert err.result.execution_log[0].outputs == {"a": 2}
+
+    def test_token_cancel_observed_in_subflow(self) -> None:
+        ex = _slow_subflow_executor(sleep_a=0.15)
+        token = CancellationToken()
+
+        def _cancel_soon() -> None:
+            time.sleep(0.05)
+            token.cancel()
+
+        canceller = threading.Thread(target=_cancel_soon)
+        canceller.start()
+        try:
+            with pytest.raises(FlowCancelledError) as exc_info:
+                ex.execute_flow("parent_slow", {"n": 1}, cancel_token=token)
+        finally:
+            canceller.join()
+        err = exc_info.value
+        assert err.token_cancelled is True
+        assert err.deadline_exceeded is False
+        assert err.flow_name == "sub_slow"
+        assert len(err.result.execution_log) == 1
+
+    def test_dag_deadline_observed_in_subflow(self) -> None:
+        ex = _slow_subflow_executor(sleep_a=0.15)
+        with pytest.raises(FlowCancelledError) as exc_info:
+            ex.execute_flow("dag_parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+        err = exc_info.value
+        assert err.deadline_exceeded is True
+        assert err.flow_name == "sub_slow"
+        assert len(err.result.execution_log) == 1
+
+    def test_no_cancel_composed_flow_completes(self) -> None:
+        ex = _slow_subflow_executor(sleep_a=0.0)
+        result = ex.execute_flow(
+            "parent_slow",
+            {"n": 1},
+            deadline=time.time() + 100,
+            cancel_token=CancellationToken(),
+        )
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["b"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Cost report accounts for nested tool invocations in composed flows (issue #75)
+# ---------------------------------------------------------------------------
+
+
+class TestCompositionCostReport:
+    def test_composed_step_counts_nested_tool_invocations(self) -> None:
+        # Sub-flow ``inc`` runs one tool; a parent that composes it plus one
+        # direct tool ran two genuine tool invocations, not "one composed
+        # step + one tool".
+        ex = _base_executor()
+        ex._cost_profile = CostProfile()
+        ex._registry.register_flow(
+            Flow(
+                name="parent",
+                version="1.0.0",
+                description="inc (sub-flow) then plus (tool).",
+                steps=[
+                    FlowStep(flow_name="inc", input_mapping={"n": "n"}),
+                    FlowStep(tool_name="t_plus", input_mapping={"a": "a"}),
+                ],
+            )
+        )
+        result = ex.execute_flow("parent", {"n": 1})
+        assert result.success is True
+        assert result.cost_report is not None
+        # 1 nested tool (inc -> t_inc) + 1 direct tool (t_plus) = 2.
+        assert result.cost_report.steps_executed == 2
+        assert result.cost_report.llm_calls_avoided == 1
+
+    def test_nested_composition_counts_recursively(self) -> None:
+        # level1 -> level2 -> inc (tool). The whole tree ran exactly one tool,
+        # so the composed containers must not each add a phantom invocation.
+        ex = _base_executor()
+        ex._cost_profile = CostProfile()
+        ex._registry.register_flow(
+            Flow(
+                name="level2",
+                version="1.0.0",
+                description="wraps inc.",
+                steps=[FlowStep(flow_name="inc", input_mapping={"n": "n"})],
+            )
+        )
+        ex._registry.register_flow(
+            Flow(
+                name="level1",
+                version="1.0.0",
+                description="wraps level2.",
+                steps=[FlowStep(flow_name="level2", input_mapping={"n": "n"})],
+            )
+        )
+        result = ex.execute_flow("level1", {"n": 1})
+        assert result.success is True
+        assert result.cost_report is not None
+        assert result.cost_report.steps_executed == 1
+        assert result.cost_report.llm_calls_avoided == 0

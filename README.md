@@ -586,7 +586,7 @@ field table (`status`, `tool_schema_hashes`, and the `input_schema_ref` /
 
 A `FlowStep` runs **either** a tool (`tool_name`) **or** a registered
 sub-flow (`flow_name`) — exactly one, never both. Referencing a sub-flow lets
-you compose reusable pipelines (issue #75):
+you compose reusable flows (issue #75):
 
 ```python
 fetch_validate = Flow(
@@ -597,8 +597,8 @@ fetch_validate = Flow(
         FlowStep(tool_name="validate", input_mapping={"data": "data"}),
     ],
 )
-pipeline = Flow(
-    name="pipeline",
+fetch_then_transform = Flow(
+    name="fetch_then_transform",
     description="Reuse fetch_validate, then transform.",
     steps=[
         FlowStep(flow_name="fetch_validate", input_mapping={"url": "url"}),  # sub-flow
@@ -613,6 +613,14 @@ output back into the parent context, and attaches the sub-flow's
 are checked for cycles and a configurable max nesting depth
 (`FlowExecutor(max_composition_depth=...)`, default 10) before execution,
 raising `FlowCompositionError` otherwise.
+
+A `deadline` or `CancellationToken` passed to `execute_flow` is forwarded into
+composed sub-flows, so cancellation and the wall-clock budget are observed at
+the step boundaries *inside* a sub-flow — a long sub-flow stops between its own
+steps rather than only at the parent boundary. The cost report's
+`steps_executed` counts the tool invocations a composed step actually drove
+(recursively), so `llm_calls_avoided` reflects every tool that ran across the
+composition.
 
 #### `FlowRegistry`
 

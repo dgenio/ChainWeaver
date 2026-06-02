@@ -1273,7 +1273,15 @@ class FlowExecutor:
                 perf_start=flow_t0,
                 initial_input=initial_input,
             )
-            record = self._execute_step(idx, step, context, flow_name, trace_id)
+            record = self._execute_step(
+                idx,
+                step,
+                context,
+                flow_name,
+                trace_id,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
             log.append(record)
 
             if not record.success:
@@ -2262,6 +2270,29 @@ class FlowExecutor:
             token_cancelled=token_cancelled,
         )
 
+    @staticmethod
+    def _count_composed_tool_steps(records: list[StepRecord]) -> int:
+        """Count genuine tool invocations in a step log, descending through
+        composed sub-flows (issue #75).
+
+        A composed sub-flow step is a *container*, not a tool invocation, so it
+        contributes only the tool steps its sub-flow actually ran (recursively,
+        for nested composition).  Every other record counts as one invocation.
+
+        Args:
+            records: A flow's ``execution_log`` (or a sub-flow's).
+
+        Returns:
+            The total number of tool invocations the log represents.
+        """
+        total = 0
+        for rec in records:
+            if rec.sub_result is not None:
+                total += FlowExecutor._count_composed_tool_steps(rec.sub_result.execution_log)
+            else:
+                total += 1
+        return total
+
     def _make_result(
         self,
         *,
@@ -2285,16 +2316,31 @@ class FlowExecutor:
                 ``cost_report.llm_calls_avoided`` so validation records
                 don't inflate the estimate.  When ``None`` (the default),
                 falls back to ``len(execution_log)`` for callers that do
-                not append validation records.
+                not append validation records.  Composed sub-flow steps
+                (issue #75) are expanded to their nested tool invocations
+                on top of this count via
+                :meth:`_count_composed_tool_steps`, so the cost estimate
+                reflects every tool that ran across the composition.
         """
         ended_at = _now_utc()
         total_ms = (time.perf_counter() - perf_start) * 1000.0
         cost_report: CostReport | None = None
         if self._cost_profile is not None:
+            base_steps = tool_step_count if tool_step_count is not None else len(execution_log)
+            # Composed sub-flow steps (issue #75) each count as a single record
+            # in ``execution_log`` but actually drive a whole sub-flow's worth
+            # of tool invocations.  Replace each composed step's lone count
+            # with the recursive count of the genuine tools it ran, so
+            # ``steps_executed`` — and thus ``llm_calls_avoided`` — reflects
+            # every tool that executed across the composition, not just the
+            # top-level steps.
+            composition_adjustment = sum(
+                self._count_composed_tool_steps(rec.sub_result.execution_log) - 1
+                for rec in execution_log
+                if rec.sub_result is not None
+            )
             cost_report = compute_cost_report(
-                steps_executed=(
-                    tool_step_count if tool_step_count is not None else len(execution_log)
-                ),
+                steps_executed=base_steps + composition_adjustment,
                 actual_execution_ms=total_ms,
                 profile=self._cost_profile,
             )
@@ -2822,6 +2868,8 @@ class FlowExecutor:
         *,
         started_at: datetime,
         perf_start: float,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> StepRecord:
         """Execute a composed sub-flow step (issue #75).
 
@@ -2872,10 +2920,20 @@ class FlowExecutor:
 
         # Recurse. ``execute_flow`` resets ``_active_flow_version`` to the
         # sub-flow's version; save and restore so the parent's result is
-        # stamped with the parent's version.
+        # stamped with the parent's version.  Forward the parent's
+        # ``deadline`` / ``cancel_token`` so flow-level cancellation and the
+        # wall-clock budget are observed *between* the sub-flow's own steps,
+        # not just at the parent boundary (issue #142). The deadline is an
+        # absolute wall-clock instant, so passing it through unchanged keeps
+        # one shared budget across the whole composed run.
         saved_version = self._active_flow_version
         try:
-            sub_result = self.execute_flow(sub_name, sub_input)
+            sub_result = self.execute_flow(
+                sub_name,
+                sub_input,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
         finally:
             self._active_flow_version = saved_version
 
@@ -2918,6 +2976,8 @@ class FlowExecutor:
         trace_id: str,
         *,
         step_id: str | None = None,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -2960,6 +3020,8 @@ class FlowExecutor:
                 trace_id,
                 started_at=started_at,
                 perf_start=t0,
+                deadline=deadline,
+                cancel_token=cancel_token,
             )
         # Resolve guided decision points (issue #102).  When the step
         # declares ``decision_candidates`` *and* the executor has a
@@ -3825,6 +3887,8 @@ class FlowExecutor:
                     flow.name,
                     trace_id,
                     step_id=step.step_id,
+                    deadline=deadline,
+                    cancel_token=cancel_token,
                 )
                 level_records.append(record)
                 flat_index += 1

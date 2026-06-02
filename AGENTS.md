@@ -224,6 +224,11 @@ before execution — cycles, nesting beyond `FlowExecutor(max_composition_depth=
 (default 10), and references to unregistered flows raise `FlowCompositionError`.
 Composition is sync-only; `execute_flow_async` rejects `flow_name` steps.
 `FlowStep.display_name` returns `tool_name` or `flow_name` for logs/records.
+The parent's `deadline` / `cancel_token` are forwarded into the recursive
+sub-flow run, so cancellation and the wall-clock budget are honoured between a
+sub-flow's own steps (not just at the parent boundary). `ExecutionResult.cost_report.steps_executed`
+counts the tool invocations a composed step actually drove (recursively), so
+`llm_calls_avoided` is not under-counted for composed flows.
 
 ### `FlowStep.input_mapping`
 
