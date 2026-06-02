@@ -194,7 +194,8 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 # weaver-contracts (issue #233) ships no py.typed marker yet; treat it as
 # untyped rather than failing the type check on the optional integration.
-module = "weaver_contracts.*"
+# Cover both the top-level package and its submodules.
+module = ["weaver_contracts", "weaver_contracts.*"]
 ignore_missing_imports = true
 
 [tool.setuptools.packages.find]

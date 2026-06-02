@@ -101,7 +101,7 @@ def test_weaver_stack_golden_path_runs() -> None:
     assert "[weaver-stack] golden path OK" in completed.stdout, output
 
 
-def test_weaver_stack_golden_path_degrades_without_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_weaver_stack_golden_path_degrades_without_extra() -> None:
     """Without the extra the demo prints a skip notice and exits 0 (#234)."""
     import importlib.util
 
