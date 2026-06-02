@@ -453,13 +453,21 @@ class TestCompositionCancellation:
         with pytest.raises(FlowCancelledError) as exc_info:
             ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + 0.05)
         err = exc_info.value
-        # The deadline fired *inside* the sub-flow, between its two steps.
+        # The deadline fired *inside* the sub-flow, but the error is re-anchored
+        # to the parent: parent name, parent step index, and a parent partial
+        # whose composed step carries the sub-flow's partial as `sub_result`.
         assert err.deadline_exceeded is True
         assert err.token_cancelled is False
-        assert err.flow_name == "sub_slow"
-        assert err.step_index == 1
+        assert err.flow_name == "parent_slow"
+        assert err.step_index == 0
         assert len(err.result.execution_log) == 1
-        assert err.result.execution_log[0].outputs == {"a": 2}
+        composed = err.result.execution_log[0]
+        assert composed.flow_name == "sub_slow"
+        assert composed.success is False
+        assert composed.sub_result is not None
+        # The sub-flow's own partial holds its one completed step (a = n + 1).
+        assert len(composed.sub_result.execution_log) == 1
+        assert composed.sub_result.execution_log[0].outputs == {"a": 2}
 
     def test_token_cancel_observed_in_subflow(self) -> None:
         ex = _slow_subflow_executor(sleep_a=0.15)
@@ -479,8 +487,8 @@ class TestCompositionCancellation:
         err = exc_info.value
         assert err.token_cancelled is True
         assert err.deadline_exceeded is False
-        assert err.flow_name == "sub_slow"
-        assert len(err.result.execution_log) == 1
+        assert err.flow_name == "parent_slow"
+        assert err.result.execution_log[0].flow_name == "sub_slow"
 
     def test_dag_deadline_observed_in_subflow(self) -> None:
         ex = _slow_subflow_executor(sleep_a=0.15)
@@ -488,8 +496,38 @@ class TestCompositionCancellation:
             ex.execute_flow("dag_parent_slow", {"n": 1}, deadline=time.time() + 0.05)
         err = exc_info.value
         assert err.deadline_exceeded is True
-        assert err.flow_name == "sub_slow"
-        assert len(err.result.execution_log) == 1
+        assert err.flow_name == "dag_parent_slow"
+        composed = err.result.execution_log[0]
+        assert composed.flow_name == "sub_slow"
+        assert composed.sub_result is not None
+
+    def test_parent_flow_end_fires_on_subflow_cancellation(self) -> None:
+        # Regression for the audit finding: cancellation inside a composed
+        # sub-flow must still fire the *parent's* on_flow_end (it pairs with
+        # on_flow_start only via the partial result), and the nested sub-flow's
+        # flow_end fires too.
+        ended: list[str] = []
+
+        class _RecordEnds:
+            def on_flow_start(self, ctx: object) -> None:
+                pass
+
+            def on_step_start(self, ctx: object) -> None:
+                pass
+
+            def on_step_end(self, ctx: object) -> None:
+                pass
+
+            def on_flow_end(self, ctx: Any) -> None:
+                ended.append(ctx.flow_name)
+
+        ex = _slow_subflow_executor(sleep_a=0.15)
+        ex.add_middleware(_RecordEnds())
+        with pytest.raises(FlowCancelledError):
+            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+        # Both the sub-flow and the parent must have fired flow_end exactly once.
+        assert ended.count("sub_slow") == 1
+        assert ended.count("parent_slow") == 1
 
     def test_no_cancel_composed_flow_completes(self) -> None:
         ex = _slow_subflow_executor(sleep_a=0.0)

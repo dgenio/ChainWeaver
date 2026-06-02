@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
-from typing import Any
+from typing import Any, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -1273,15 +1273,31 @@ class FlowExecutor:
                 perf_start=flow_t0,
                 initial_input=initial_input,
             )
-            record = self._execute_step(
-                idx,
-                step,
-                context,
-                flow_name,
-                trace_id,
-                deadline=deadline,
-                cancel_token=cancel_token,
-            )
+            try:
+                record = self._execute_step(
+                    idx,
+                    step,
+                    context,
+                    flow_name,
+                    trace_id,
+                    deadline=deadline,
+                    cancel_token=cancel_token,
+                )
+            except FlowCancelledError as exc:
+                # Cancellation fired inside a composed sub-flow; re-anchor it to
+                # this parent flow so the parent's flow_end fires and the
+                # surfaced partial carries the parent's completed steps.
+                self._reraise_subflow_cancellation(
+                    exc,
+                    parent_flow_name=flow_name,
+                    step=step,
+                    flat_step_index=idx,
+                    prior_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                )
             log.append(record)
 
             if not record.success:
@@ -2269,6 +2285,81 @@ class FlowExecutor:
             deadline_exceeded=deadline_exceeded,
             token_cancelled=token_cancelled,
         )
+
+    def _reraise_subflow_cancellation(
+        self,
+        exc: FlowCancelledError,
+        *,
+        parent_flow_name: str,
+        step: FlowStep,
+        flat_step_index: int,
+        prior_log: list[StepRecord],
+        trace_id: str,
+        started_at: datetime,
+        perf_start: float,
+        initial_input: dict[str, Any],
+    ) -> NoReturn:
+        """Re-anchor a sub-flow `FlowCancelledError` to its parent (issue #142 / #75).
+
+        When a `deadline` / `cancel_token` fires *between* a composed sub-flow's
+        own steps, the recursive `execute_flow` builds and fires the sub-flow's
+        (nested) result and raises. Left unhandled, that error escapes the
+        parent carrying only the sub-flow's partial, and the parent's
+        `flow_end` middleware never fires (it pairs with `flow_start` solely via
+        `_make_result`). This records the cancelled composed step — with the
+        sub-flow's partial attached as `sub_result` — builds the parent's
+        partial via `_make_result` (firing the parent `flow_end`), and re-raises
+        a `FlowCancelledError` carrying the parent's flow name, step index, and
+        partial so the cancellation contract holds at every nesting level.
+
+        Args:
+            exc: The `FlowCancelledError` raised inside the sub-flow.
+            parent_flow_name: Name of the enclosing (parent) flow.
+            step: The composed `FlowStep` whose sub-flow was cancelled.
+            flat_step_index: The composed step's index in the parent flow.
+            prior_log: The parent's step records completed before this step.
+            trace_id: The parent flow's trace id.
+            started_at: The parent flow's start timestamp.
+            perf_start: The parent flow's `perf_counter` start.
+            initial_input: The parent flow's initial input.
+
+        Raises:
+            FlowCancelledError: Always, re-anchored to the parent flow.
+        """
+        now = _now_utc()
+        composed = StepRecord(
+            step_index=flat_step_index,
+            tool_name=step.display_name,
+            flow_name=step.flow_name,
+            inputs={},
+            outputs=None,
+            error_type="FlowCancelledError",
+            error_message=str(exc),
+            success=False,
+            started_at=now,
+            ended_at=now,
+            duration_ms=0.0,
+            sub_result=exc.result,
+        )
+        full_log = [*prior_log, composed]
+        partial = self._make_result(
+            flow_name=parent_flow_name,
+            success=False,
+            final_output=None,
+            execution_log=full_log,
+            trace_id=trace_id,
+            started_at=started_at,
+            perf_start=perf_start,
+            initial_input=initial_input,
+            tool_step_count=len(full_log),
+        )
+        raise FlowCancelledError(
+            parent_flow_name,
+            flat_step_index,
+            result=partial,
+            deadline_exceeded=exc.deadline_exceeded,
+            token_cancelled=exc.token_cancelled,
+        ) from exc
 
     @staticmethod
     def _count_composed_tool_steps(records: list[StepRecord]) -> int:
@@ -3880,16 +3971,32 @@ class FlowExecutor:
                     on_error=step.on_error,
                     decision_candidates=step.decision_candidates,
                 )
-                record = self._execute_step(
-                    flat_index,
-                    proxy,
-                    context,
-                    flow.name,
-                    trace_id,
-                    step_id=step.step_id,
-                    deadline=deadline,
-                    cancel_token=cancel_token,
-                )
+                try:
+                    record = self._execute_step(
+                        flat_index,
+                        proxy,
+                        context,
+                        flow.name,
+                        trace_id,
+                        step_id=step.step_id,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
+                except FlowCancelledError as exc:
+                    # Cancellation fired inside a composed sub-flow; re-anchor it
+                    # to this parent DAG so its flow_end fires and the partial
+                    # carries the levels completed so far + this level's siblings.
+                    self._reraise_subflow_cancellation(
+                        exc,
+                        parent_flow_name=flow.name,
+                        step=proxy,
+                        flat_step_index=flat_index,
+                        prior_log=[*log, *level_records],
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
+                        initial_input=initial_input,
+                    )
                 level_records.append(record)
                 flat_index += 1
 
