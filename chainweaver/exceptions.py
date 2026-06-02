@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from chainweaver.executor import ExecutionResult
+
 
 class ChainWeaverError(Exception):
     """Base exception for all ChainWeaver errors."""
@@ -147,6 +152,80 @@ class FlowStatusError(ChainWeaverError):
         super().__init__(
             f"Flow '{flow_name}' has status '{status}'. Use force=True to execute anyway."
         )
+
+
+class FlowCancelledError(ChainWeaverError):
+    """Raised when a flow is cancelled at a step boundary (issue #142).
+
+    Cooperative cancellation is requested by a wall-clock ``deadline`` and/or
+    a :class:`~chainweaver.cancellation.CancellationToken` passed to
+    :meth:`~chainweaver.executor.FlowExecutor.execute_flow`.  The executor
+    checks both **between** steps (and between DAG levels) — never inside a
+    tool invocation — so the hard executor invariants are preserved.
+
+    The error is raised *after* the partial trace has been recorded, so the
+    :attr:`result` carries every step that completed before the cancellation
+    point.  When both the deadline expired and the token was cancelled, the
+    message names both reasons.
+
+    Attributes:
+        flow_name: Name of the flow that was cancelled.
+        step_index: Zero-based index of the step that *would* have run next
+            (the boundary at which the cancellation was observed).  For DAG
+            flows this is the number of step records completed so far.
+        result: The partial :class:`~chainweaver.executor.ExecutionResult`
+            populated up to (but excluding) ``step_index``.
+        deadline_exceeded: ``True`` when a wall-clock deadline had passed.
+        token_cancelled: ``True`` when the cancellation token was set.
+    """
+
+    def __init__(
+        self,
+        flow_name: str,
+        step_index: int,
+        *,
+        result: ExecutionResult,
+        deadline_exceeded: bool = False,
+        token_cancelled: bool = False,
+    ) -> None:
+        self.flow_name = flow_name
+        self.step_index = step_index
+        self.result = result
+        self.deadline_exceeded = deadline_exceeded
+        self.token_cancelled = token_cancelled
+        reasons = []
+        if deadline_exceeded:
+            reasons.append("wall-clock deadline exceeded")
+        if token_cancelled:
+            reasons.append("cancellation requested")
+        reason = " and ".join(reasons) if reasons else "cancellation requested"
+        super().__init__(f"Flow '{flow_name}' cancelled before step {step_index} ({reason}).")
+
+
+class FlowCompositionError(ChainWeaverError):
+    """Raised when a composed flow's sub-flow references are invalid (issue #75).
+
+    Flow composition lets a :class:`~chainweaver.flow.FlowStep` reference a
+    registered sub-flow by ``flow_name`` instead of a tool.  Before executing,
+    the executor walks the composition graph and rejects:
+
+    * **cycles** — e.g. ``A`` references ``B`` which references ``A``;
+    * **excessive nesting** — chains deeper than the executor's configured
+      ``max_composition_depth``;
+    * **dangling references** — a ``flow_name`` that is not registered.
+
+    Attributes:
+        flow_name: Name of the flow whose composition is invalid.
+        reason: Machine-readable reason code — one of ``"cycle"``,
+            ``"max_depth_exceeded"``, or ``"unknown_flow"``.
+        detail: Human-readable explanation (includes the offending chain).
+    """
+
+    def __init__(self, flow_name: str, reason: str, detail: str) -> None:
+        self.flow_name = flow_name
+        self.reason = reason
+        self.detail = detail
+        super().__init__(f"Invalid flow composition for '{flow_name}' ({reason}): {detail}")
 
 
 class InvalidFlowVersionError(ChainWeaverError):

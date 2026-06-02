@@ -23,12 +23,13 @@ from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
-from typing import Any
+from typing import Any, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
+from chainweaver.cancellation import CancellationToken
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
 from chainweaver.contracts import evaluate_predicate
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
@@ -44,7 +45,10 @@ from chainweaver.exceptions import (
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     DecisionCallbackError,
+    FlowCancelledError,
+    FlowCompositionError,
     FlowExecutionError,
+    FlowNotFoundError,
     FlowStatusError,
     InputMappingError,
     PredicateSyntaxError,
@@ -78,7 +82,7 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import TraceRecorder
-from chainweaver.registry import FlowRegistry
+from chainweaver.registry import AnyFlow, FlowRegistry
 from chainweaver.tools import Tool
 
 _logger = get_logger("chainweaver.executor")
@@ -367,6 +371,13 @@ class StepRecord(BaseModel):
             fallback tool (issue #176).  Set regardless of whether the
             fallback itself succeeded or failed; ``False`` for normal
             execution, retry-success, ``skip``, and ``fail`` paths.
+        flow_name: For a composed sub-flow step (issue #75), the name of the
+            sub-flow that was executed; ``None`` for ordinary tool steps.
+            When set, ``tool_name`` mirrors it so existing trace consumers
+            still see a stable display name.
+        sub_result: For a composed sub-flow step (issue #75), the nested
+            :class:`ExecutionResult` of the sub-flow run, so the parent trace
+            retains the full sub-flow execution log.  ``None`` for tool steps.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -386,6 +397,8 @@ class StepRecord(BaseModel):
     skipped: bool = False
     cached: bool = False
     fallback_used: bool = False
+    flow_name: str | None = None
+    sub_result: ExecutionResult | None = None
 
 
 class ExecutionResult(BaseModel):
@@ -397,6 +410,12 @@ class ExecutionResult(BaseModel):
 
     Attributes:
         flow_name: Name of the flow that was executed.
+        flow_version: The exact registered version of the flow that
+            executed (issue #201).  When :meth:`FlowExecutor.execute_flow`
+            is called with ``version=...`` this is that version; otherwise
+            it is the latest registered version that was resolved.  Audit,
+            replay, and external-routing feedback loops use this to
+            correlate a result with the precise flow definition that ran.
         success: ``True`` when all steps completed without error.
         final_output: The merged execution context (initial input combined
             with all step outputs), or ``None`` on failure.
@@ -436,6 +455,7 @@ class ExecutionResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     flow_name: str
+    flow_version: str
     success: bool
     final_output: dict[str, Any] | None
     execution_log: list[StepRecord] = Field(default_factory=list)
@@ -451,6 +471,13 @@ class ExecutionResult(BaseModel):
         from chainweaver.viz import result_to_mermaid
 
         return result_to_mermaid(self, direction=direction)
+
+
+# ``StepRecord.sub_result`` (issue #75) is a forward reference to
+# ``ExecutionResult``, which is defined after ``StepRecord``.  Rebuild the
+# model now that both classes exist so Pydantic can bind the recursive
+# (StepRecord ↔ ExecutionResult) schema.
+StepRecord.model_rebuild()
 
 
 class FlowExecutor:
@@ -505,6 +532,11 @@ class FlowExecutor:
             an :class:`~chainweaver.observation.ObservedTrace` for every
             ``execute_flow`` call so ad-hoc agent sequences and compiled
             flow runs share a uniform observation store.
+        max_composition_depth: Maximum nesting depth for ``flow_name``
+            sub-flow references (issue #75).  Defaults to ``10``.  The
+            composition graph is validated before execution; deeper chains
+            (or cycles) raise
+            :class:`~chainweaver.exceptions.FlowCompositionError`.
 
     Example::
 
@@ -531,6 +563,7 @@ class FlowExecutor:
         delete_on_success: bool = True,
         decision_callback: DecisionCallback | DecisionCallable | None = None,
         discover_plugins: bool = False,
+        max_composition_depth: int = 10,
     ) -> None:
         self._registry = registry
         self._tools: dict[str, Tool] = {}
@@ -566,6 +599,19 @@ class FlowExecutor:
         # invoking the relevant ``_execute_*`` path so the loops know
         # where to start and which records to prepend.
         self._resume_snapshot: ExecutionSnapshot | None = None
+        # Version of the flow currently executing (issue #201).  Set at the
+        # top of every result-producing path so ``_make_result`` can stamp
+        # ``ExecutionResult.flow_version`` without threading the value
+        # through ~30 call sites.  Sub-flow composition (issue #75) recurses
+        # through ``execute_flow``; ``_execute_step`` save/restores this
+        # around the recursive call so the parent's value is not clobbered.
+        # Like ``_in_replay`` / ``_resume_snapshot`` this assumes the
+        # documented "one executor per concurrent run" contract.
+        self._active_flow_version: str = ""
+        # Flow composition (issue #75): the maximum nesting depth of
+        # ``flow_name`` sub-flow references.  Checked statically before
+        # execution so runaway / cyclic recursion fails loudly.
+        self._max_composition_depth = max_composition_depth
         # Plugin discovery (issue #130).  When ``True``, every Tool
         # advertised under the ``chainweaver.tools`` entry-point group
         # is registered eagerly so end-users don't have to call
@@ -785,8 +831,8 @@ class FlowExecutor:
         flow = self._registry.get_flow(flow_name, version=version)
         new_hashes: dict[str, str] = {}
         for step in flow.steps:
-            if step.tool_name in self._tools:
-                new_hashes[step.tool_name] = self._tools[step.tool_name].schema_hash
+            if step.display_name in self._tools:
+                new_hashes[step.display_name] = self._tools[step.display_name].schema_hash
         flow.tool_schema_hashes = new_hashes
         flow.status = FlowStatus.ACTIVE
 
@@ -881,6 +927,7 @@ class FlowExecutor:
         """Re-run *flow* starting at index *resume_from_step* with a
         context seeded from the original execution log.
         """
+        self._active_flow_version = flow.version
         if resume_from_step > len(flow.steps):
             raise ValueError(
                 f"resume_from_step={resume_from_step} exceeds step count {len(flow.steps)}."
@@ -1012,23 +1059,40 @@ class FlowExecutor:
         for idx, step in enumerate(steps):
             warnings: list[str] = []
             unresolved: list[str] = []
-
-            try:
-                tool = self.get_tool(step.tool_name)
-            except ToolNotFoundError:
-                tool = None
-                warnings.append(f"Tool '{step.tool_name}' is not registered.")
-
-            input_sources = self._describe_input_sources(step, projected_context, unresolved)
             input_schema_shape: dict[str, str] = {}
             output_schema_shape: dict[str, str] = {}
 
-            if tool is not None:
-                input_schema_shape = _schema_field_shape(tool.input_schema)
-                output_schema_shape = _schema_field_shape(tool.output_schema)
-                # Merge the projected output keys into the cumulative context.
-                for field_name, field_type in output_schema_shape.items():
-                    projected_context[field_name] = field_type
+            if step.flow_name is not None:
+                # Composed sub-flow step (issue #75): project the sub-flow's
+                # declared output schema (if any) into the cumulative context.
+                display_name = step.flow_name
+                try:
+                    sub_flow = self._registry.get_flow(step.flow_name)
+                except FlowNotFoundError:
+                    sub_flow = None
+                    warnings.append(f"Sub-flow '{step.flow_name}' is not registered.")
+                input_sources = self._describe_input_sources(step, projected_context, unresolved)
+                if sub_flow is not None and sub_flow.output_schema is not None:
+                    output_schema_shape = _schema_field_shape(sub_flow.output_schema)
+                    for field_name, field_type in output_schema_shape.items():
+                        projected_context[field_name] = field_type
+            else:
+                display_name = step.display_name or "<unknown>"
+                try:
+                    tool = self.get_tool(step.display_name) if step.display_name else None
+                except ToolNotFoundError:
+                    tool = None
+                if tool is None:
+                    warnings.append(f"Tool '{step.display_name}' is not registered.")
+
+                input_sources = self._describe_input_sources(step, projected_context, unresolved)
+
+                if tool is not None:
+                    input_schema_shape = _schema_field_shape(tool.input_schema)
+                    output_schema_shape = _schema_field_shape(tool.output_schema)
+                    # Merge the projected output keys into the cumulative context.
+                    for field_name, field_type in output_schema_shape.items():
+                        projected_context[field_name] = field_type
 
             if unresolved:
                 any_warnings = True
@@ -1038,7 +1102,7 @@ class FlowExecutor:
             plans.append(
                 StepPlan(
                     step_index=idx,
-                    tool_name=step.tool_name,
+                    tool_name=display_name,
                     input_sources=input_sources,
                     input_schema=input_schema_shape,
                     output_schema=output_schema_shape,
@@ -1082,15 +1146,38 @@ class FlowExecutor:
         flow_name: str,
         initial_input: dict[str, Any],
         *,
+        version: str | None = None,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
 
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
+            version: When provided, execute that exact registered flow
+                version (issue #201).  When ``None`` (the default), execute
+                the latest registered version for *flow_name* — preserving
+                the historical behaviour.  External routers and audit/replay
+                systems use this to correlate a routing decision with the
+                precise flow version that ran; the version that executed is
+                always recorded on :attr:`ExecutionResult.flow_version`.
             force: When ``True``, bypass the status guard and execute even if
                 the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional absolute wall-clock deadline in
+                :func:`time.time` seconds (issue #142).  Checked **between**
+                steps (and between DAG levels) — never inside a tool — so an
+                in-flight step always completes.  When the deadline has
+                passed at a step boundary the executor raises
+                :class:`~chainweaver.exceptions.FlowCancelledError` carrying
+                the partial result.
+            cancel_token: Optional :class:`CancellationToken` (issue #142).
+                Calling :meth:`CancellationToken.cancel` from another thread
+                requests that the flow stop at its next step boundary, again
+                raising :class:`~chainweaver.exceptions.FlowCancelledError`.
+                Cancellation is cooperative: a tool that never returns cannot
+                be force-stopped.
 
         Returns:
             An :class:`ExecutionResult` describing the outcome and containing
@@ -1099,17 +1186,27 @@ class FlowExecutor:
             reported via ``ExecutionResult.success`` instead of being raised.
 
         Raises:
-            FlowNotFoundError: When *flow_name* is not registered.
+            FlowNotFoundError: When *flow_name* (at *version*, when given) is
+                not registered.
             FlowStatusError: When the flow's status is not ``ACTIVE`` and
                 *force* is ``False``.
+            FlowCancelledError: When *deadline* has passed or *cancel_token*
+                is cancelled at a step boundary.
         """
-        flow = self._registry.get_flow(flow_name)
+        flow = self._registry.get_flow(flow_name, version=version)
+        self._active_flow_version = flow.version
 
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
 
+        # Validate sub-flow composition up front (issue #75): reject cycles,
+        # over-deep nesting, and dangling references before any step runs.
+        self._validate_composition(flow)
+
         if isinstance(flow, DAGFlow):
-            return self._execute_dag_flow(flow, initial_input)
+            return self._execute_dag_flow(
+                flow, initial_input, deadline=deadline, cancel_token=cancel_token
+            )
 
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
@@ -1162,7 +1259,45 @@ class FlowExecutor:
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
-            record = self._execute_step(idx, step, context, flow_name, trace_id)
+            # Cooperative cancellation check at the step boundary (issue #142):
+            # an in-flight step always finishes; we only stop *before* the
+            # next one. Pure clock/boolean reads — invariants preserved.
+            self._check_cancellation(
+                flow_name=flow_name,
+                next_step_index=idx,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
+            try:
+                record = self._execute_step(
+                    idx,
+                    step,
+                    context,
+                    flow_name,
+                    trace_id,
+                    deadline=deadline,
+                    cancel_token=cancel_token,
+                )
+            except FlowCancelledError as exc:
+                # Cancellation fired inside a composed sub-flow; re-anchor it to
+                # this parent flow so the parent's flow_end fires and the
+                # surfaced partial carries the parent's completed steps.
+                self._reraise_subflow_cancellation(
+                    exc,
+                    parent_flow_name=flow_name,
+                    step=step,
+                    flat_step_index=idx,
+                    prior_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                )
             log.append(record)
 
             if not record.success:
@@ -1183,7 +1318,7 @@ class FlowExecutor:
             # Merge step outputs into the shared context.
             if record.outputs is None:
                 raise RuntimeError(
-                    f"Step {idx} ({step.tool_name}) succeeded but produced no outputs"
+                    f"Step {idx} ({step.display_name}) succeeded but produced no outputs"
                 )
 
             for key in record.outputs:
@@ -1191,7 +1326,7 @@ class FlowExecutor:
                     _logger.debug(
                         "Step %d (%s): context key '%s' overwritten",
                         idx,
-                        step.tool_name,
+                        step.display_name,
                         key,
                     )
             context.update(record.outputs)
@@ -1279,7 +1414,10 @@ class FlowExecutor:
         flow_name: str,
         initial_input: dict[str, Any],
         *,
+        version: str | None = None,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Asynchronously execute a registered flow (issue #80).
 
@@ -1313,13 +1451,25 @@ class FlowExecutor:
         Args:
             flow_name: Name of the flow to execute.
             initial_input: Initial key/value context passed to the first step.
+            version: When provided, execute that exact registered flow
+                version (issue #201); when ``None`` (the default), execute
+                the latest registered version.  Mirrors the synchronous
+                :meth:`execute_flow`.
             force: When ``True``, bypass the status guard and execute even
                 if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional wall-clock deadline (issue #142); checked
+                between steps / DAG levels, mirroring :meth:`execute_flow`.
+            cancel_token: Optional :class:`CancellationToken` (issue #142);
+                checked between steps / DAG levels.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
+
+        Raises:
+            FlowCancelledError: When *deadline* has passed or *cancel_token*
+                is cancelled at a step boundary.
         """
-        flow = self._registry.get_flow(flow_name)
+        flow = self._registry.get_flow(flow_name, version=version)
 
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
@@ -1327,8 +1477,12 @@ class FlowExecutor:
         self._assert_async_lane_supported(flow)
 
         if isinstance(flow, DAGFlow):
-            return await self._execute_dag_flow_async(flow, initial_input)
-        return await self._execute_linear_flow_async(flow, initial_input)
+            return await self._execute_dag_flow_async(
+                flow, initial_input, deadline=deadline, cancel_token=cancel_token
+            )
+        return await self._execute_linear_flow_async(
+            flow, initial_input, deadline=deadline, cancel_token=cancel_token
+        )
 
     @staticmethod
     def _assert_async_lane_supported(flow: Any) -> None:
@@ -1346,9 +1500,17 @@ class FlowExecutor:
         DAG path, which already errors loudly on it.
         """
         for idx, step in enumerate(flow.steps):
+            if getattr(step, "flow_name", None) is not None:
+                raise FlowExecutionError(
+                    step.flow_name,
+                    idx,
+                    "execute_flow_async does not support composed sub-flow "
+                    "(flow_name) steps (issue #75) yet; run this flow via the "
+                    "synchronous execute_flow.",
+                )
             if getattr(step, "decision_candidates", None):
                 raise FlowExecutionError(
-                    step.tool_name,
+                    step.display_name,
                     idx,
                     "execute_flow_async does not support decision_candidates "
                     "(issue #102) yet; run this flow via the synchronous "
@@ -1356,7 +1518,7 @@ class FlowExecutor:
                 )
             if getattr(step, "branches", None):
                 raise FlowExecutionError(
-                    step.tool_name,
+                    step.display_name,
                     idx,
                     "execute_flow_async does not support conditional branches "
                     "(issue #9) yet; run this flow via the synchronous "
@@ -1364,7 +1526,7 @@ class FlowExecutor:
                 )
             if getattr(step, "default_next", None) is not None:
                 raise FlowExecutionError(
-                    step.tool_name,
+                    step.display_name,
                     idx,
                     "execute_flow_async does not support default_next routing "
                     "(issue #9) yet; run this flow via the synchronous "
@@ -1375,8 +1537,12 @@ class FlowExecutor:
         self,
         flow: Any,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Async-native counterpart to the linear branch of :meth:`execute_flow`."""
+        self._active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -1423,6 +1589,18 @@ class FlowExecutor:
         context: dict[str, Any] = dict(initial_input)
         log: list[StepRecord] = []
         for idx, step in enumerate(flow.steps):
+            # Cooperative cancellation at the step boundary (issue #142).
+            self._check_cancellation(
+                flow_name=flow_name,
+                next_step_index=idx,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
             log.append(record)
             if not record.success:
@@ -1438,7 +1616,7 @@ class FlowExecutor:
                 )
             if record.outputs is None:
                 raise RuntimeError(
-                    f"Step {idx} ({step.tool_name}) succeeded but produced no outputs"
+                    f"Step {idx} ({step.display_name}) succeeded but produced no outputs"
                 )
             context.update(record.outputs)
 
@@ -1478,6 +1656,9 @@ class FlowExecutor:
         self,
         flow: DAGFlow,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Async-native counterpart to :meth:`_execute_dag_flow`.
 
@@ -1485,7 +1666,9 @@ class FlowExecutor:
         level run sequentially (concurrent intra-level execution is a
         follow-up — see issue #80 acceptance criteria), and outputs are
         merged with sibling-key-conflict detection between levels.
+        Cancellation (issue #142) is checked between levels.
         """
+        self._active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -1528,11 +1711,23 @@ class FlowExecutor:
         levels = self._compute_dag_levels(flow)
 
         for level_steps in levels:
+            # Cooperative cancellation between topological levels (issue #142).
+            self._check_cancellation(
+                flow_name=flow.name,
+                next_step_index=flat_index,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             level_outputs: dict[str, Any] = {}
             for step in level_steps:
                 if step.step_type != "tool":
                     err = FlowExecutionError(
-                        step.tool_name,
+                        step.display_name,
                         flat_index,
                         f"Step '{step.step_id}' has step_type='{step.step_type}' "
                         f"which is not supported by FlowExecutor.",
@@ -1542,7 +1737,7 @@ class FlowExecutor:
                     log.append(
                         StepRecord(
                             step_index=flat_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs={},
                             error_type=err_type,
                             error_message=err_msg,
@@ -1564,7 +1759,7 @@ class FlowExecutor:
                     )
 
                 proxy = FlowStep(
-                    tool_name=step.tool_name,
+                    tool_name=step.display_name,
                     input_mapping=step.input_mapping,
                 )
                 record = await self._execute_step_async(
@@ -1587,15 +1782,15 @@ class FlowExecutor:
                 for key, value in record.outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
-                            step.tool_name,
+                            step.display_name,
                             record.step_index,
-                            f"Key '{key}' produced by both '{step.tool_name}' and a "
+                            f"Key '{key}' produced by both '{step.display_name}' and a "
                             f"sibling step in the same DAG level.",
                         )
                         err_type, err_msg = _exc_to_strings(conflict_err)
                         log[-1] = StepRecord(
                             step_index=record.step_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs=record.inputs,
                             error_type=err_type,
                             error_message=err_msg,
@@ -1687,7 +1882,7 @@ class FlowExecutor:
             retry_count = max(0, tool_attempts[0] - 1)
             return StepRecord(
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=inputs,
                 outputs=outputs,
                 error_type=err_type,
@@ -1714,9 +1909,9 @@ class FlowExecutor:
             return record
 
         try:
-            tool = self.get_tool(step.tool_name)
+            tool = self.get_tool(step.display_name)
         except ToolNotFoundError as exc:
-            log_step_error(_logger, step_index, step.tool_name, exc)
+            log_step_error(_logger, step_index, step.display_name, exc)
             return _finish(
                 _record(
                     inputs={},
@@ -1731,7 +1926,7 @@ class FlowExecutor:
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
-            log_step_error(_logger, step_index, step.tool_name, exc)
+            log_step_error(_logger, step_index, step.display_name, exc)
             return _finish(
                 _record(
                     inputs={},
@@ -1748,7 +1943,7 @@ class FlowExecutor:
                 trace_id=trace_id,
                 flow_name=flow_name,
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=dict(inputs),
                 started_at=started_at,
             )
@@ -1756,7 +1951,7 @@ class FlowExecutor:
         log_step_start(
             _logger,
             step_index,
-            step.tool_name,
+            step.display_name,
             inputs,
             redaction=self._redaction_policy,
         )
@@ -1768,7 +1963,7 @@ class FlowExecutor:
             )
         except Exception as exc:
             wrapped = self._wrap_tool_exception(step, step_index, exc)
-            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            log_step_error(_logger, step_index, step.display_name, wrapped)
             # Re-use the sync ``_apply_on_error`` for fail / skip; the
             # fallback path needs an async dispatch, so route through
             # an async-aware helper.
@@ -1786,7 +1981,7 @@ class FlowExecutor:
         log_step_end(
             _logger,
             step_index,
-            step.tool_name,
+            step.display_name,
             outputs,
             redaction=self._redaction_policy,
         )
@@ -2040,6 +2235,155 @@ class FlowExecutor:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _check_cancellation(
+        self,
+        *,
+        flow_name: str,
+        next_step_index: int,
+        deadline: float | None,
+        cancel_token: CancellationToken | None,
+        execution_log: list[StepRecord],
+        trace_id: str,
+        started_at: datetime,
+        perf_start: float,
+        initial_input: dict[str, Any],
+    ) -> None:
+        """Raise :class:`FlowCancelledError` if cancellation is due (issue #142).
+
+        Invoked only at step boundaries (between linear steps and between DAG
+        levels).  The check is a pure :func:`time.time` read plus a pure
+        boolean token read, so it never touches the network, an LLM, or a
+        randomness source — the three hard executor invariants hold.
+
+        No-op when neither ``deadline`` nor ``cancel_token`` is supplied, or
+        when neither has fired.  When one (or both) has fired it builds the
+        partial :class:`ExecutionResult` from the records gathered so far
+        (``success=False``) and raises, so the partial trace survives on the
+        error and the crash-resume snapshot is preserved.
+        """
+        if deadline is None and cancel_token is None:
+            return
+        deadline_exceeded = deadline is not None and time.time() >= deadline
+        token_cancelled = cancel_token is not None and cancel_token.is_cancelled
+        if not (deadline_exceeded or token_cancelled):
+            return
+        partial = self._make_result(
+            flow_name=flow_name,
+            success=False,
+            final_output=None,
+            execution_log=execution_log,
+            trace_id=trace_id,
+            started_at=started_at,
+            perf_start=perf_start,
+            initial_input=initial_input,
+            tool_step_count=len(execution_log),
+        )
+        raise FlowCancelledError(
+            flow_name,
+            next_step_index,
+            result=partial,
+            deadline_exceeded=deadline_exceeded,
+            token_cancelled=token_cancelled,
+        )
+
+    def _reraise_subflow_cancellation(
+        self,
+        exc: FlowCancelledError,
+        *,
+        parent_flow_name: str,
+        step: FlowStep,
+        flat_step_index: int,
+        prior_log: list[StepRecord],
+        trace_id: str,
+        started_at: datetime,
+        perf_start: float,
+        initial_input: dict[str, Any],
+    ) -> NoReturn:
+        """Re-anchor a sub-flow `FlowCancelledError` to its parent (issue #142 / #75).
+
+        When a `deadline` / `cancel_token` fires *between* a composed sub-flow's
+        own steps, the recursive `execute_flow` builds and fires the sub-flow's
+        (nested) result and raises. Left unhandled, that error escapes the
+        parent carrying only the sub-flow's partial, and the parent's
+        `flow_end` middleware never fires (it pairs with `flow_start` solely via
+        `_make_result`). This records the cancelled composed step — with the
+        sub-flow's partial attached as `sub_result` — builds the parent's
+        partial via `_make_result` (firing the parent `flow_end`), and re-raises
+        a `FlowCancelledError` carrying the parent's flow name, step index, and
+        partial so the cancellation contract holds at every nesting level.
+
+        Args:
+            exc: The `FlowCancelledError` raised inside the sub-flow.
+            parent_flow_name: Name of the enclosing (parent) flow.
+            step: The composed `FlowStep` whose sub-flow was cancelled.
+            flat_step_index: The composed step's index in the parent flow.
+            prior_log: The parent's step records completed before this step.
+            trace_id: The parent flow's trace id.
+            started_at: The parent flow's start timestamp.
+            perf_start: The parent flow's `perf_counter` start.
+            initial_input: The parent flow's initial input.
+
+        Raises:
+            FlowCancelledError: Always, re-anchored to the parent flow.
+        """
+        now = _now_utc()
+        composed = StepRecord(
+            step_index=flat_step_index,
+            tool_name=step.display_name,
+            flow_name=step.flow_name,
+            inputs={},
+            outputs=None,
+            error_type="FlowCancelledError",
+            error_message=str(exc),
+            success=False,
+            started_at=now,
+            ended_at=now,
+            duration_ms=0.0,
+            sub_result=exc.result,
+        )
+        full_log = [*prior_log, composed]
+        partial = self._make_result(
+            flow_name=parent_flow_name,
+            success=False,
+            final_output=None,
+            execution_log=full_log,
+            trace_id=trace_id,
+            started_at=started_at,
+            perf_start=perf_start,
+            initial_input=initial_input,
+            tool_step_count=len(full_log),
+        )
+        raise FlowCancelledError(
+            parent_flow_name,
+            flat_step_index,
+            result=partial,
+            deadline_exceeded=exc.deadline_exceeded,
+            token_cancelled=exc.token_cancelled,
+        ) from exc
+
+    @staticmethod
+    def _count_composed_tool_steps(records: list[StepRecord]) -> int:
+        """Count genuine tool invocations in a step log, descending through
+        composed sub-flows (issue #75).
+
+        A composed sub-flow step is a *container*, not a tool invocation, so it
+        contributes only the tool steps its sub-flow actually ran (recursively,
+        for nested composition).  Every other record counts as one invocation.
+
+        Args:
+            records: A flow's ``execution_log`` (or a sub-flow's).
+
+        Returns:
+            The total number of tool invocations the log represents.
+        """
+        total = 0
+        for rec in records:
+            if rec.sub_result is not None:
+                total += FlowExecutor._count_composed_tool_steps(rec.sub_result.execution_log)
+            else:
+                total += 1
+        return total
+
     def _make_result(
         self,
         *,
@@ -2063,21 +2407,37 @@ class FlowExecutor:
                 ``cost_report.llm_calls_avoided`` so validation records
                 don't inflate the estimate.  When ``None`` (the default),
                 falls back to ``len(execution_log)`` for callers that do
-                not append validation records.
+                not append validation records.  Composed sub-flow steps
+                (issue #75) are expanded to their nested tool invocations
+                on top of this count via
+                :meth:`_count_composed_tool_steps`, so the cost estimate
+                reflects every tool that ran across the composition.
         """
         ended_at = _now_utc()
         total_ms = (time.perf_counter() - perf_start) * 1000.0
         cost_report: CostReport | None = None
         if self._cost_profile is not None:
+            base_steps = tool_step_count if tool_step_count is not None else len(execution_log)
+            # Composed sub-flow steps (issue #75) each count as a single record
+            # in ``execution_log`` but actually drive a whole sub-flow's worth
+            # of tool invocations.  Replace each composed step's lone count
+            # with the recursive count of the genuine tools it ran, so
+            # ``steps_executed`` — and thus ``llm_calls_avoided`` — reflects
+            # every tool that executed across the composition, not just the
+            # top-level steps.
+            composition_adjustment = sum(
+                self._count_composed_tool_steps(rec.sub_result.execution_log) - 1
+                for rec in execution_log
+                if rec.sub_result is not None
+            )
             cost_report = compute_cost_report(
-                steps_executed=(
-                    tool_step_count if tool_step_count is not None else len(execution_log)
-                ),
+                steps_executed=base_steps + composition_adjustment,
                 actual_execution_ms=total_ms,
                 profile=self._cost_profile,
             )
         result = ExecutionResult(
             flow_name=flow_name,
+            flow_version=self._active_flow_version,
             success=success,
             final_output=final_output,
             execution_log=execution_log,
@@ -2125,9 +2485,9 @@ class FlowExecutor:
             return
         tool_hashes: dict[str, str] = {}
         for step in flow.steps:
-            tool = self._tools.get(step.tool_name)
+            tool = self._tools.get(step.display_name)
             if tool is not None:
-                tool_hashes[step.tool_name] = tool.schema_hash
+                tool_hashes[step.display_name] = tool.schema_hash
         snapshot = ExecutionSnapshot(
             trace_id=trace_id,
             flow_name=flow.name,
@@ -2162,9 +2522,9 @@ class FlowExecutor:
             return
         tool_hashes: dict[str, str] = {}
         for step in flow.steps:
-            tool = self._tools.get(step.tool_name)
+            tool = self._tools.get(step.display_name)
             if tool is not None:
-                tool_hashes[step.tool_name] = tool.schema_hash
+                tool_hashes[step.display_name] = tool.schema_hash
         snapshot = ExecutionSnapshot(
             trace_id=trace_id,
             flow_name=flow.name,
@@ -2250,6 +2610,7 @@ class FlowExecutor:
         snapshot: ExecutionSnapshot,
     ) -> ExecutionResult:
         """Continue a linear execution from *snapshot.completed_steps*."""
+        self._active_flow_version = flow.version
         trace_id = snapshot.trace_id
         flow_name = snapshot.flow_name
         flow_started_at = snapshot.started_at
@@ -2450,7 +2811,7 @@ class FlowExecutor:
             contract.model_validate(payload)
         except ValidationError as exc:
             return SchemaValidationError(
-                step.tool_name,
+                step.display_name,
                 step_index,
                 str(exc),
                 context=context_label,
@@ -2484,10 +2845,11 @@ class FlowExecutor:
             return dict(context)
 
         resolved: dict[str, Any] = {}
+        step_label = step.display_name or step.flow_name or "<step>"
         for target_key, source in step.input_mapping.items():
             if isinstance(source, str):
                 if source not in context:
-                    raise InputMappingError(step.tool_name, step_index, source)
+                    raise InputMappingError(step_label, step_index, source)
                 resolved[target_key] = context[source]
             else:
                 # Literal constant — use the value directly.
@@ -2524,19 +2886,19 @@ class FlowExecutor:
             return a successful record after dispatching the capability.
         """
         err = FlowExecutionError(
-            step.tool_name,
+            step.display_name,
             step_index,
             f"Step '{step.step_id}' has step_type='{step.step_type}' "
             f"which is not supported by FlowExecutor. "
             f"Only step_type='tool' can be executed — use "
             f"KernelBackedExecutor for capability-typed steps.",
         )
-        log_step_error(_logger, step_index, step.tool_name, err)
+        log_step_error(_logger, step_index, step.display_name, err)
         err_type, err_msg = _exc_to_strings(err)
         now = _now_utc()
         return StepRecord(
             step_index=step_index,
-            tool_name=step.tool_name,
+            tool_name=step.display_name,
             inputs={},
             outputs=None,
             error_type=err_type,
@@ -2547,6 +2909,155 @@ class FlowExecutor:
             duration_ms=0.0,
         )
 
+    def _validate_composition(self, flow: AnyFlow) -> None:
+        """Reject invalid sub-flow composition before execution (issue #75).
+
+        Walks the ``flow_name`` reference graph reachable from *flow* and
+        raises :class:`FlowCompositionError` on a cycle, on nesting deeper
+        than :attr:`_max_composition_depth`, or on a reference to a flow that
+        is not registered.  A flow with no ``flow_name`` steps is validated in
+        O(steps) and never recurses.
+        """
+
+        def visit(current: AnyFlow, path: tuple[str, ...]) -> None:
+            for step in current.steps:
+                sub_name = getattr(step, "flow_name", None)
+                if sub_name is None:
+                    continue
+                if sub_name in path:
+                    chain = " -> ".join([*path, sub_name])
+                    raise FlowCompositionError(
+                        flow.name, "cycle", f"circular sub-flow reference: {chain}"
+                    )
+                if len(path) > self._max_composition_depth:
+                    chain = " -> ".join([*path, sub_name])
+                    raise FlowCompositionError(
+                        flow.name,
+                        "max_depth_exceeded",
+                        f"nesting exceeds max_composition_depth="
+                        f"{self._max_composition_depth}: {chain}",
+                    )
+                try:
+                    sub_flow = self._registry.get_flow(sub_name)
+                except FlowNotFoundError as exc:
+                    raise FlowCompositionError(
+                        flow.name,
+                        "unknown_flow",
+                        f"step references unregistered sub-flow '{sub_name}'",
+                    ) from exc
+                visit(sub_flow, (*path, sub_name))
+
+        visit(flow, (flow.name,))
+
+    def _execute_subflow_step(
+        self,
+        step_index: int,
+        step: FlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        *,
+        started_at: datetime,
+        perf_start: float,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+    ) -> StepRecord:
+        """Execute a composed sub-flow step (issue #75).
+
+        Resolves the step's inputs (the same ``input_mapping`` machinery used
+        for tool steps), recursively runs the named sub-flow via
+        :meth:`execute_flow`, and folds the sub-flow's final output back into
+        the parent context.  The nested :class:`ExecutionResult` is attached
+        to the returned :class:`StepRecord` as ``sub_result`` so the parent
+        trace keeps the full sub-flow log.
+
+        Cycles and over-deep nesting are already rejected by
+        :meth:`_validate_composition` before any step runs, so the recursion
+        here is bounded.
+        """
+        sub_name = step.flow_name
+        assert sub_name is not None  # guaranteed by the caller / FlowStep validator
+        try:
+            sub_input = self._resolve_inputs(step, context, step_index)
+        except InputMappingError as exc:
+            # Pre-resolution failure: no on_step_start, mirroring the tool path.
+            log_step_error(_logger, step_index, sub_name, exc)
+            err_type, err_msg = _exc_to_strings(exc)
+            now = _now_utc()
+            return StepRecord(
+                step_index=step_index,
+                tool_name=sub_name,
+                flow_name=sub_name,
+                inputs={},
+                outputs=None,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=now,
+                duration_ms=(time.perf_counter() - perf_start) * 1000.0,
+            )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=sub_name,
+                inputs=dict(sub_input),
+                started_at=started_at,
+            )
+        )
+
+        # Recurse. ``execute_flow`` resets ``_active_flow_version`` to the
+        # sub-flow's version; save and restore so the parent's result is
+        # stamped with the parent's version.  Forward the parent's
+        # ``deadline`` / ``cancel_token`` so flow-level cancellation and the
+        # wall-clock budget are observed *between* the sub-flow's own steps,
+        # not just at the parent boundary (issue #142). The deadline is an
+        # absolute wall-clock instant, so passing it through unchanged keeps
+        # one shared budget across the whole composed run.
+        saved_version = self._active_flow_version
+        try:
+            sub_result = self.execute_flow(
+                sub_name,
+                sub_input,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
+        finally:
+            self._active_flow_version = saved_version
+
+        ended_at = _now_utc()
+        duration_ms = (time.perf_counter() - perf_start) * 1000.0
+        error_type: str | None = None
+        error_message: str | None = None
+        if not sub_result.success:
+            error_type = "FlowExecutionError"
+            error_message = f"Sub-flow '{sub_name}' failed."
+        record = StepRecord(
+            step_index=step_index,
+            tool_name=sub_name,
+            flow_name=sub_name,
+            inputs=sub_input,
+            outputs=sub_result.final_output if sub_result.success else None,
+            error_type=error_type,
+            error_message=error_message,
+            success=sub_result.success,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            sub_result=sub_result,
+        )
+        self._fire_step_end(
+            StepEndContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_record=record,
+            )
+        )
+        return record
+
     def _execute_step(
         self,
         step_index: int,
@@ -2556,6 +3067,8 @@ class FlowExecutor:
         trace_id: str,
         *,
         step_id: str | None = None,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> StepRecord:
         """Execute a single :class:`~chainweaver.flow.FlowStep`.
 
@@ -2586,6 +3099,21 @@ class FlowExecutor:
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Composed sub-flow step (issue #75): recurse into the named flow
+        # instead of invoking a tool.  Shared by the linear and DAG sync
+        # paths since both dispatch tool steps through ``_execute_step``.
+        if step.flow_name is not None:
+            return self._execute_subflow_step(
+                step_index,
+                step,
+                context,
+                flow_name,
+                trace_id,
+                started_at=started_at,
+                perf_start=t0,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
         # Resolve guided decision points (issue #102).  When the step
         # declares ``decision_candidates`` *and* the executor has a
         # ``decision_callback`` registered, ask the callback which
@@ -2603,24 +3131,24 @@ class FlowExecutor:
                         flow_name=flow_name,
                         step_index=step_index,
                         step_id=step_id,
-                        default_tool_name=step.tool_name,
+                        default_tool_name=step.display_name,
                         candidates=list(step.decision_candidates),
                         context=dict(context),
                     )
                 )
             except Exception as exc:
                 err = DecisionCallbackError(
-                    step.tool_name,
+                    step.display_name,
                     step_index,
                     f"callback raised {type(exc).__name__}: {exc}",
                 )
                 err.__cause__ = exc
-                log_step_error(_logger, step_index, step.tool_name, err)
+                log_step_error(_logger, step_index, step.display_name, err)
                 err_type, err_msg = _exc_to_strings(err)
                 now = _now_utc()
                 record = StepRecord(
                     step_index=step_index,
-                    tool_name=step.tool_name,
+                    tool_name=step.display_name,
                     inputs={},
                     outputs=None,
                     error_type=err_type,
@@ -2636,17 +3164,17 @@ class FlowExecutor:
                 return record
             if chosen not in step.decision_candidates:
                 err = DecisionCallbackError(
-                    step.tool_name,
+                    step.display_name,
                     step_index,
                     f"callback returned '{chosen}' which is not in "
                     f"decision_candidates={list(step.decision_candidates)!r}",
                 )
-                log_step_error(_logger, step_index, step.tool_name, err)
+                log_step_error(_logger, step_index, step.display_name, err)
                 err_type, err_msg = _exc_to_strings(err)
                 now = _now_utc()
                 record = StepRecord(
                     step_index=step_index,
-                    tool_name=step.tool_name,
+                    tool_name=step.display_name,
                     inputs={},
                     outputs=None,
                     error_type=err_type,
@@ -2660,7 +3188,7 @@ class FlowExecutor:
                     StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
                 )
                 return record
-            if chosen != step.tool_name:
+            if chosen != step.display_name:
                 step = step.model_copy(update={"tool_name": chosen})
         # Mutable holder so ``_invoke_tool`` can report how many times the
         # primary tool was actually called.  Threading this through (instead
@@ -2688,7 +3216,7 @@ class FlowExecutor:
             retry_count = max(0, tool_attempts[0] - 1)
             return StepRecord(
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=inputs,
                 outputs=outputs,
                 error_type=err_type,
@@ -2715,9 +3243,9 @@ class FlowExecutor:
             return record
 
         try:
-            tool = self.get_tool(step.tool_name)
+            tool = self.get_tool(step.display_name)
         except ToolNotFoundError as exc:
-            log_step_error(_logger, step_index, step.tool_name, exc)
+            log_step_error(_logger, step_index, step.display_name, exc)
             return _finish(
                 _record(
                     inputs={},
@@ -2732,7 +3260,7 @@ class FlowExecutor:
         try:
             inputs = self._resolve_inputs(step, context, step_index)
         except InputMappingError as exc:
-            log_step_error(_logger, step_index, step.tool_name, exc)
+            log_step_error(_logger, step_index, step.display_name, exc)
             return _finish(
                 _record(
                     inputs={},
@@ -2759,7 +3287,7 @@ class FlowExecutor:
                 context_label="step_input_contract",
             )
             if contract_err is not None:
-                log_step_error(_logger, step_index, step.tool_name, contract_err)
+                log_step_error(_logger, step_index, step.display_name, contract_err)
                 return _finish(
                     _record(
                         inputs=inputs,
@@ -2776,7 +3304,7 @@ class FlowExecutor:
                 trace_id=trace_id,
                 flow_name=flow_name,
                 step_index=step_index,
-                tool_name=step.tool_name,
+                tool_name=step.display_name,
                 inputs=dict(inputs),
                 started_at=started_at,
             )
@@ -2785,7 +3313,7 @@ class FlowExecutor:
         log_step_start(
             _logger,
             step_index,
-            step.tool_name,
+            step.display_name,
             inputs,
             redaction=self._redaction_policy,
         )
@@ -2829,7 +3357,7 @@ class FlowExecutor:
                         )
                         if cached_contract_err is not None:
                             log_step_error(
-                                _logger, step_index, step.tool_name, cached_contract_err
+                                _logger, step_index, step.display_name, cached_contract_err
                             )
                             return _finish(
                                 _record(
@@ -2845,7 +3373,7 @@ class FlowExecutor:
                     log_step_end(
                         _logger,
                         step_index,
-                        step.tool_name,
+                        step.display_name,
                         cached_output,
                         redaction=self._redaction_policy,
                     )
@@ -2872,7 +3400,7 @@ class FlowExecutor:
 
         if final_raw_exc is not None:
             wrapped = self._wrap_tool_exception(step, step_index, final_raw_exc)
-            log_step_error(_logger, step_index, step.tool_name, wrapped)
+            log_step_error(_logger, step_index, step.display_name, wrapped)
             return _finish(
                 self._apply_on_error(
                     step=step,
@@ -2888,7 +3416,7 @@ class FlowExecutor:
         log_step_end(
             _logger,
             step_index,
-            step.tool_name,
+            step.display_name,
             outputs,
             redaction=self._redaction_policy,
         )
@@ -2908,7 +3436,7 @@ class FlowExecutor:
                 context_label="step_output_contract",
             )
             if contract_err is not None:
-                log_step_error(_logger, step_index, step.tool_name, contract_err)
+                log_step_error(_logger, step_index, step.display_name, contract_err)
                 return _finish(
                     _record(
                         inputs=inputs,
@@ -2999,10 +3527,10 @@ class FlowExecutor:
         - Any other exception → :class:`FlowExecutionError`.
         """
         if isinstance(exc, ValidationError):
-            return SchemaValidationError(step.tool_name, step_index, str(exc))
+            return SchemaValidationError(step.display_name, step_index, str(exc))
         if isinstance(exc, (ToolTimeoutError, ToolOutputSizeError)):
             return exc
-        return FlowExecutionError(step.tool_name, step_index, str(exc))
+        return FlowExecutionError(step.display_name, step_index, str(exc))
 
     def _apply_on_error(
         self,
@@ -3175,6 +3703,9 @@ class FlowExecutor:
         self,
         flow: DAGFlow,
         initial_input: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Execute a :class:`~chainweaver.flow.DAGFlow`.
 
@@ -3188,10 +3719,15 @@ class FlowExecutor:
         Args:
             flow: The :class:`~chainweaver.flow.DAGFlow` to execute.
             initial_input: Initial key/value context.
+            deadline: Optional wall-clock deadline (issue #142), checked
+                between topological levels — in-flight level steps complete.
+            cancel_token: Optional :class:`CancellationToken` (issue #142),
+                checked between topological levels.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
+        self._active_flow_version = flow.version
         # Resume support (issue #128): when _resume_snapshot is set,
         # reuse its trace_id / started_at / context / log and skip the
         # already-completed DAG levels.
@@ -3278,6 +3814,20 @@ class FlowExecutor:
                 dependents_map[dep].add(s.step_id)
 
         for relative_level_idx, level_steps in enumerate(levels[start_level:]):
+            # Cooperative cancellation between topological levels (issue #142):
+            # steps already dispatched in the previous level have completed;
+            # we stop before starting the next one. Pure clock/boolean reads.
+            self._check_cancellation(
+                flow_name=flow.name,
+                next_step_index=flat_index,
+                deadline=deadline,
+                cancel_token=cancel_token,
+                execution_log=log,
+                trace_id=trace_id,
+                started_at=flow_started_at,
+                perf_start=flow_t0,
+                initial_input=initial_input,
+            )
             absolute_level_idx = start_level + relative_level_idx
             level_outputs: dict[str, Any] = {}
             level_records: list[StepRecord] = []
@@ -3299,7 +3849,7 @@ class FlowExecutor:
                     level_records.append(
                         StepRecord(
                             step_index=flat_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs={},
                             outputs={},
                             success=True,
@@ -3338,7 +3888,7 @@ class FlowExecutor:
                                 trace_id=trace_id,
                                 flow_name=flow.name,
                                 step_index=record.step_index,
-                                tool_name=step.tool_name,
+                                tool_name=step.display_name,
                                 inputs=dict(record.inputs),
                                 started_at=record.started_at,
                             )
@@ -3368,20 +3918,20 @@ class FlowExecutor:
                     for key, value in record.outputs.items():
                         if key in level_outputs:
                             conflict_err = FlowExecutionError(
-                                step.tool_name,
+                                step.display_name,
                                 record.step_index,
-                                f"Key '{key}' produced by both '{step.tool_name}' and a "
+                                f"Key '{key}' produced by both '{step.display_name}' and a "
                                 f"sibling step in the same DAG level — execution "
                                 f"would be order-dependent.",
                             )
                             log_step_error(
-                                _logger, record.step_index, step.tool_name, conflict_err
+                                _logger, record.step_index, step.display_name, conflict_err
                             )
                             err_type, err_msg = _exc_to_strings(conflict_err)
                             now = _now_utc()
                             level_records[-1] = StepRecord(
                                 step_index=record.step_index,
-                                tool_name=step.tool_name,
+                                tool_name=step.display_name,
                                 inputs=record.inputs,
                                 outputs=None,
                                 error_type=err_type,
@@ -3413,6 +3963,7 @@ class FlowExecutor:
                 # linear flows; otherwise the proxy silently drops them.
                 proxy = FlowStep(
                     tool_name=step.tool_name,
+                    flow_name=step.flow_name,
                     input_mapping=step.input_mapping,
                     input_contract=step.input_contract,
                     output_contract=step.output_contract,
@@ -3420,14 +3971,32 @@ class FlowExecutor:
                     on_error=step.on_error,
                     decision_candidates=step.decision_candidates,
                 )
-                record = self._execute_step(
-                    flat_index,
-                    proxy,
-                    context,
-                    flow.name,
-                    trace_id,
-                    step_id=step.step_id,
-                )
+                try:
+                    record = self._execute_step(
+                        flat_index,
+                        proxy,
+                        context,
+                        flow.name,
+                        trace_id,
+                        step_id=step.step_id,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
+                except FlowCancelledError as exc:
+                    # Cancellation fired inside a composed sub-flow; re-anchor it
+                    # to this parent DAG so its flow_end fires and the partial
+                    # carries the levels completed so far + this level's siblings.
+                    self._reraise_subflow_cancellation(
+                        exc,
+                        parent_flow_name=flow.name,
+                        step=proxy,
+                        flat_step_index=flat_index,
+                        prior_log=[*log, *level_records],
+                        trace_id=trace_id,
+                        started_at=flow_started_at,
+                        perf_start=flow_t0,
+                        initial_input=initial_input,
+                    )
                 level_records.append(record)
                 flat_index += 1
 
@@ -3437,7 +4006,7 @@ class FlowExecutor:
                         "DAGFlow '%s' aborted at step %d (%s) | trace_id=%s",
                         flow.name,
                         record.step_index,
-                        step.tool_name,
+                        step.display_name,
                         trace_id,
                     )
                     return self._make_result(
@@ -3456,16 +4025,16 @@ class FlowExecutor:
                 for key, value in record.outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
-                            step.tool_name,
+                            step.display_name,
                             record.step_index,
-                            f"Key '{key}' produced by both '{step.tool_name}' and a "
+                            f"Key '{key}' produced by both '{step.display_name}' and a "
                             f"sibling step in the same DAG level. "
                             f"Use distinct output keys or sequential steps.",
                         )
                         err_type, err_msg = _exc_to_strings(conflict_err)
                         record_conflict = StepRecord(
                             step_index=record.step_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs=record.inputs,
                             error_type=err_type,
                             error_message=err_msg,
@@ -3514,7 +4083,7 @@ class FlowExecutor:
                         # handling above.
                         record_failed = StepRecord(
                             step_index=record.step_index,
-                            tool_name=step.tool_name,
+                            tool_name=step.display_name,
                             inputs=record.inputs,
                             error_type=err_type,
                             error_message=err_msg,

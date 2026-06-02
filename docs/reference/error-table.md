@@ -14,6 +14,8 @@ inspect failures programmatically rather than parsing strings.
 | `FlowNotFoundError` | The requested flow is not registered. |
 | `FlowAlreadyExistsError` | A registration would overwrite an existing `(name, version)` without `overwrite=True`. |
 | `FlowStatusError` | Execution attempted on a flow whose status is not `ACTIVE` (without `force=True`). |
+| `FlowCancelledError` | A `deadline` passed or a `CancellationToken` was cancelled at a step boundary. Carries `step_index`, the partial `result`, and `deadline_exceeded` / `token_cancelled` flags. |
+| `FlowCompositionError` | A composed flow's sub-flow references form a cycle, exceed `max_composition_depth`, or point to an unregistered flow. The `reason` attribute is `"cycle"`, `"max_depth_exceeded"`, or `"unknown_flow"`. |
 | `FlowExecutionError` | A tool callable raised an unexpected exception during execution. |
 | `FlowSerializationError` | A `.flow.yaml` / `.flow.json` file is malformed or references an unresolvable class. |
 | `InvalidFlowVersionError` | A flow's `version` field is not a valid PEP 440 string. |

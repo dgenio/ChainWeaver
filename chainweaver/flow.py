@@ -228,6 +228,16 @@ class FlowStep(BaseModel):
 
     Attributes:
         tool_name: The name of the :class:`~chainweaver.tools.Tool` to invoke.
+            Mutually exclusive with :attr:`flow_name`; exactly one must be set.
+        flow_name: The name of a registered sub-:class:`Flow` to execute in
+            place of a tool (issue #75 — flow composition).  When set, the
+            executor resolves the named flow from the registry, runs it with
+            this step's resolved inputs as its initial input, and merges the
+            sub-flow's final output back into the parent context.  Mutually
+            exclusive with :attr:`tool_name`.  Sub-flow references are checked
+            for cycles and a configurable maximum nesting depth before
+            execution (raising
+            :class:`~chainweaver.exceptions.FlowCompositionError`).
         input_mapping: Maps keys expected by the tool's *input_schema* to keys
             present in the accumulated execution context (initial input merged
             with all previous step outputs).
@@ -298,13 +308,35 @@ class FlowStep(BaseModel):
         )
     """
 
-    tool_name: str
+    tool_name: str | None = None
+    flow_name: str | None = None
     input_mapping: dict[str, Any] = Field(default_factory=dict)
     retry: RetryPolicy | None = None
     on_error: str = "fail"
     decision_candidates: list[str] | None = None
     input_contract: str | None = None
     output_contract: str | None = None
+
+    @model_validator(mode="after")
+    def _check_tool_or_flow(self) -> FlowStep:
+        """Require exactly one of ``tool_name`` / ``flow_name`` (issue #75).
+
+        A step either invokes a tool (``tool_name``) or recursively executes a
+        registered sub-flow (``flow_name``) — never both, and never neither.
+        Enforcing this at construction turns a wiring mistake into a loud
+        validation error instead of a confusing execution-time failure.
+        """
+        if (self.tool_name is None) == (self.flow_name is None):
+            raise ValueError(
+                "FlowStep requires exactly one of 'tool_name' or 'flow_name' "
+                f"(got tool_name={self.tool_name!r}, flow_name={self.flow_name!r})."
+            )
+        if self.flow_name is not None and self.decision_candidates is not None:
+            raise ValueError(
+                "FlowStep 'decision_candidates' is only valid for tool steps, "
+                "not sub-flow (flow_name) steps."
+            )
+        return self
 
     @field_validator("decision_candidates")
     @classmethod
@@ -344,6 +376,20 @@ class FlowStep(BaseModel):
                 f"{self.decision_candidates!r}; it is the default a callback may return."
             )
         return self
+
+    @property
+    def display_name(self) -> str:
+        """A stable non-empty label for this step (issue #75).
+
+        Returns :attr:`tool_name` for a tool step or :attr:`flow_name` for a
+        composed sub-flow step.  The ``_check_tool_or_flow`` validator
+        guarantees exactly one is set, so the result is always a ``str`` —
+        useful for logs, error messages, and trace records that should not
+        carry ``None``.
+        """
+        name = self.tool_name or self.flow_name
+        assert name is not None  # guaranteed by _check_tool_or_flow
+        return name
 
     @staticmethod
     def contract_ref_from(cls: type[BaseModel]) -> str:

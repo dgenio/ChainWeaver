@@ -77,6 +77,10 @@ def check_flow_compatibility(
     issues: list[CompatibilityIssue] = []
 
     for idx, step in enumerate(flow.steps):
+        if step.tool_name is None:
+            # Composed sub-flow step (issue #75) — not a tool reference, so
+            # tool-schema compatibility checks do not apply here.
+            continue
         if step.tool_name not in tools:
             issues.append(
                 CompatibilityIssue(

@@ -5,6 +5,7 @@
     "BUILTIN_PROPERTIES",
     "BaseDecisionCallback",
     "BaseMiddleware",
+    "CancellationToken",
     "ChainAnalyzer",
     "ChainWeaverError",
     "CheckpointDriftError",
@@ -41,6 +42,8 @@
     "FlowAlreadyExistsError",
     "FlowBuilder",
     "FlowBuilderError",
+    "FlowCancelledError",
+    "FlowCompositionError",
     "FlowEndContext",
     "FlowEvent",
     "FlowExecutionError",
@@ -174,6 +177,12 @@
       "module": "chainweaver.middleware",
       "qualname": "BaseMiddleware",
       "signature": "()"
+    },
+    "CancellationToken": {
+      "kind": "class",
+      "module": "chainweaver.cancellation",
+      "qualname": "CancellationToken",
+      "signature": "() -> None"
     },
     "ChainAnalyzer": {
       "kind": "class",
@@ -315,6 +324,7 @@
         "decision_candidates": "list[str] | NoneType",
         "default_next": "str | NoneType",
         "depends_on": "list[str]",
+        "flow_name": "str | NoneType",
         "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
@@ -322,7 +332,7 @@
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
         "step_id": "str",
         "step_type": "Literal['tool', 'capability']",
-        "tool_name": "str"
+        "tool_name": "str | NoneType"
       },
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
@@ -389,6 +399,7 @@
         "execution_log": "list[chainweaver.executor.StepRecord]",
         "final_output": "dict[str, Any] | NoneType",
         "flow_name": "str",
+        "flow_version": "str",
         "initial_input": "dict[str, Any]",
         "started_at": "datetime.datetime",
         "success": "bool",
@@ -482,6 +493,18 @@
       "qualname": "FlowBuilderError",
       "signature": "(detail: str) -> None"
     },
+    "FlowCancelledError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "FlowCancelledError",
+      "signature": "(flow_name: str, step_index: int, *, result: ExecutionResult, deadline_exceeded: bool = False, token_cancelled: bool = False) -> None"
+    },
+    "FlowCompositionError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "FlowCompositionError",
+      "signature": "(flow_name: str, reason: str, detail: str) -> None"
+    },
     "FlowEndContext": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -521,7 +544,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False, max_composition_depth: int = 10) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -587,12 +610,13 @@
       "kind": "pydantic-model",
       "model_fields": {
         "decision_candidates": "list[str] | NoneType",
+        "flow_name": "str | NoneType",
         "input_contract": "str | NoneType",
         "input_mapping": "dict[str, Any]",
         "on_error": "str",
         "output_contract": "str | NoneType",
         "retry": "chainweaver.flow.RetryPolicy | NoneType",
-        "tool_name": "str"
+        "tool_name": "str | NoneType"
       },
       "module": "chainweaver.flow",
       "qualname": "FlowStep"
@@ -864,6 +888,7 @@
         "error_message": "str | NoneType",
         "error_type": "str | NoneType",
         "fallback_used": "bool",
+        "flow_name": "str | NoneType",
         "inputs": "dict[str, Any]",
         "outputs": "dict[str, Any] | NoneType",
         "retry_count": "int",
@@ -871,6 +896,7 @@
         "skipped": "bool",
         "started_at": "datetime.datetime",
         "step_index": "int",
+        "sub_result": "chainweaver.executor.ExecutionResult | NoneType",
         "success": "bool",
         "tool_name": "str"
       },

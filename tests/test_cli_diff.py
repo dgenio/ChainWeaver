@@ -59,6 +59,7 @@ def _result(
         ]
     return ExecutionResult(
         flow_name=flow_name,
+        flow_version="0.1.0",
         success=success,
         final_output=final_output if final_output is not None else {"rows": 42},
         execution_log=log,

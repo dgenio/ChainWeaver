@@ -44,6 +44,7 @@ from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_o
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
+from chainweaver.cancellation import CancellationToken
 from chainweaver.checkpoint import (
     Checkpointer,
     ExecutionSnapshot,
@@ -91,6 +92,8 @@ from chainweaver.exceptions import (
     DAGDefinitionError,
     DecisionCallbackError,
     FlowAlreadyExistsError,
+    FlowCancelledError,
+    FlowCompositionError,
     FlowExecutionError,
     FlowNotFoundError,
     FlowSerializationError,
@@ -191,6 +194,7 @@ __all__ = [
     "AttestationReport",
     "BaseDecisionCallback",
     "BaseMiddleware",
+    "CancellationToken",
     "ChainAnalyzer",
     "ChainWeaverError",
     "CheckpointDriftError",
@@ -227,6 +231,8 @@ __all__ = [
     "FlowAlreadyExistsError",
     "FlowBuilder",
     "FlowBuilderError",
+    "FlowCancelledError",
+    "FlowCompositionError",
     "FlowEndContext",
     "FlowEvent",
     "FlowExecutionError",

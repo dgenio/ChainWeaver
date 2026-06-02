@@ -122,8 +122,8 @@ benchmarks/                  Standalone benchmark scripts (not coverage-gated): 
 - `KernelBackedExecutor(..., kernel=...)` from `chainweaver.integrations.agent_kernel` (#89) → optional `FlowExecutor` subclass that delegates `DAGFlowStep` instances with `step_type="capability"` through a `KernelProtocol`.  The base `FlowExecutor` rejects capability steps; only this subclass dispatches them.
 - `flow_to_selectable_item(flow, *, capability_id=None, tags=())` from `chainweaver.integrations.weaver_spec` (#107) → project a `Flow` or `DAGFlow` to a weaver-spec `SelectableItem` for contextweaver catalog ingestion.
 - `RoutingDecisionAdapter(client=...)` from `chainweaver.integrations.contextweaver` (#106) → `DecisionCallback` impl that asks a `ContextweaverClient` for a `RoutingDecision` and returns the selected capability id.
-- `FlowExecutor.execute_flow(flow_name, initial_input, *, force=False)` → `ExecutionResult`
-- `FlowExecutor.execute_flow_async(flow_name, initial_input, *, force=False)` → `Awaitable[ExecutionResult]` (#80); async-native counterpart of `execute_flow`. Dispatches each step through `Tool.run_async` so async-fn tools (e.g. those produced by `chainweaver.mcp.MCPToolAdapter`) execute on the calling loop and sync-fn tools are offloaded to `asyncio.to_thread`. Supports linear and DAG flows with retries, middleware, and on_error policies; defers step cache + checkpoint resume to a follow-up.
+- `FlowExecutor.execute_flow(flow_name, initial_input, *, version=None, force=False, deadline=None, cancel_token=None)` → `ExecutionResult`. `version` (#201) targets an exact registered flow version (default: latest); the version that ran is recorded on `ExecutionResult.flow_version`. `deadline` (wall-clock `time.time()` seconds) and `cancel_token` (`CancellationToken`, #142) cooperatively cancel **between** steps / DAG levels — never inside a tool — raising `FlowCancelledError` with the partial result.
+- `FlowExecutor.execute_flow_async(flow_name, initial_input, *, version=None, force=False, deadline=None, cancel_token=None)` → `Awaitable[ExecutionResult]` (#80); async-native counterpart of `execute_flow`. Dispatches each step through `Tool.run_async` so async-fn tools (e.g. those produced by `chainweaver.mcp.MCPToolAdapter`) execute on the calling loop and sync-fn tools are offloaded to `asyncio.to_thread`. Supports linear and DAG flows with retries, middleware, and on_error policies; honours `version` / `deadline` / `cancel_token`; rejects composed `flow_name` sub-flow steps (#75, sync-only); defers step cache + checkpoint resume to a follow-up.
 - `FlowExecutor.stream_flow(flow_name, initial_input, *, force=False)` → `Iterator[FlowEvent]` (#134); yields `kind="flow_start"` → (`step_start` → `step_end`)* → `flow_end` events as the flow runs on a worker thread. Cancellation is not supported for the sync variant; the background thread runs to completion.
 - `FlowExecutor(..., step_cache=...)` → memoize step outputs across runs (#127); keyed by `(tool_name, schema_hash, input_value_hash)`. Cache hits skip `Tool.fn` entirely (including retries and timeout) and surface as `StepRecord.cached=True`. Tools mark themselves `cacheable=False` to always run (side-effects, external state). `replay_flow` always bypasses the cache.
 - `FlowExecutor(..., checkpointer=..., delete_on_success=True)` → crash-resume (#128); writes an `ExecutionSnapshot` after every successful linear step or DAG level. `FlowExecutor.resume_flow(trace_id)` validates the snapshot's flow version and tool `schema_hash` values against the current registry — drift raises `CheckpointDriftError` — then continues execution with the original `trace_id`. Snapshots are deleted on terminal success when `delete_on_success=True` (the default); preserved on failure for operator-driven retry.
@@ -211,6 +211,24 @@ see the `DAGFlowStep` subsection below).
 Predicates are evaluated by `chainweaver.contracts.evaluate_predicate`, which parses the string with `ast` and walks the tree by hand — `eval()` is **never** called.  Predicate syntax errors and unsupported AST nodes raise `PredicateSyntaxError` and abort the flow with a synthetic failed `StepRecord`.
 
 Branching is only supported on `step_type="tool"` steps.  Capability steps (`step_type="capability"`) are dispatched through `_execute_capability_step` before `_select_branch` runs, so `branches` / `default_next` are rejected on them at construction (a `DAGFlowStep` validator) rather than silently ignored.
+
+### `FlowStep.tool_name` / `FlowStep.flow_name` (issue #75)
+
+A step runs **either** a tool or a registered sub-flow — exactly one of
+`tool_name` / `flow_name` must be set (a model validator enforces this; both
+or neither raises `ValidationError`). When `flow_name` is set the executor
+recursively runs that flow with the step's resolved inputs, merges its final
+output into the parent context, and attaches the sub-flow's `ExecutionResult`
+to `StepRecord.sub_result` (nested trace). The composition graph is validated
+before execution — cycles, nesting beyond `FlowExecutor(max_composition_depth=...)`
+(default 10), and references to unregistered flows raise `FlowCompositionError`.
+Composition is sync-only; `execute_flow_async` rejects `flow_name` steps.
+`FlowStep.display_name` returns `tool_name` or `flow_name` for logs/records.
+The parent's `deadline` / `cancel_token` are forwarded into the recursive
+sub-flow run, so cancellation and the wall-clock budget are honoured between a
+sub-flow's own steps (not just at the parent boundary). `ExecutionResult.cost_report.steps_executed`
+counts the tool invocations a composed step actually drove (recursively), so
+`llm_calls_avoided` is not under-counted for composed flows.
 
 ### `FlowStep.input_mapping`
 

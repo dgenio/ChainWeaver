@@ -305,6 +305,10 @@ def _resolve_input_schema(
     if not flow.steps:
         return _PermissiveInput
     first_step = flow.steps[0]
+    if first_step.tool_name is None:
+        # Composed sub-flow first step (issue #75): no tool schema; fall back
+        # to a permissive input model.
+        return _PermissiveInput
     try:
         first_tool = executor.get_tool(first_step.tool_name)
     except Exception:
@@ -336,7 +340,9 @@ def _resolve_output_schema(
             depended_on.update(step.depends_on)
         for step in flow.steps:
             if step.step_id not in depended_on:
-                sinks.append(step.tool_name)
+                # Composed sub-flow sink (issue #75): display_name yields the
+                # sub-flow name, which get_tool won't resolve → None below.
+                sinks.append(step.display_name)
         if len(sinks) != 1:
             return None
         try:
@@ -345,6 +351,9 @@ def _resolve_output_schema(
             return None
     # Linear flow — last step's tool.
     last_step = flow.steps[-1]
+    if last_step.tool_name is None:
+        # Composed sub-flow terminal step (issue #75): no derivable schema.
+        return None
     try:
         return executor.get_tool(last_step.tool_name).output_schema
     except Exception:

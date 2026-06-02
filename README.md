@@ -584,6 +584,44 @@ An ordered sequence of steps. See [AGENTS.md](AGENTS.md) §5 for the full
 field table (`status`, `tool_schema_hashes`, and the `input_schema_ref` /
 `output_schema_ref` string fields with their resolved-property accessors).
 
+A `FlowStep` runs **either** a tool (`tool_name`) **or** a registered
+sub-flow (`flow_name`) — exactly one, never both. Referencing a sub-flow lets
+you compose reusable flows (issue #75):
+
+```python
+fetch_validate = Flow(
+    name="fetch_validate",
+    description="Fetch and validate.",
+    steps=[
+        FlowStep(tool_name="fetch", input_mapping={"url": "url"}),
+        FlowStep(tool_name="validate", input_mapping={"data": "data"}),
+    ],
+)
+fetch_then_transform = Flow(
+    name="fetch_then_transform",
+    description="Reuse fetch_validate, then transform.",
+    steps=[
+        FlowStep(flow_name="fetch_validate", input_mapping={"url": "url"}),  # sub-flow
+        FlowStep(tool_name="transform", input_mapping={"data": "data"}),
+    ],
+)
+```
+
+The executor runs the sub-flow with the step's resolved inputs, merges its
+output back into the parent context, and attaches the sub-flow's
+`ExecutionResult` to the parent `StepRecord.sub_result`. Sub-flow references
+are checked for cycles and a configurable max nesting depth
+(`FlowExecutor(max_composition_depth=...)`, default 10) before execution,
+raising `FlowCompositionError` otherwise.
+
+A `deadline` or `CancellationToken` passed to `execute_flow` is forwarded into
+composed sub-flows, so cancellation and the wall-clock budget are observed at
+the step boundaries *inside* a sub-flow — a long sub-flow stops between its own
+steps rather than only at the parent boundary. The cost report's
+`steps_executed` counts the tool invocations a composed step actually drove
+(recursively), so `llm_calls_avoided` reflects every tool that ran across the
+composition.
+
 #### `FlowRegistry`
 
 ```python
@@ -602,6 +640,13 @@ An in-memory catalogue of flows.
 executor = FlowExecutor(registry=registry)
 executor.register_tool(tool_a)
 result = executor.execute_flow("my_flow", {"key": "value"})
+
+# Version-targeted execution: run an exact registered version instead of the
+# latest. Omitting `version` keeps the default (latest) behaviour. The version
+# that actually ran is always recorded on `result.flow_version`, so routing,
+# audit, and replay can correlate a result with the precise flow definition.
+result = executor.execute_flow("my_flow", {"key": "value"}, version="1.2.0")
+assert result.flow_version == "1.2.0"
 ```
 
 Runs a flow step-by-step with full schema validation and structured logging.
@@ -698,6 +743,7 @@ All errors are typed and traceable:
 | `FlowNotFoundError` | The requested flow is not registered |
 | `FlowAlreadyExistsError` | Registering a flow that already exists (without `overwrite=True`) |
 | `FlowStatusError` | Executing a flow whose status is not `ACTIVE` (without `force=True`) |
+| `FlowCancelledError` | A `deadline` passed or a `CancellationToken` was cancelled at a step boundary (carries the partial result) |
 | `InvalidFlowVersionError` | A flow is registered with a version string that is not valid PEP 440 |
 | `FlowSerializationError` | A flow file (YAML/JSON) is malformed, has an unknown discriminator, or references an unresolvable class |
 | `SchemaValidationError` | Input or output fails Pydantic validation |
@@ -705,6 +751,7 @@ All errors are typed and traceable:
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 | `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
+| `FlowCompositionError` | A composed flow has a sub-flow cycle, exceeds `max_composition_depth`, or references an unregistered sub-flow |
 | `ToolTimeoutError` | A `Tool` with `timeout_seconds` set exceeds the configured wall-clock cap |
 | `ToolOutputSizeError` | A `Tool` with `max_output_size` set returns an output larger than the configured cap |
 | `FlowBuilderError` | `FlowBuilder.build()` is called without a name or description |
