@@ -10,12 +10,12 @@ YAML payload parser, and a compact tool-catalogue renderer for prompts.
 NOT be imported by :mod:`chainweaver.executor` — the executor stays free of
 any LLM coupling (AGENTS.md core invariant #1: *no LLM calls in
 ``executor.py``*).  ``tests/test_offline_llm_guardrail.py`` enforces this
-statically by parsing ``executor.py``'s import graph.
+statically by scanning ``executor.py``'s own import statements.
 
 The single LLM seam is :data:`LLMFn` — ChainWeaver never imports an LLM SDK,
 so it carries zero dependency on any provider.  Parsing YAML requires
 ``pyyaml`` (the ``chainweaver[yaml]`` extra); the base install is unaffected
-because nothing imports this module at import time.
+because ``pyyaml`` is imported lazily, only when a completion is parsed.
 """
 
 from __future__ import annotations

@@ -32,6 +32,7 @@ discriminator defaults to ``"Flow"``.  Parsing YAML requires ``pyyaml``
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,7 +162,8 @@ def write_proposals(proposals: Iterable[LLMProposal], directory: str | Path) -> 
 
     Raises:
         OfflineLLMError: When ``pyyaml`` (the ``chainweaver[yaml]`` extra) is
-            not installed.
+            not installed, or when a proposed flow name is not safe to use as
+            a filename (see :func:`_safe_flow_filename`).
     """
     target = Path(directory)
     target.mkdir(parents=True, exist_ok=True)
@@ -170,7 +172,7 @@ def write_proposals(proposals: Iterable[LLMProposal], directory: str | Path) -> 
     summary_lines = ["# Proposed flows", ""]
     for proposal in proposals:
         flow = proposal.proposed_flow
-        flow_path = target / f"{flow.name}.flow.yaml"
+        flow_path = _safe_flow_filename(flow.name, target)
         try:
             flow_path.write_text(flow_to_yaml(flow), encoding="utf-8")
         except FlowSerializationError as exc:
@@ -186,6 +188,44 @@ def write_proposals(proposals: Iterable[LLMProposal], directory: str | Path) -> 
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     written.append(summary_path)
     return written
+
+
+_SAFE_FLOW_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _safe_flow_filename(name: str, target: Path) -> Path:
+    """Return ``<target>/<name>.flow.yaml``, rejecting unsafe flow names.
+
+    ``Flow.name`` is LLM-proposed and otherwise unvalidated, so a malformed or
+    adversarial completion could embed path separators or ``..`` segments and
+    write outside *target* (path traversal).  The name is restricted to a
+    conservative filename-safe character set, the bare ``.``/``..`` segments
+    are rejected, and the resolved path is confirmed to land directly inside
+    *target* as defence in depth.
+
+    Args:
+        name: The proposed flow name to turn into a filename.
+        target: The directory the file must stay within.
+
+    Returns:
+        The resolved ``.flow.yaml`` path inside *target*.
+
+    Raises:
+        OfflineLLMError: When *name* is empty, contains characters outside
+            ``[A-Za-z0-9._-]`` (e.g. a path separator), is ``.`` or ``..``, or
+            otherwise resolves outside *target*.
+    """
+    if not _SAFE_FLOW_NAME.fullmatch(name) or name in {".", ".."}:
+        raise OfflineLLMError(
+            f"Proposed flow name '{name}' is not safe for a filename; expected "
+            "only letters, digits, '.', '_', and '-' with no path separators."
+        )
+    candidate = (target / f"{name}.flow.yaml").resolve()
+    if candidate.parent != target.resolve():
+        raise OfflineLLMError(
+            f"Proposed flow name '{name}' resolves outside the target directory."
+        )
+    return candidate
 
 
 def _render_hints(static_candidates: Iterable[Flow] | None) -> str:

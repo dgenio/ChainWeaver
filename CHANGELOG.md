@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reached only through a provider-agnostic `llm_fn(prompt) -> completion`
   callable — **offline, at build time, never in the executor**. Proposals are
   returned as reviewable data (and optionally written as PR-ready `.flow.yaml`
-  files plus a `PROPOSALS.md`); they are never auto-registered.
+  files plus a `PROPOSALS.md`); they are never auto-registered. Proposed flow
+  names are validated as safe filenames before `write_proposals()` writes them,
+  so a malformed completion cannot escape the target directory (path traversal).
 - **Offline tool-description optimizer** (#100): a new `chainweaver.optimizer`
   module exposing `OptimizationStrategy`, `ToolDescriptionProposal`,
   `optimize_tool_descriptions()`, and `optimize_new_tool_description()`. It

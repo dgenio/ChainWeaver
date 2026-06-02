@@ -180,6 +180,26 @@ def test_write_proposals_emits_flow_files_and_summary(tmp_path: Path) -> None:
     assert "confidence 0.90" in summary_text
 
 
+@pytest.mark.parametrize("unsafe_name", ["../evil", "sub/dir", "..", "with space", ""])
+def test_write_proposals_rejects_unsafe_flow_names(tmp_path: Path, unsafe_name: str) -> None:
+    pytest.importorskip("yaml")
+    proposal = LLMProposal(
+        proposed_flow=Flow(
+            name=unsafe_name,
+            description="Adversarial name.",
+            steps=[FlowStep(tool_name="search")],
+        ),
+        rationale="n/a",
+        confidence=0.5,
+    )
+
+    with pytest.raises(OfflineLLMError, match=r"not safe for a filename|resolves outside"):
+        write_proposals([proposal], tmp_path)
+
+    # Nothing escaped the target directory.
+    assert not (tmp_path.parent / "evil.flow.yaml").exists()
+
+
 def test_non_list_payload_raises() -> None:
     with pytest.raises(OfflineLLMError, match="Expected a YAML list"):
         llm_propose_flows([SEARCH], llm_fn=_FakeLLM("just a string"))

@@ -3,9 +3,11 @@
 AGENTS.md core invariant #1 — *no LLM calls in ``executor.py``* — is the
 reason :mod:`chainweaver.compiler_llm` (issue #28) and
 :mod:`chainweaver.optimizer` (issue #100) exist as build-time-only modules.
-This test statically parses ``executor.py``'s import graph (including
-function-local and deferred imports) and fails if it reaches any of the
-offline-LLM modules, directly or via ``from chainweaver import ...``.
+This test statically walks ``executor.py``'s AST and collects every import
+statement it contains (including function-local and deferred imports),
+failing if any names an offline-LLM module, directly or via
+``from chainweaver import ...``.  It inspects ``executor.py`` itself, not the
+transitive import graph.
 """
 
 from __future__ import annotations
