@@ -51,7 +51,7 @@ conforming to the
 Open a PR adding ChainWeaver to each list. Suggested entry:
 
 > **[ChainWeaver](https://github.com/dgenio/ChainWeaver)** — Deterministic
-> orchestration layer for MCP agents. Compiles tool chains into schema-validated
+> orchestration layer for MCP agents. Compiles tool sequences into schema-validated
 > flows and exposes each flow as a single MCP tool — no LLM at build or run time.
 
 - [ ] [`punkpeye/awesome-mcp-servers`](https://github.com/punkpeye/awesome-mcp-servers)
