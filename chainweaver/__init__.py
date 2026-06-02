@@ -58,6 +58,7 @@ from chainweaver.compiler import (
     CompilationWarning,
     compile_flow,
 )
+from chainweaver.compiler_llm import LLMProposal, llm_propose_flows, write_proposals
 from chainweaver.contracts import (
     DeterminismLevel,
     SideEffectLevel,
@@ -104,6 +105,7 @@ from chainweaver.exceptions import (
     MCPError,
     MCPSchemaConversionError,
     MCPToolInvocationError,
+    OfflineLLMError,
     PluginDiscoveryError,
     PredicateSyntaxError,
     SchemaValidationError,
@@ -154,6 +156,12 @@ from chainweaver.middleware import (
     StepStartContext,
 )
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
+from chainweaver.optimizer import (
+    OptimizationStrategy,
+    ToolDescriptionProposal,
+    optimize_new_tool_description,
+    optimize_tool_descriptions,
+)
 from chainweaver.plugins import discover_flows, discover_tools
 from chainweaver.registry import FlowRegistry
 from chainweaver.schemas import flow_schema_json
@@ -257,11 +265,14 @@ __all__ = [
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
+    "LLMProposal",
     "MCPError",
     "MCPSchemaConversionError",
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "OfflineLLMError",
+    "OptimizationStrategy",
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
@@ -284,6 +295,7 @@ __all__ = [
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
+    "ToolDescriptionProposal",
     "ToolNotFoundError",
     "ToolOutputSizeError",
     "ToolSafetyContract",
@@ -307,12 +319,16 @@ __all__ = [
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "llm_propose_flows",
     "lookup_price",
     "merge_safety",
     "minimize_failure",
+    "optimize_new_tool_description",
+    "optimize_tool_descriptions",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",
     "tool",
     "validate_dag_topology",
+    "write_proposals",
 ]

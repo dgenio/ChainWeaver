@@ -68,11 +68,14 @@
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
+    "LLMProposal",
     "MCPError",
     "MCPSchemaConversionError",
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
+    "OfflineLLMError",
+    "OptimizationStrategy",
     "PROVIDER_PRICES",
     "PluginDiscoveryError",
     "PredicateSyntaxError",
@@ -96,6 +99,7 @@
     "Tool",
     "ToolChain",
     "ToolDefinitionError",
+    "ToolDescriptionProposal",
     "ToolNotFoundError",
     "ToolOutputSizeError",
     "ToolSafetyContract",
@@ -119,14 +123,18 @@
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "llm_propose_flows",
     "lookup_price",
     "merge_safety",
     "minimize_failure",
+    "optimize_new_tool_description",
+    "optimize_tool_descriptions",
     "result_to_mermaid",
     "schema_fingerprint",
     "suggest_optimizations",
     "tool",
-    "validate_dag_topology"
+    "validate_dag_topology",
+    "write_proposals"
   ],
   "python_version": [
     3,
@@ -696,6 +704,12 @@
       "qualname": "KernelInvocationError",
       "signature": "(capability_id: str, step_index: int, detail: str) -> None"
     },
+    "LLMProposal": {
+      "kind": "class",
+      "module": "chainweaver.compiler_llm",
+      "qualname": "LLMProposal",
+      "signature": "(proposed_flow: Flow, rationale: str, confidence: float, source: str = 'llm-compiler') -> None"
+    },
     "MCPError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -737,6 +751,17 @@
       },
       "module": "chainweaver.observation",
       "qualname": "ObservedTrace"
+    },
+    "OfflineLLMError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "OfflineLLMError",
+      "signature": "(detail: str) -> None"
+    },
+    "OptimizationStrategy": {
+      "kind": "enum",
+      "module": "chainweaver.optimizer",
+      "qualname": "OptimizationStrategy"
     },
     "PROVIDER_PRICES": {
       "kind": "mappingproxy",
@@ -945,6 +970,12 @@
       "qualname": "ToolDefinitionError",
       "signature": "(function_name: str, detail: str) -> None"
     },
+    "ToolDescriptionProposal": {
+      "kind": "class",
+      "module": "chainweaver.optimizer",
+      "qualname": "ToolDescriptionProposal",
+      "signature": "(tool_name: str, original_description: str, proposed_description: str, rationale: str, similarity_group: list[str] = <factory>, token_delta: int = 0, source: str = 'description-optimizer') -> None"
+    },
     "ToolNotFoundError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1089,6 +1120,12 @@
       "qualname": "flow_to_yaml",
       "signature": "(flow: AnyFlow) -> str"
     },
+    "llm_propose_flows": {
+      "kind": "function",
+      "module": "chainweaver.compiler_llm",
+      "qualname": "llm_propose_flows",
+      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, max_proposals: int = 5, static_candidates: Iterable[Flow] | None = None) -> list[LLMProposal]"
+    },
     "lookup_price": {
       "kind": "function",
       "module": "chainweaver.cost",
@@ -1106,6 +1143,18 @@
       "module": "chainweaver.fuzz",
       "qualname": "minimize_failure",
       "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, failing_input: dict[str, Any], prop: FlowProperty, *, max_rounds: int = 50) -> dict[str, Any]"
+    },
+    "optimize_new_tool_description": {
+      "kind": "function",
+      "module": "chainweaver.optimizer",
+      "qualname": "optimize_new_tool_description",
+      "signature": "(new_tool: Tool, existing_tools: Iterable[Tool], *, llm_fn: LLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE) -> list[ToolDescriptionProposal]"
+    },
+    "optimize_tool_descriptions": {
+      "kind": "function",
+      "module": "chainweaver.optimizer",
+      "qualname": "optimize_tool_descriptions",
+      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE) -> list[ToolDescriptionProposal]"
     },
     "result_to_mermaid": {
       "kind": "function",
@@ -1136,6 +1185,12 @@
       "module": "chainweaver.flow",
       "qualname": "validate_dag_topology",
       "signature": "(flow: DAGFlow) -> None"
+    },
+    "write_proposals": {
+      "kind": "function",
+      "module": "chainweaver.compiler_llm",
+      "qualname": "write_proposals",
+      "signature": "(proposals: Iterable[LLMProposal], directory: str | Path) -> list[Path]"
     }
   }
 }
