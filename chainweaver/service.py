@@ -9,7 +9,7 @@ It ties together the deterministic building blocks:
 
 * :class:`~chainweaver.observer.ChainObserver` (#78) — runtime trace mining.
 * :class:`~chainweaver.analyzer.ChainAnalyzer` (#77) — static schema-compatible
-  chain discovery (built on demand from the monitored tools).
+  flow discovery (built on demand from the monitored tools).
 * an opt-in offline LLM proposer (:func:`chainweaver.compiler_llm.llm_propose_flows`,
   #28) — only consulted when ``enable_llm_proposals`` is set *and* an
   ``llm_fn`` is supplied.
@@ -27,14 +27,16 @@ the minimum viable in-process gate.
 Invariants
 ----------
 
-* No LLM, no network, no randomness on the deterministic path.  The LLM
-  proposer is opt-in and provider-agnostic via the ``llm_fn`` seam.
+* No LLM, no network, and no randomness in *flow generation* — the observer
+  and analyzer passes mine the same flows from the same inputs.  Proposal
+  envelope metadata (the UUID ``id`` and ``created_at`` timestamp) is
+  non-deterministic bookkeeping and never affects which flows are proposed.
+  The LLM proposer is opt-in and provider-agnostic via the ``llm_fn`` seam.
 * In-memory state only — persistence across restarts is out of scope (#16).
 """
 
 from __future__ import annotations
 
-import contextlib
 import threading
 import uuid
 from collections.abc import Callable
@@ -91,7 +93,7 @@ class ServiceConfig(BaseModel):
             service is then purely event/manual-driven.
         min_trace_occurrences: Minimum runtime occurrences before an observed
             pattern is proposed (forwarded to the observer).
-        min_pattern_length: Minimum pattern / chain length (number of tools).
+        min_pattern_length: Minimum pattern / flow length (number of tools).
         min_determinism_score: Minimum confidence (0-1) for a proposal to be
             queued.
         enable_llm_proposals: Opt in to offline LLM-assisted proposals.  Only
@@ -244,15 +246,27 @@ class ChainWeaverService:
         inputs: dict[str, Any],
         outputs: dict[str, Any] | None = None,
     ) -> None:
-        """Forward a runtime tool call to the underlying observer."""
-        self.observer.record(tool_name, inputs, outputs)
+        """Forward a runtime tool call to the underlying observer.
+
+        ``ChainObserver`` is not thread-safe, so observer access is serialized
+        under the service lock to avoid racing with the background analysis
+        loop (:meth:`_observer_pass`).
+        """
+        with self._lock:
+            self.observer.record(tool_name, inputs, outputs)
 
     def end_trace(self) -> None:
-        """Close the current observed trace and count it."""
-        self.observer.end_trace()
+        """Close the current observed trace and count it.
+
+        The trace mutation and the metric update happen under the lock (so the
+        background loop never reads a half-updated observer); the event is
+        emitted outside the lock so callbacks may re-enter the service.
+        """
         with self._lock:
+            self.observer.end_trace()
             self._metrics.traces_recorded += 1
-        self.emit(ServiceEvent.TRACE_RECORDED, {"traces_recorded": self._metrics.traces_recorded})
+            recorded = self._metrics.traces_recorded
+        self.emit(ServiceEvent.TRACE_RECORDED, {"traces_recorded": recorded})
 
     # ------------------------------------------------------------------
     # Analysis pipeline
@@ -274,10 +288,13 @@ class ChainWeaverService:
         return created
 
     def _observer_pass(self) -> list[ServiceProposal]:
-        suggestions = self.observer.suggest_flows(
-            min_occurrences=self.config.min_trace_occurrences,
-            min_length=self.config.min_pattern_length,
-        )
+        # ``ChainObserver`` is not thread-safe; hold the lock while reading it
+        # so this never races with concurrent ``record`` / ``end_trace`` calls.
+        with self._lock:
+            suggestions = self.observer.suggest_flows(
+                min_occurrences=self.config.min_trace_occurrences,
+                min_length=self.config.min_pattern_length,
+            )
         out: list[ServiceProposal] = []
         for suggestion in suggestions:
             proposal = self._queue_proposal(
@@ -406,12 +423,18 @@ class ChainWeaverService:
                 raise ValueError(
                     f"Proposal '{proposal_id}' is {proposal.status.value}, not pending."
                 )
-            # Already promoted out-of-band? Treat approval as idempotent.
-            with contextlib.suppress(FlowAlreadyExistsError):
+            # Already promoted out-of-band? Treat approval as idempotent and
+            # do not double-count metrics for a flow we did not register here.
+            try:
                 self.registry.register_flow(proposal.flow)
+            except FlowAlreadyExistsError:
+                newly_registered = False
+            else:
+                newly_registered = True
             proposal.status = ProposalStatus.APPROVED
-            self._metrics.flows_promoted += 1
-            self._metrics.total_llm_calls_avoided += proposal.estimated_llm_calls_avoided
+            if newly_registered:
+                self._metrics.flows_promoted += 1
+                self._metrics.total_llm_calls_avoided += proposal.estimated_llm_calls_avoided
         self.emit(
             ServiceEvent.FLOW_PROMOTED, {"proposal_id": proposal_id, "flow": proposal.flow.name}
         )

@@ -20,7 +20,7 @@ from chainweaver import (
 )
 
 # ---------------------------------------------------------------------------
-# Tool fixtures (schema-compatible chain: double -> add_one)
+# Tool fixtures (schema-compatible flow: double -> add_one)
 # ---------------------------------------------------------------------------
 
 
@@ -104,6 +104,22 @@ class TestProposalPipeline:
         assert metrics.flows_promoted == 1
         assert metrics.total_llm_calls_avoided == proposal.estimated_llm_calls_avoided
         assert service.list_proposals(status=ProposalStatus.APPROVED)[0].id == proposal.id
+
+    def test_approve_is_idempotent_when_flow_already_registered(self) -> None:
+        # A flow promoted out-of-band (already in the registry) must not be
+        # double-counted in metrics when its pending proposal is approved.
+        registry = FlowRegistry()
+        service = ChainWeaverService(registry=registry)
+        _observe_pattern(service, 3, "a", "b")
+        proposal = service.trigger_analysis()[0]
+        registry.register_flow(proposal.flow)  # promote out-of-band
+
+        approved = service.approve(proposal.id)
+
+        assert approved.status is ProposalStatus.APPROVED
+        metrics = service.metrics
+        assert metrics.flows_promoted == 0
+        assert metrics.total_llm_calls_avoided == 0
 
     def test_reject_keeps_flow_out_of_registry(self) -> None:
         registry = FlowRegistry()

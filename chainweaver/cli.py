@@ -1646,13 +1646,17 @@ def _load_tool_trace(path: Path) -> ChainObserver:
         tool = obj.get("tool", obj.get("tool_name"))
         if not isinstance(tool, str) or not tool:
             raise ValueError(f"line {lineno}: missing or empty 'tool' field.")
-        inputs = obj.get("inputs") or {}
+        inputs = obj.get("inputs", {})
         outputs = obj.get("outputs")
         if not isinstance(inputs, dict):
             raise ValueError(f"line {lineno}: 'inputs' must be a JSON object.")
         if outputs is not None and not isinstance(outputs, dict):
             raise ValueError(f"line {lineno}: 'outputs' must be a JSON object or null.")
-        trace_id = str(obj.get("trace_id", "__default__"))
+        trace_id_value = obj.get("trace_id")
+        if trace_id_value is None or trace_id_value == "":
+            trace_id = "__default__"
+        else:
+            trace_id = str(trace_id_value)
         grouped.setdefault(trace_id, []).append(
             (tool, dict(inputs), dict(outputs) if outputs is not None else None)
         )

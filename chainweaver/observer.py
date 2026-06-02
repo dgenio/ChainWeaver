@@ -1,4 +1,4 @@
-"""Runtime chain observer with auto-flow suggestion (issue #78).
+"""Runtime flow observer with auto-flow suggestion (issue #78).
 
 While :class:`~chainweaver.observation.TraceRecorder` (issue #11) captures
 raw ad-hoc tool sequences, it does not *learn* from them.  ``ChainObserver``
@@ -9,7 +9,7 @@ actually walked the pattern.
 
 This is the runtime, trace-driven counterpart to
 :meth:`chainweaver.analyzer.ChainAnalyzer.suggest_flows`, which discovers
-chains *statically* from tool schemas.  Where the analyzer answers "what
+flows *statically* from tool schemas.  Where the analyzer answers "what
 *could* be compiled?", the observer answers "what *did* the agent keep
 doing?".
 
