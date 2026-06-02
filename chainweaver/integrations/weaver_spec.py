@@ -1,173 +1,87 @@
-"""Weaver Stack interop — types, exporters, and conformance (issues #91, #107).
+"""Weaver Stack interop — real consumption of ``weaver-contracts`` (issues #91, #107, #233).
 
 This module is ChainWeaver's interface to the Weaver Stack family of
-sibling repositories — `weaver-spec` (the shared contract),
-`contextweaver` (routing), and `agent-kernel` (capability execution).
-Three concerns sit here:
+sibling projects — `weaver-spec` (the shared contract, published as the
+``weaver-contracts`` distribution on PyPI), `contextweaver` (routing),
+and `agent-kernel` (capability execution).  Four concerns sit here:
 
-1. **Mirror types** — Pydantic models that match the
-   ``weaver-spec`` v0.1.0 contract for :class:`SelectableItem`,
-   :class:`CapabilityToken`, and :class:`RoutingDecision`.  ChainWeaver
-   carries the types itself so the dependency on ``weaver-spec`` stays
-   optional; consumers that already depend on the upstream package can
-   adapt with a one-line conversion (the field names and JSON shape
-   match).
+1. **Contract types** — ChainWeaver consumes the upstream
+   ``weaver_contracts`` dataclasses directly (:class:`SelectableItem`,
+   :class:`ChoiceCard`, :class:`RoutingDecision`,
+   :class:`CapabilityToken`, …) rather than carrying its own mirrors.
+   The third-party import is guarded so importing this module without
+   the ``weaver-stack`` extra raises a clear :class:`ImportError`.
 2. **Capability export** — :func:`flow_to_selectable_item` (issue #107)
    projects a :class:`~chainweaver.flow.Flow` or
    :class:`~chainweaver.flow.DAGFlow` to a :class:`SelectableItem` that
    contextweaver can ingest into its catalog.
-3. **Conformance signal** — :data:`WEAVER_SPEC_VERSION` declares the
-   spec revision ChainWeaver targets (issue #91).  The conformance
-   test suite (``tests/test_weaver_spec_conformance.py``) verifies the
-   declaration matches the published spec and that the mirror types
-   round-trip through JSON.
+3. **Routing consumption** (issue #233) — :func:`make_routing_decision`
+   builds a contract-shaped :class:`RoutingDecision` from a flat
+   candidate list, :func:`selected_capability_id` reads the chosen
+   capability back out, and :func:`resolve_flow_from_routing_decision`
+   resolves a routing decision to a registered flow so a Weaver router
+   can hand a verdict straight to ChainWeaver for execution.
+4. **Conformance signal** — :data:`WEAVER_SPEC_VERSION` mirrors the
+   installed contract version (issue #91).  The conformance test suite
+   (``tests/test_weaver_spec_conformance.py``) verifies the declaration
+   matches ``docs/SPEC_COMPAT.md``.
 
 No agent-kernel or contextweaver imports live in
 :mod:`chainweaver.executor` — per the Weaver Stack guardrail
-documented in
-:doc:`/docs/agent-context/architecture.md`.  Adapters that need either
-package live in :mod:`chainweaver.integrations.contextweaver` and
+documented in :doc:`/docs/agent-context/architecture.md`.  Adapters
+that drive either layer live in
+:mod:`chainweaver.integrations.contextweaver` and
 :mod:`chainweaver.integrations.agent_kernel`; this module only carries
-data types and a pure exporter.
+the contract types and pure resolvers.
+
+Optional extra
+--------------
+
+Install with the ``weaver-stack`` extra::
+
+    pip install 'chainweaver[weaver-stack]'
 """
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict
 
-from chainweaver.flow import DAGFlow, Flow
+try:  # Optional dependency — the published Weaver Stack contract.
+    from weaver_contracts import (
+        Capability,
+        CapabilityToken,
+        ChoiceCard,
+        PolicyDecision,
+        RoutingDecision,
+        SelectableItem,
+        TraceEvent,
+    )
+    from weaver_contracts.version import CONTRACT_VERSION as _CONTRACT_VERSION
+    from weaver_contracts.version import is_compatible
+except ImportError as exc:  # pragma: no cover — depends on install layout
+    raise ImportError(
+        "chainweaver.integrations.weaver_spec requires weaver-contracts>=0.6. "
+        "Install with: pip install 'chainweaver[weaver-stack]'."
+    ) from exc
 
-#: PEP 440 version string of the weaver-spec contract ChainWeaver
-#: targets.  Bumped when the spec lands a new revision and ChainWeaver
-#: has been audited against it.  The conformance test in
-#: ``tests/test_weaver_spec_conformance.py`` keeps
+if TYPE_CHECKING:
+    from chainweaver.flow import DAGFlow, Flow
+    from chainweaver.registry import FlowRegistry
+
+#: Version string of the ``weaver-contracts`` package ChainWeaver
+#: consumes.  Sourced from the installed distribution so the declaration
+#: cannot drift from what is actually importable.  The conformance test
+#: in ``tests/test_weaver_spec_conformance.py`` keeps
 #: ``docs/SPEC_COMPAT.md`` and this constant in sync.
-WEAVER_SPEC_VERSION = "0.1.0"
+WEAVER_SPEC_VERSION = _CONTRACT_VERSION
 
 
-class CapabilityToken(BaseModel):
-    """Bearer token identifying a capability to execute (weaver-spec I-07).
-
-    Mirrors the upstream ``weaver_spec.CapabilityToken`` v0.1.0 shape:
-    a stable ``capability_id``, an optional ``version`` pin, an opaque
-    ``token`` string for kernel authentication, and an optional set of
-    ``scopes`` the bearer is permitted to use.
-
-    Attributes:
-        capability_id: Stable, dotted identifier — e.g. ``"data.ingest"``.
-        version: Optional PEP 440 version pin (``None`` = any).
-        token: Opaque kernel-issued bearer string; treated as a credential.
-        scopes: Optional set of capability scopes the token grants.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    capability_id: str
-    version: str | None = None
-    token: str
-    scopes: tuple[str, ...] = ()
-
-
-class RoutingDecision(BaseModel):
-    """A contextweaver routing verdict (weaver-spec I-04).
-
-    Mirrors the upstream ``weaver_spec.RoutingDecision`` v0.1.0 shape.
-    Returned by :class:`~chainweaver.integrations.contextweaver.ContextweaverClient`
-    when an agent (or a :class:`~chainweaver.decisions.DecisionCallback`)
-    asks for a bounded selection among candidate capabilities.
-
-    Attributes:
-        selected_capability_id: The chosen capability — must match a
-            ``capability_id`` advertised in the contextweaver catalog
-            (i.e. one exported via :func:`flow_to_selectable_item`).
-        candidates: The full candidate set the decision was drawn from.
-            Includes ``selected_capability_id``.
-        rationale: Optional human-readable explanation; useful for
-            debugging routing decisions in traces.
-        confidence: Optional self-reported confidence in ``[0.0, 1.0]``.
-        token: Optional :class:`CapabilityToken` minted alongside the
-            decision so the caller can pass it straight to
-            :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    selected_capability_id: str
-    candidates: tuple[str, ...]
-    rationale: str | None = None
-    confidence: float | None = None
-    token: CapabilityToken | None = None
-
-    @field_validator("candidates")
-    @classmethod
-    def _candidates_non_empty(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(value) == 0:
-            raise ValueError("RoutingDecision.candidates must be non-empty.")
-        return value
-
-    @field_validator("confidence")
-    @classmethod
-    def _confidence_in_range(cls, value: float | None) -> float | None:
-        if value is None:
-            return None
-        if not (0.0 <= value <= 1.0):
-            raise ValueError(f"RoutingDecision.confidence must be in [0.0, 1.0]; got {value}.")
-        return value
-
-    @model_validator(mode="after")
-    def _selected_is_candidate(self) -> RoutingDecision:
-        """Ensure ``selected_capability_id`` is one of ``candidates``.
-
-        The docstring contracts that ``candidates`` includes the selection;
-        enforcing it here turns a catalog/router misconfiguration into a loud
-        validation error instead of a confusing downstream lookup failure.
-        """
-        if self.selected_capability_id not in self.candidates:
-            raise ValueError(
-                f"RoutingDecision.selected_capability_id '{self.selected_capability_id}' "
-                f"must be one of candidates {self.candidates!r}."
-            )
-        return self
-
-
-class SelectableItem(BaseModel):
-    """A routable capability advertised to contextweaver (weaver-spec I-03).
-
-    Mirrors the upstream ``weaver_spec.SelectableItem`` v0.1.0 shape.
-    Produced by :func:`flow_to_selectable_item` so a ChainWeaver flow
-    can be ingested into the contextweaver catalog and addressed by a
-    :class:`RoutingDecision`.
-
-    Attributes:
-        capability_id: Stable, dotted identifier.
-        name: Human-readable display name.  :func:`flow_to_selectable_item`
-            sets this to the flow's ``name``.
-        description: One-paragraph summary of what the capability does.
-        version: PEP 440 version string of the underlying flow.
-        input_schema: JSON Schema for the capability inputs, derived from
-            the flow's resolved ``input_schema`` (its ``input_schema_ref``)
-            when set.  ``None`` when the flow declares no input schema ref.
-        output_schema: JSON Schema for the capability outputs, derived from
-            the flow's resolved ``output_schema`` (its ``output_schema_ref``)
-            when set.  ``None`` when the flow declares no output schema ref.
-        tags: Optional taxonomy tags used by contextweaver for catalog
-            filtering.
-        deterministic: Whether the underlying flow is marked
-            deterministic.  Mirrors ``Flow.deterministic``.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    capability_id: str
-    name: str
-    description: str
-    version: str
-    input_schema: dict[str, Any] | None = None
-    output_schema: dict[str, Any] | None = None
-    tags: tuple[str, ...] = ()
-    deterministic: bool = True
+def _utcnow() -> datetime:
+    """Return the current UTC time as a timezone-aware ``datetime``."""
+    return datetime.now(timezone.utc)
 
 
 def flow_to_selectable_item(
@@ -185,18 +99,19 @@ def flow_to_selectable_item(
     3. The flow's :attr:`~chainweaver.flow.Flow.name` (fallback so that
        every registered flow has a stable id by default).
 
-    JSON Schemas are derived from the flow's
-    ``input_schema_ref`` / ``output_schema_ref`` when set.  When the
-    flow has no schema refs the function returns ``None`` for that
-    field — callers that need full schemas should set the refs on the
-    flow itself (the same surface used by the FlowExecutor for
-    validation).
+    The resolved id is used for both the contract's ``id`` and its
+    ``capability_id`` (a flow *is* the capability it advertises).
+    Flow-specific routing metadata — version, determinism, tags, and the
+    JSON Schemas derived from the flow's ``input_schema_ref`` /
+    ``output_schema_ref`` — is carried in the item's ``metadata`` map,
+    which is where the ``weaver-contracts`` ``SelectableItem`` shape
+    expects router-specific extras to live.
 
     Args:
         flow: A :class:`Flow` or :class:`DAGFlow` instance.
         capability_id: Explicit override for the resolved id; pinned
             into the result.
-        tags: Optional catalog tags propagated verbatim.
+        tags: Optional catalog tags propagated into ``metadata['tags']``.
 
     Returns:
         A :class:`SelectableItem` ready to ingest into the
@@ -223,29 +138,156 @@ def flow_to_selectable_item(
     )
 
     return SelectableItem(
-        capability_id=resolved_id,
-        name=flow.name,
+        id=resolved_id,
+        label=flow.name,
         description=flow.description,
-        version=flow.version,
-        input_schema=input_schema_json,
-        output_schema=output_schema_json,
-        tags=tags,
-        deterministic=flow.deterministic,
+        capability_id=resolved_id,
+        metadata={
+            "version": flow.version,
+            "deterministic": flow.deterministic,
+            "tags": list(tags),
+            "input_schema": input_schema_json,
+            "output_schema": output_schema_json,
+        },
+    )
+
+
+def make_routing_decision(
+    *,
+    decision_id: str,
+    selected_capability_id: str,
+    candidates: tuple[str, ...],
+    card_id: str = "chainweaver-candidates",
+    context_summary: str | None = None,
+) -> RoutingDecision:
+    """Build a contract-shaped :class:`RoutingDecision` from a flat candidate list (issue #233).
+
+    The ``weaver-contracts`` :class:`RoutingDecision` nests candidates as
+    :class:`SelectableItem` objects inside :class:`ChoiceCard` objects and
+    records the verdict as a ``selected_item_id``.  Routers that think in
+    terms of a flat capability list — the common ChainWeaver case where
+    each capability id is both the item id and the capability id — can use
+    this helper to produce a well-formed decision without hand-assembling
+    the card structure.
+
+    Args:
+        decision_id: Stable id for the decision (appears in audit traces).
+        selected_capability_id: The chosen capability; must be one of
+            *candidates*.
+        candidates: The bounded candidate set the decision was drawn from.
+        card_id: Id for the single :class:`ChoiceCard` wrapping the
+            candidates.
+        context_summary: Optional human-readable routing rationale.
+
+    Returns:
+        A :class:`RoutingDecision` whose ``selected_item_id`` resolves to
+        *selected_capability_id* via :func:`selected_capability_id`.
+
+    Raises:
+        ValueError: When *candidates* is empty or *selected_capability_id*
+            is not among *candidates*.
+    """
+    if not candidates:
+        raise ValueError("make_routing_decision requires a non-empty candidate set.")
+    if selected_capability_id not in candidates:
+        raise ValueError(
+            f"selected_capability_id '{selected_capability_id}' "
+            f"must be one of candidates {candidates!r}."
+        )
+    items = [
+        SelectableItem(id=cap, label=cap, description=cap, capability_id=cap) for cap in candidates
+    ]
+    card = ChoiceCard(id=card_id, items=items)
+    return RoutingDecision(
+        id=decision_id,
+        choice_cards=[card],
+        timestamp=_utcnow(),
+        selected_item_id=selected_capability_id,
+        selected_card_id=card_id,
+        context_summary=context_summary,
+    )
+
+
+def selected_capability_id(decision: RoutingDecision) -> str:
+    """Return the capability id the *decision* selected (issue #233).
+
+    Resolves ``decision.selected_item_id`` against the
+    :class:`SelectableItem` objects nested in the decision's choice cards,
+    returning the matched item's ``capability_id`` (falling back to the
+    item ``id`` when the item carries no explicit ``capability_id``).
+
+    Args:
+        decision: A :class:`RoutingDecision` to read the verdict from.
+
+    Returns:
+        The selected capability id.
+
+    Raises:
+        ValueError: When the decision records no ``selected_item_id`` or
+            the id does not match any item in its choice cards.
+    """
+    if decision.selected_item_id is None:
+        raise ValueError(f"RoutingDecision '{decision.id}' records no selected_item_id.")
+    for card in decision.choice_cards:
+        for item in card.items:
+            if item.id == decision.selected_item_id:
+                return str(item.capability_id or item.id)
+    raise ValueError(
+        f"RoutingDecision '{decision.id}' selected_item_id "
+        f"'{decision.selected_item_id}' matches no item in its choice cards."
+    )
+
+
+def resolve_flow_from_routing_decision(
+    decision: RoutingDecision,
+    registry: FlowRegistry,
+) -> Flow | DAGFlow:
+    """Resolve a routing *decision* to a registered flow (issue #233).
+
+    Lets a Weaver router hand a :class:`RoutingDecision` straight to
+    ChainWeaver for execution: the selected capability id (see
+    :func:`selected_capability_id`) is matched against each active flow's
+    :attr:`~chainweaver.flow.Flow.capability_id`, falling back to the
+    flow ``name`` when no flow declares a matching capability id.
+
+    Args:
+        decision: The routing verdict produced upstream.
+        registry: The :class:`~chainweaver.registry.FlowRegistry` to
+            resolve against.
+
+    Returns:
+        The registered flow advertising the selected capability.
+
+    Raises:
+        ValueError: When the decision carries no resolvable selection.
+        LookupError: When no registered flow advertises the selected
+            capability id.
+    """
+    capability = selected_capability_id(decision)
+    for flow in registry.get_active_flows():
+        if flow.capability_id == capability:
+            return flow
+    for flow in registry.get_active_flows():
+        if flow.name == capability:
+            return flow
+    raise LookupError(
+        f"No registered flow advertises capability '{capability}'. "
+        f"Register a flow with capability_id='{capability}' (or that name) first."
     )
 
 
 class SpecCompatibilityReport(BaseModel):
-    """Conformance fingerprint for the declared weaver-spec version (issue #91).
+    """Conformance fingerprint for the consumed contract version (issue #91).
 
-    Emitted by :func:`spec_compatibility_report` so CI can verify (a)
-    the declared spec version matches what ChainWeaver actually
-    supports and (b) the mirror types round-trip through JSON without
-    drift.
+    Emitted by :func:`spec_compatibility_report` so CI can verify the
+    declared contract version matches what ChainWeaver actually imports
+    and that the exporter is present.
 
     Attributes:
-        spec_version: The weaver-spec version ChainWeaver targets.
-        mirror_types: Sorted tuple of mirror type names this module
-            exports.  Bumping the spec must update this list in lock-step.
+        spec_version: The ``weaver-contracts`` version ChainWeaver
+            consumes.
+        contract_types: Sorted tuple of contract type names this module
+            re-exports.
         exporter_present: ``True`` when :func:`flow_to_selectable_item`
             is importable from this module (the contract for #107).
     """
@@ -253,15 +295,15 @@ class SpecCompatibilityReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     spec_version: str
-    mirror_types: tuple[str, ...]
+    contract_types: tuple[str, ...]
     exporter_present: bool
 
 
 def spec_compatibility_report() -> SpecCompatibilityReport:
-    """Return the current weaver-spec compatibility fingerprint (issue #91).
+    """Return the current contract compatibility fingerprint (issue #91).
 
     Used by the CI conformance job to detect drift between
-    :data:`WEAVER_SPEC_VERSION`, the exported mirror types, and the
+    :data:`WEAVER_SPEC_VERSION`, the re-exported contract types, and the
     declared compatibility in ``docs/SPEC_COMPAT.md``.
 
     Returns:
@@ -269,17 +311,25 @@ def spec_compatibility_report() -> SpecCompatibilityReport:
     """
     return SpecCompatibilityReport(
         spec_version=WEAVER_SPEC_VERSION,
-        mirror_types=("CapabilityToken", "RoutingDecision", "SelectableItem"),
+        contract_types=("CapabilityToken", "RoutingDecision", "SelectableItem"),
         exporter_present=True,
     )
 
 
 __all__ = [
     "WEAVER_SPEC_VERSION",
+    "Capability",
     "CapabilityToken",
+    "ChoiceCard",
+    "PolicyDecision",
     "RoutingDecision",
     "SelectableItem",
     "SpecCompatibilityReport",
+    "TraceEvent",
     "flow_to_selectable_item",
+    "is_compatible",
+    "make_routing_decision",
+    "resolve_flow_from_routing_decision",
+    "selected_capability_id",
     "spec_compatibility_report",
 ]

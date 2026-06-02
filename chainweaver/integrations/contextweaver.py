@@ -19,15 +19,15 @@ Example
         RoutingDecisionAdapter,
         StaticRoutingClient,
     )
-    from chainweaver.integrations.weaver_spec import RoutingDecision
+    from chainweaver.integrations.weaver_spec import make_routing_decision
 
     # Stub client for tests; production callers swap this for an HTTP one.
     client = StaticRoutingClient(
-        RoutingDecision(
+        make_routing_decision(
+            decision_id="rd-1",
             selected_capability_id="summarize_short",
             candidates=("summarize_short", "summarize_long"),
-            rationale="Input under 1000 tokens",
-            confidence=0.92,
+            context_summary="Input under 1000 tokens",
         )
     )
 
@@ -36,7 +36,7 @@ Example
         decision_callback=RoutingDecisionAdapter(client=client),
     )
 
-When the adapter's ``selected_capability_id`` does not match any of the
+When the decision's selected capability does not match any of the
 step's ``decision_candidates`` (a misconfigured catalog), the adapter
 raises :class:`ValueError` — the executor wraps that in a
 :class:`~chainweaver.exceptions.DecisionCallbackError` and aborts the
@@ -48,7 +48,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from chainweaver.decisions import DecisionContext
-from chainweaver.integrations.weaver_spec import RoutingDecision
+from chainweaver.integrations.weaver_spec import RoutingDecision, selected_capability_id
 
 
 @runtime_checkable
@@ -107,9 +107,11 @@ class RoutingDecisionAdapter:
     Holds a :class:`ContextweaverClient` and translates each decision
     point into a :meth:`ContextweaverClient.route` call, then maps the
     returned :class:`RoutingDecision` back to the tool name the
-    executor will run.
+    executor will run (resolving the decision's ``selected_item_id``
+    to its capability id via
+    :func:`~chainweaver.integrations.weaver_spec.selected_capability_id`).
 
-    The ``selected_capability_id`` must equal one of the step's
+    The selected capability id must equal one of the step's
     ``decision_candidates`` — that's the bridge between contextweaver's
     capability namespace and ChainWeaver's tool namespace.  In typical
     deployments the capability_id and the tool name are the same
@@ -146,30 +148,29 @@ class RoutingDecisionAdapter:
             ctx: The :class:`DecisionContext` provided by the executor.
 
         Returns:
-            The ``selected_capability_id`` from the underlying
+            The selected capability id resolved from the underlying
             :class:`RoutingDecision`.  The executor validates this
             against ``ctx.candidates`` and aborts the step (via
             :class:`~chainweaver.exceptions.DecisionCallbackError`) if
             it isn't a member.
 
         Raises:
-            ValueError: When the routing decision references candidates
-                that diverge from ``ctx.candidates`` (a catalog
+            ValueError: When the decision's selected capability is not
+                one of the step's ``decision_candidates`` (a catalog
                 misconfiguration).  The executor wraps this in a
                 :class:`~chainweaver.exceptions.DecisionCallbackError`.
         """
         decision = self._client.route(ctx)
-        # Sanity-check the candidate set agrees with the executor's view.
-        # Tolerate decisions whose candidates are a subset of ctx.candidates
-        # (the router may have narrowed the set further), but reject
-        # decisions referencing candidates the executor doesn't know about.
-        unknown = set(decision.candidates) - set(ctx.candidates)
-        if unknown:
+        selected = selected_capability_id(decision)
+        # The router may legitimately narrow the candidate set further, but a
+        # selection the executor doesn't know about signals a catalog/router
+        # mismatch — fail loudly rather than let a bad lookup confuse callers.
+        if selected not in ctx.candidates:
             raise ValueError(
-                f"RoutingDecision references candidates not in the step's "
-                f"decision_candidates: {sorted(unknown)!r}"
+                f"RoutingDecision selected capability '{selected}' is not in the step's "
+                f"decision_candidates: {sorted(ctx.candidates)!r}"
             )
-        return decision.selected_capability_id
+        return selected
 
 
 __all__ = [

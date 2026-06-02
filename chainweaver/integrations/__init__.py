@@ -21,17 +21,21 @@ Available integrations
 - :mod:`chainweaver.integrations.llamaindex` — bidirectional adapters
   between LlamaIndex ``FunctionTool`` and ChainWeaver :class:`Tool`.
   Install with ``pip install 'chainweaver[llamaindex]'``.
-- :mod:`chainweaver.integrations.weaver_spec` — Weaver Stack mirror
-  types (``SelectableItem``, ``RoutingDecision``, ``CapabilityToken``)
-  plus the :func:`flow_to_selectable_item` exporter (issues #91, #107).
-  No external dependency required.
+- :mod:`chainweaver.integrations.weaver_spec` — consumes the published
+  Weaver Stack contract types (``SelectableItem``, ``RoutingDecision``,
+  ``CapabilityToken``, …) from the ``weaver-contracts`` package, plus
+  the :func:`flow_to_selectable_item` exporter and the routing
+  resolvers (issues #91, #107, #233).  Install with
+  ``pip install 'chainweaver[weaver-stack]'``.
 - :mod:`chainweaver.integrations.contextweaver` — bridges a
   ``RoutingDecision`` into ChainWeaver's
   :class:`~chainweaver.decisions.DecisionCallback` seam (issue #106).
-  Accepts any duck-typed :class:`ContextweaverClient`.
+  Accepts any duck-typed :class:`ContextweaverClient`.  Requires the
+  ``weaver-stack`` extra.
 - :mod:`chainweaver.integrations.agent_kernel` — optional
   :class:`KernelBackedExecutor` that delegates capability-typed DAG
-  steps to a structural :class:`KernelProtocol` (issue #89).
+  steps to a structural :class:`KernelProtocol` (issue #89).  Requires
+  the ``weaver-stack`` extra.
 """
 
 from __future__ import annotations

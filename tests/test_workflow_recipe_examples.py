@@ -89,3 +89,24 @@ def test_openai_agents_tool_recipe_runs() -> None:
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     assert completed.returncode == 0, output
     assert "tool name   : price_with_tax" in completed.stdout, output
+
+
+def test_weaver_stack_golden_path_runs() -> None:
+    """The route -> execute -> gate demo runs the full path with the extra (#233, #234)."""
+    pytest.importorskip("weaver_contracts")
+    completed = _run_script("examples/weaver_stack_golden_path/weaver_stack_golden_path.py")
+    output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+    assert completed.returncode == 0, output
+    assert "contextweaver routed -> 'report.generate'" in completed.stdout, output
+    assert "[weaver-stack] golden path OK" in completed.stdout, output
+
+
+def test_weaver_stack_golden_path_degrades_without_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the extra the demo prints a skip notice and exits 0 (#234)."""
+    import importlib.util
+
+    if importlib.util.find_spec("weaver_contracts") is not None:
+        pytest.skip("weaver-contracts installed; graceful-degrade path not exercised")
+    completed = _run_script("examples/weaver_stack_golden_path/weaver_stack_golden_path.py")
+    assert completed.returncode == 0, completed.stderr
+    assert "[weaver-stack] skipped" in completed.stdout, completed.stdout

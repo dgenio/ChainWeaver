@@ -87,10 +87,12 @@ mcp = [
     "mcp>=1.0",
 ]
 weaver-stack = [
-    # Placeholder for the Weaver Stack sibling SDKs (issue #91 — weaver-spec
-    # conformance, #106 — contextweaver, #89 — agent-kernel).  ChainWeaver's
-    # mirror types are self-contained, so this extra is a no-op until the
-    # upstream packages ship on PyPI; pinning them here marks the seam.
+    # Real Weaver Stack interop (issue #233).  ``weaver-contracts`` is the
+    # published distribution of the weaver-spec shared contract consumed by
+    # chainweaver.integrations.weaver_spec / contextweaver / agent_kernel
+    # (issues #91, #106, #89, #107).  Pinned to the 0.x line — the contract
+    # promises no breaking changes within a major version.
+    "weaver-contracts>=0.6,<1.0",
 ]
 # Property-based testing extra (issue #143).  Pulls the Hypothesis stack the
 # property suite needs — including hypothesis-jsonschema, which main's suite
@@ -124,6 +126,9 @@ dev = [
     "langgraph>=0.2",
     "openai-agents>=0.1",
     "mcp>=1.0",
+    # Weaver Stack interop (issue #233): the conformance + adapter suites import
+    # the real weaver-contracts types, so CI's ``.[dev]`` install must carry them.
+    "weaver-contracts>=0.6,<1.0",
     # Notebook execution gate (issue #229): nbmake runs notebooks/ in CI so the
     # "Open in Colab" quickstart cannot silently rot; ipykernel is the kernel it
     # executes against.
@@ -185,6 +190,12 @@ strict = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# weaver-contracts (issue #233) ships no py.typed marker yet; treat it as
+# untyped rather than failing the type check on the optional integration.
+module = "weaver_contracts.*"
+ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
 where = ["."]

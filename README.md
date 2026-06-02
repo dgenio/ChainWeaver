@@ -257,10 +257,15 @@ flowchart LR
     end
 ```
 
-**Use standalone or together.** Each layer stands on its own — ChainWeaver has
-**no hard dependency** on any sibling and works fully standalone. The
-`chainweaver[weaver-stack]` extra is a placeholder that will pin the siblings
-once they ship on PyPI.
+**Use standalone or together.** Each layer stands on its own — ChainWeaver's
+base install has **no hard dependency** on any sibling and works fully
+standalone. Real interop runs through the `chainweaver[weaver-stack]` extra,
+which pins the published [`weaver-contracts`](https://pypi.org/project/weaver-contracts/)
+package: ChainWeaver consumes its `SelectableItem` / `RoutingDecision` /
+`CapabilityToken` types directly, so a router can hand a routing decision
+straight to `resolve_flow_from_routing_decision()` for deterministic
+execution. See the runnable
+[Weaver Stack golden path](examples/weaver_stack_golden_path/) (issue #234).
 
 | Layer | What it owns | Sibling project |
 |-------|--------------|-----------------|
@@ -304,7 +309,7 @@ SDK pinned.  Pick extras for the integrations you actually use:
 | `chainweaver[llamaindex]` | Bidirectional adapters between ChainWeaver and LlamaIndex `FunctionTool` | `llama-index-core` |
 | `chainweaver[test]` | Hypothesis-based property tests for your own flows | `hypothesis`, `hypothesis-jsonschema` |
 | `chainweaver[docs]` | Building the docs site locally with mkdocs | `mkdocs`, `mkdocs-material`, `mkdocstrings` |
-| `chainweaver[weaver-stack]` | Reserving the seam for the sibling Weaver Stack SDKs (`weaver-spec` #91, `contextweaver` #106, `agent-kernel` #89) | *(placeholder — no transitive dep today; will pin them once they ship on PyPI)* |
+| `chainweaver[weaver-stack]` | Real Weaver Stack interop — consuming the shared routing/capability contract (`weaver-spec` #91, `contextweaver` #106, `agent-kernel` #89, #233) | `weaver-contracts` |
 | `chainweaver[dev]` | Contributing — pulls every test/lint/type dep and most integration deps | the union of the above |
 
 Package metadata (`pyproject.toml`) publishes URLs for the

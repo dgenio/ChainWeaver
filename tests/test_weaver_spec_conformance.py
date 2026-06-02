@@ -1,4 +1,4 @@
-"""Weaver-spec conformance gate (issue #91).
+"""Weaver-spec conformance gate (issues #91, #233).
 
 This module is the CI conformance signal for ChainWeaver's declared
 weaver-spec compatibility.  It is collected by the default ``pytest``
@@ -8,11 +8,13 @@ and ``docs/SPEC_COMPAT.md`` fails the build.
 
 The tests are intentionally narrow:
 
-- They do not depend on any external ``weaver-spec`` Python package
-  (the spec is a sibling repo, not a PyPI distribution).
-- They verify the **mirror types** declared in
-  :mod:`chainweaver.integrations.weaver_spec` exist, are
-  pydantic-validated, and round-trip through JSON.
+- They consume the **published** ``weaver-contracts`` package directly
+  (issue #233) — the integration is no longer a self-contained mirror.
+  Each test skips cleanly if the ``weaver-stack`` extra is not installed.
+- They verify the contract types re-exported by
+  :mod:`chainweaver.integrations.weaver_spec` are the upstream
+  dataclasses and that the exporter/resolvers are at their documented
+  paths.
 - They cross-check the declared version against
   ``docs/SPEC_COMPAT.md`` so the compat statement and the code stay
   in sync.
@@ -20,9 +22,13 @@ The tests are intentionally narrow:
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("weaver_contracts")
 
 from chainweaver.integrations.weaver_spec import (
     WEAVER_SPEC_VERSION,
@@ -30,6 +36,7 @@ from chainweaver.integrations.weaver_spec import (
     RoutingDecision,
     SelectableItem,
     flow_to_selectable_item,
+    is_compatible,
     spec_compatibility_report,
 )
 
@@ -47,6 +54,15 @@ def test_weaver_spec_version_format() -> None:
 
 
 @pytest.mark.conformance
+def test_declared_version_matches_installed_contract() -> None:
+    """The declared version is the version actually importable from the package."""
+    from weaver_contracts.version import CONTRACT_VERSION
+
+    assert WEAVER_SPEC_VERSION == CONTRACT_VERSION
+    assert is_compatible(WEAVER_SPEC_VERSION) is True
+
+
+@pytest.mark.conformance
 def test_spec_compat_doc_references_declared_version() -> None:
     """``docs/SPEC_COMPAT.md`` must mention the declared spec version."""
     assert SPEC_COMPAT_PATH.is_file(), f"Missing {SPEC_COMPAT_PATH}"
@@ -59,40 +75,29 @@ def test_spec_compat_doc_references_declared_version() -> None:
 
 
 @pytest.mark.conformance
-def test_mirror_types_all_present() -> None:
-    """All three mirror types are importable and Pydantic models."""
-    from pydantic import BaseModel
+def test_contract_types_are_upstream_dataclasses() -> None:
+    """The re-exported contract types are the upstream weaver-contracts dataclasses."""
+    import weaver_contracts as wc
 
-    assert issubclass(CapabilityToken, BaseModel)
-    assert issubclass(RoutingDecision, BaseModel)
-    assert issubclass(SelectableItem, BaseModel)
+    assert SelectableItem is wc.SelectableItem
+    assert RoutingDecision is wc.RoutingDecision
+    assert CapabilityToken is wc.CapabilityToken
+    for cls in (SelectableItem, RoutingDecision, CapabilityToken):
+        assert dataclasses.is_dataclass(cls)
 
 
 @pytest.mark.conformance
-def test_mirror_types_json_round_trip() -> None:
-    """Each mirror type round-trips through JSON byte-identically."""
-    tok = CapabilityToken(
-        capability_id="data.ingest", version="1.0.0", token="s", scopes=("read",)
-    )
-    assert CapabilityToken.model_validate_json(tok.model_dump_json()) == tok
-
-    rd = RoutingDecision(
-        selected_capability_id="data.ingest",
-        candidates=("data.ingest", "data.batch"),
-        rationale="r",
-        confidence=0.9,
-        token=tok,
-    )
-    assert RoutingDecision.model_validate_json(rd.model_dump_json()) == rd
-
+def test_selectable_item_json_round_trip() -> None:
+    """A SelectableItem round-trips through JSON byte-for-byte via ``asdict``."""
     item = SelectableItem(
-        capability_id="data.ingest",
-        name="ingest",
+        id="data.ingest",
+        label="ingest",
         description="d",
-        version="0.1.0",
-        tags=("data",),
+        capability_id="data.ingest",
+        metadata={"version": "0.1.0", "tags": ["data"]},
     )
-    assert SelectableItem.model_validate_json(item.model_dump_json()) == item
+    restored = SelectableItem(**json.loads(json.dumps(dataclasses.asdict(item))))
+    assert restored == item
 
 
 @pytest.mark.conformance
@@ -101,7 +106,7 @@ def test_spec_compatibility_report_fields() -> None:
     report = spec_compatibility_report()
     assert report.spec_version == WEAVER_SPEC_VERSION
     assert report.exporter_present is True
-    assert set(report.mirror_types) == {
+    assert set(report.contract_types) == {
         "CapabilityToken",
         "RoutingDecision",
         "SelectableItem",
@@ -112,6 +117,20 @@ def test_spec_compatibility_report_fields() -> None:
 def test_flow_to_selectable_item_is_exported() -> None:
     """The exporter function is at the documented path."""
     assert callable(flow_to_selectable_item)
+
+
+@pytest.mark.conformance
+def test_routing_resolvers_are_exported() -> None:
+    """The routing-consumption helpers are at their documented path (issue #233)."""
+    from chainweaver.integrations.weaver_spec import (
+        make_routing_decision,
+        resolve_flow_from_routing_decision,
+        selected_capability_id,
+    )
+
+    assert callable(make_routing_decision)
+    assert callable(selected_capability_id)
+    assert callable(resolve_flow_from_routing_decision)
 
 
 @pytest.mark.conformance

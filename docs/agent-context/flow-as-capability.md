@@ -86,10 +86,15 @@ flow = Flow(
 )
 
 item = flow_to_selectable_item(flow, tags=("data", "ingest"))
-# item.capability_id == "data.ingest"
-# item.input_schema    == IngestInput.model_json_schema()
-# item.output_schema   == IngestOutput.model_json_schema()
+# item.capability_id              == "data.ingest"
+# item.label                      == "ingest"
+# item.metadata["input_schema"]   == IngestInput.model_json_schema()
+# item.metadata["output_schema"]  == IngestOutput.model_json_schema()
 ```
+
+`flow_to_selectable_item` returns the upstream `weaver_contracts.SelectableItem`
+dataclass; flow-specific routing metadata (version, determinism, tags, and the
+resolved JSON Schemas) is carried in its `metadata` map.
 
 The exporter is a **pure function** — it doesn't talk to a network
 contextweaver, it just returns the data structure.  Ingesting the
@@ -134,9 +139,13 @@ dispatches the step's work.
 
 - **#90** — this doc + the `capability_id` field.
 - **#107** — `flow_to_selectable_item()` exporter.
-- **#106** — `RoutingDecisionAdapter` consumes
-  `RoutingDecision` whose `selected_capability_id` matches a
-  `SelectableItem.capability_id`.
+- **#106** — `RoutingDecisionAdapter` consumes a
+  `RoutingDecision` whose selected item resolves (via
+  `selected_capability_id()`) to a `SelectableItem.capability_id`.
+- **#233** — `chainweaver.integrations.weaver_spec` consumes the published
+  `weaver-contracts` types and adds `make_routing_decision()` /
+  `resolve_flow_from_routing_decision()` so a router can hand a verdict
+  straight to ChainWeaver for execution.
 - **#89** — `KernelBackedExecutor` dispatches per-step
   `capability_id` via `KernelProtocol.invoke`.
 - **#91** — declared weaver-spec compatibility lives in

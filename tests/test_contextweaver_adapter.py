@@ -1,9 +1,18 @@
-"""Tests for the contextweaver routing adapter (issue #106)."""
+"""Tests for the contextweaver routing adapter (issues #106, #233)."""
 
 from __future__ import annotations
 
 import pytest
-from helpers import NumberInput, ValueInput, ValueOutput, _add_ten_fn, _double_fn
+
+pytest.importorskip("weaver_contracts")
+
+from helpers import (
+    NumberInput,
+    ValueInput,
+    ValueOutput,
+    _add_ten_fn,
+    _double_fn,
+)
 
 from chainweaver.decisions import DecisionContext
 from chainweaver.executor import FlowExecutor
@@ -13,7 +22,10 @@ from chainweaver.integrations.contextweaver import (
     RoutingDecisionAdapter,
     StaticRoutingClient,
 )
-from chainweaver.integrations.weaver_spec import CapabilityToken, RoutingDecision
+from chainweaver.integrations.weaver_spec import (
+    RoutingDecision,
+    make_routing_decision,
+)
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
 
@@ -30,14 +42,20 @@ def _ctx(candidates: tuple[str, ...]) -> DecisionContext:
     )
 
 
+def _decision(selected: str, candidates: tuple[str, ...]) -> RoutingDecision:
+    return make_routing_decision(
+        decision_id="rd", selected_capability_id=selected, candidates=candidates
+    )
+
+
 def test_static_routing_client_returns_pinned_decision() -> None:
-    decision = RoutingDecision(selected_capability_id="double", candidates=("double", "add_ten"))
+    decision = _decision("double", ("double", "add_ten"))
     client = StaticRoutingClient(decision)
     assert client.route(_ctx(("double", "add_ten"))) is decision
 
 
 def test_static_routing_client_satisfies_protocol() -> None:
-    client = StaticRoutingClient(RoutingDecision(selected_capability_id="x", candidates=("x",)))
+    client = StaticRoutingClient(_decision("x", ("x",)))
     assert isinstance(client, ContextweaverClient)
 
 
@@ -47,17 +65,13 @@ def test_adapter_rejects_non_protocol_client() -> None:
 
 
 def test_adapter_returns_selected_capability_id() -> None:
-    client = StaticRoutingClient(
-        RoutingDecision(selected_capability_id="add_ten", candidates=("double", "add_ten"))
-    )
+    client = StaticRoutingClient(_decision("add_ten", ("double", "add_ten")))
     adapter = RoutingDecisionAdapter(client=client)
     assert adapter.decide(_ctx(("double", "add_ten"))) == "add_ten"
 
 
-def test_adapter_rejects_decision_with_unknown_candidates() -> None:
-    client = StaticRoutingClient(
-        RoutingDecision(selected_capability_id="ghost", candidates=("ghost",))
-    )
+def test_adapter_rejects_decision_with_unknown_selection() -> None:
+    client = StaticRoutingClient(_decision("ghost", ("ghost",)))
     adapter = RoutingDecisionAdapter(client=client)
     with pytest.raises(ValueError, match="not in the step"):
         adapter.decide(_ctx(("double", "add_ten")))
@@ -65,15 +79,13 @@ def test_adapter_rejects_decision_with_unknown_candidates() -> None:
 
 def test_adapter_accepts_narrowed_candidate_subset() -> None:
     """Router may narrow candidates further (subset) — still valid."""
-    client = StaticRoutingClient(
-        RoutingDecision(selected_capability_id="double", candidates=("double",))
-    )
+    client = StaticRoutingClient(_decision("double", ("double",)))
     adapter = RoutingDecisionAdapter(client=client)
     assert adapter.decide(_ctx(("double", "add_ten"))) == "double"
 
 
 def test_adapter_client_property_exposes_bound_client() -> None:
-    client = StaticRoutingClient(RoutingDecision(selected_capability_id="x", candidates=("x",)))
+    client = StaticRoutingClient(_decision("x", ("x",)))
     adapter = RoutingDecisionAdapter(client=client)
     assert adapter.client is client
 
@@ -94,11 +106,11 @@ def test_adapter_wires_into_flow_executor_end_to_end() -> None:
     reg = FlowRegistry()
     reg.register_flow(flow)
     client = StaticRoutingClient(
-        RoutingDecision(
+        make_routing_decision(
+            decision_id="rd",
             selected_capability_id="add_ten",
             candidates=("double", "add_ten"),
-            rationale="picked by router",
-            confidence=0.88,
+            context_summary="picked by router",
         )
     )
     ex = FlowExecutor(
@@ -136,7 +148,8 @@ def test_dynamic_client_can_branch_on_context() -> None:
         def route(self, ctx: DecisionContext) -> RoutingDecision:
             n = ctx.context.get("number", 0)
             choice = "double" if n < 10 else "add_ten"
-            return RoutingDecision(
+            return make_routing_decision(
+                decision_id="rd",
                 selected_capability_id=choice,
                 candidates=tuple(ctx.candidates),
             )
@@ -183,12 +196,3 @@ def test_dynamic_client_can_branch_on_context() -> None:
     assert small.execution_log[0].tool_name == "double"
     large = ex.execute_flow("threshold", {"number": 15})
     assert large.execution_log[0].tool_name == "add_ten"
-
-
-def test_capability_token_in_routing_decision_is_preserved() -> None:
-    """Decisions may carry a token alongside the selected capability."""
-    tok = CapabilityToken(capability_id="x", token="abc")
-    rd = RoutingDecision(selected_capability_id="x", candidates=("x",), token=tok)
-    assert rd.token == tok
-    restored = RoutingDecision.model_validate_json(rd.model_dump_json())
-    assert restored.token == tok

@@ -59,7 +59,7 @@ chainweaver/
 │   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
 │   ├── langchain.py   from_/to_langchain_tool + from_langchain_toolkit (#82); requires chainweaver[langchain]
 │   ├── llamaindex.py  from_/to_llamaindex_tool (#82); requires chainweaver[llamaindex]
-│   ├── weaver_spec.py    SelectableItem/RoutingDecision/CapabilityToken mirror types + flow_to_selectable_item (#91, #107)
+│   ├── weaver_spec.py    Re-exports weaver-contracts types + flow_to_selectable_item + routing resolvers; needs [weaver-stack] extra (#91, #107, #233)
 │   ├── contextweaver.py  RoutingDecisionAdapter (DecisionCallback impl) + ContextweaverClient Protocol (#106)
 │   └── agent_kernel.py   KernelBackedExecutor + KernelProtocol + InMemoryKernel (#89)
 ├── mcp/               MCP integration (issues #70, #72, #150); requires chainweaver[mcp]
@@ -366,7 +366,7 @@ Full checklist: [review-checklist.md](docs/agent-context/review-checklist.md).
 | [review-checklist.md](docs/agent-context/review-checklist.md) | Definition-of-done, review gates | Before submitting a PR, during code review |
 | [versioning-policy.md](docs/versioning-policy.md) | SemVer policy, public-API scope, deprecation process | Adding / removing / renaming public symbols, planning a release |
 | [flow-as-capability.md](docs/agent-context/flow-as-capability.md) | Treating a flow as a Weaver Stack capability (#90); `Flow.capability_id`; `flow_to_selectable_item` exporter | Setting capability identity on a flow, exporting to contextweaver |
-| [SPEC_COMPAT.md](docs/SPEC_COMPAT.md) | Declared `weaver-spec` v0.1.0 compatibility (#91); conformance test + CI gate | Bumping the declared spec version, changing the weaver_spec mirror types |
+| [SPEC_COMPAT.md](docs/SPEC_COMPAT.md) | Declared `weaver-contracts` 0.6.0 compatibility (#91, #233); conformance test + CI gate | Bumping the pinned contract version, changing the weaver_spec adapters |
 | [v1-release-criteria.md](docs/v1-release-criteria.md) | Measurable v1.0.0 release bar | Before tagging a release, when scoping issues against the v1.0 milestone |
 
 ---
