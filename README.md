@@ -933,6 +933,46 @@ Runnable example: [`examples/plugin_discovery.py`](examples/plugin_discovery.py)
 
 ---
 
+## Runtime learning
+
+You don't have to hand-author every flow. ChainWeaver can watch what your
+agent actually does and **propose** compiled flows for the repeated,
+deterministic paths — all offline, with no LLM in the loop.
+
+```python
+from chainweaver import ChainObserver, FlowRegistry
+
+observer = ChainObserver()
+
+# Record tool calls as the agent makes them.
+observer.record("fetch", {"url": "..."}, {"body": "..."})
+observer.record("validate", {"body": "..."}, {"valid": True})
+observer.record("transform", {"body": "..."}, {"records": [1, 2, 3]})
+observer.end_trace()
+# ... many traces later ...
+
+registry = FlowRegistry()
+for suggestion in observer.suggest_flows(min_occurrences=3):
+    # Suggestions are proposals — review, then promote explicitly.
+    print(suggestion.flow.name, suggestion.confidence,
+          suggestion.estimated_llm_calls_avoided)
+    registry.register_flow(suggestion.flow)
+```
+
+- **`ChainObserver`** (#78) mines repeated tool sequences from runtime traces
+  and emits ranked `FlowSuggestion`s — never auto-registered.
+- **`chainweaver record`** (#226) does the same from a recorded JSONL trace on
+  the command line, writing candidate `.flow.yaml` files ranked by projected
+  LLM calls avoided.
+- **`ChainWeaverService`** (#101) ties the observer, the static
+  [`ChainAnalyzer`](#core-abstractions), and an optional offline LLM proposer
+  into a continuous *analyze → propose → govern → promote* loop with an
+  in-process governance gate and adoption metrics.
+
+Runnable example: [`examples/chain_observer.py`](examples/chain_observer.py).
+
+---
+
 ## Roadmap
 
 Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainWeaver/milestones); see
@@ -994,6 +1034,12 @@ chainweaver attest flows/etl.flow.yaml --tools my_pkg.tools --runs 50 --repeats 
 
 # Advisory optimization suggestions for a saved flow.
 chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.json
+
+# Mine candidate flows from a recorded JSONL tool trace (offline, no LLM).
+chainweaver record examples/agent_tool_trace.jsonl --output-dir candidates/
+
+# Run one continuous-analysis service pass and report flow proposals.
+chainweaver service --tools my_pkg.tools --trace trace.jsonl
 
 # Check saved flows for tool schema drift against the live registry.
 chainweaver doctor flows/ --check-drift --tools my_pkg.tools

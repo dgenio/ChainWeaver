@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from chainweaver.flow import Flow
@@ -152,7 +154,7 @@ class TestSuggestFlows:
             ({"min_length": 3, "max_length": 2}, "max_length must be >= min_length"),
         ],
     )
-    def test_invalid_arguments_rejected(self, kwargs: dict[str, int], match: str) -> None:
+    def test_invalid_arguments_rejected(self, kwargs: dict[str, Any], match: str) -> None:
         observer = ChainObserver()
         _record_trace(observer, "a", "b", "c")
         with pytest.raises(ValueError, match=match):

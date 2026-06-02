@@ -137,7 +137,7 @@ class TestRecordTraceFormat:
     def test_tool_name_alias_accepted(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        lines = [
+        lines: list[dict[str, object]] = [
             {"trace_id": f"t{i}", "tool_name": tool, "inputs": {}, "outputs": {}}
             for i in range(3)
             for tool in ("a", "b")

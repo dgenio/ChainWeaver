@@ -174,6 +174,14 @@ from chainweaver.serialization import (
     flow_to_json,
     flow_to_yaml,
 )
+from chainweaver.service import (
+    ChainWeaverService,
+    ProposalStatus,
+    ServiceConfig,
+    ServiceEvent,
+    ServiceMetrics,
+    ServiceProposal,
+)
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
 from chainweaver.tools import Tool
@@ -207,6 +215,7 @@ __all__ = [
     "ChainAnalyzer",
     "ChainObserver",
     "ChainWeaverError",
+    "ChainWeaverService",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
     "Checkpointer",
@@ -279,12 +288,17 @@ __all__ = [
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
+    "ProposalStatus",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
     "SchemaValidationError",
+    "ServiceConfig",
+    "ServiceEvent",
+    "ServiceMetrics",
+    "ServiceProposal",
     "SideEffectLevel",
     "StabilityLevel",
     "StepCache",
