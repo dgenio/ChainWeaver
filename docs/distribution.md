@@ -19,7 +19,7 @@ Recipes and the MCP server are verified runnable against these versions
 
 | Integration | Entry point | Verified against |
 |---|---|---|
-| MCP server (outbound) | `chainweaver serve` / `chainweaver.mcp.FlowServer` | `mcp` 1.27.2 |
+| MCP server (outbound) | `chainweaver serve` / `chainweaver.mcp.FlowServer` | `fastmcp` 3.4.0 (+ `mcp` 1.27.2 for the inbound adapter) |
 | LangGraph node | `examples/integrations/langgraph_node.py`, [recipe](cookbook/langgraph-node.md) | `langgraph` 1.2.4 |
 | OpenAI Agents SDK tool | `examples/integrations/openai_agents_tool.py`, [recipe](cookbook/openai-agents-tool.md) | `openai-agents` 0.17.4 |
 | LangChain bridge | `chainweaver.integrations.langchain` | `langchain-core` 1.4.0 |

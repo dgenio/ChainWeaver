@@ -90,6 +90,14 @@ class TestFlowServerRegistration:
         server = FlowServer(executor_with_flow, name="cw-test")
         assert server.fastmcp.name == "cw-test"
 
+    def test_backed_by_standalone_fastmcp(self, executor_with_flow: FlowExecutor) -> None:
+        # Migration guard (issue #243): the server runs on the standalone
+        # ``fastmcp`` package, not the SDK-bundled ``mcp.server.fastmcp``.
+        from fastmcp import FastMCP
+
+        server = FlowServer(executor_with_flow, name="cw-test")
+        assert isinstance(server.fastmcp, FastMCP)
+
 
 class TestFlowServerOverMCP:
     def test_client_sees_advertised_flow(self, executor_with_flow: FlowExecutor) -> None:

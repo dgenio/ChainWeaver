@@ -109,6 +109,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MCP server now runs on standalone `fastmcp`** (#243, breaking for the
+  `[mcp]` extra): `chainweaver.mcp.FlowServer` migrated from the SDK-bundled
+  `mcp.server.fastmcp.FastMCP` to the standalone
+  [`fastmcp`](https://github.com/jlowin/fastmcp) package (3.x). The `[mcp]`
+  extra now installs `fastmcp>=3.4` alongside `mcp>=1.0` — the inbound
+  `MCPToolAdapter` still imports `mcp.ClientSession`, and `fastmcp` re-uses
+  `mcp.types.ToolAnnotations`. `FlowServer`'s public API is unchanged
+  (constructor, `serve()`/`serve_async()`, `.fastmcp`, `.registered_tool_names`);
+  `.fastmcp` now returns a `fastmcp.FastMCP` instance. The base install is
+  unaffected.
 - **Weaver Stack types are now the upstream `weaver-contracts` dataclasses**
   (#233, breaking): the previous internal Pydantic mirror types
   (`SelectableItem`, `RoutingDecision`, `CapabilityToken`) are replaced by the

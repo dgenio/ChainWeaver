@@ -12,8 +12,10 @@ ChainWeaver is MCP-native in **both directions**:
 This page covers the **outbound** direction: turning ChainWeaver into an MCP server.
 
 !!! note "Requires the `mcp` extra"
-    The MCP server builds on the official [`mcp`](https://pypi.org/project/mcp/)
-    Python SDK (FastMCP):
+    The MCP server builds on the standalone
+    [`fastmcp`](https://github.com/jlowin/fastmcp) package; the official
+    [`mcp`](https://pypi.org/project/mcp/) SDK is pulled in by the same extra
+    for the inbound adapter:
 
     ```bash
     pip install 'chainweaver[mcp]'

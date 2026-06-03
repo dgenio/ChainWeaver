@@ -23,7 +23,10 @@ Each exposed flow advertises:
 Optional extra
 --------------
 
-Requires the official MCP SDK::
+Runs on the standalone `fastmcp <https://github.com/jlowin/fastmcp>`_
+package (issue #243).  The official ``mcp`` SDK is also pulled in by the
+extra for the inbound :mod:`chainweaver.mcp.adapter` (``mcp.ClientSession``)
+and for :class:`mcp.types.ToolAnnotations`, which ``fastmcp`` re-uses::
 
     pip install 'chainweaver[mcp]'
 
@@ -43,11 +46,12 @@ from chainweaver.exceptions import FlowExecutionError
 from chainweaver.flow import DAGFlow, Flow
 
 try:  # Optional dependency.
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
+    from fastmcp.tools import Tool as _FastMCPTool
     from mcp.types import ToolAnnotations
 except ImportError as exc:  # pragma: no cover — depends on install layout
     raise ImportError(
-        "chainweaver.mcp.server requires the 'mcp' Python SDK. "
+        "chainweaver.mcp.server requires the 'fastmcp' package and the 'mcp' SDK. "
         "Install with: pip install 'chainweaver[mcp]'."
     ) from exc
 
@@ -167,13 +171,20 @@ class FlowServer:
             idempotentHint=getattr(flow, "deterministic", False),
         )
 
-        self._mcp.add_tool(
+        # fastmcp 3.x takes a pre-built ``Tool`` rather than ``add_tool``
+        # keyword arguments.  Passing ``output_schema`` as a JSON-Schema dict
+        # enables structured output; ``None`` disables it (the result then
+        # lands in the content text block as JSON) — matching the behaviour of
+        # the old ``structured_output`` flag.
+        out_schema = output_schema.model_json_schema() if output_schema is not None else None
+        tool = _FastMCPTool.from_function(
             flow_tool,
             name=mcp_name,
             description=flow.description or f"ChainWeaver flow '{flow.name}'.",
             annotations=annotations,
-            structured_output=output_schema is not None,
+            output_schema=out_schema,
         )
+        self._mcp.add_tool(tool)
         self._registered_tool_names.append(mcp_name)
 
     def serve(self, transport: TransportName = "stdio") -> None:
@@ -185,30 +196,26 @@ class FlowServer:
                 or ``"streamable-http"``.
 
         This delegates to :meth:`FastMCP.run` and blocks the calling
-        thread for the lifetime of the server.  For programmatic
-        embedding inside an existing event loop, see :meth:`serve_async`.
+        thread for the lifetime of the server.  ``show_banner`` is
+        disabled so nothing is written to stdout — a banner there would
+        corrupt the stdio MCP framing.  For programmatic embedding inside
+        an existing event loop, see :meth:`serve_async`.
         """
-        self._mcp.run(transport=transport)
+        self._mcp.run(transport=transport, show_banner=False)
 
     async def serve_async(self, transport: TransportName = "stdio") -> None:
         """Async variant of :meth:`serve`.
 
-        Picks the right FastMCP coroutine based on *transport*.  Use
-        this from inside an existing ``asyncio`` event loop (e.g. when
-        embedding the MCP server in a larger async application).
+        Delegates to :meth:`FastMCP.run_async`, which dispatches on
+        *transport* internally.  Use this from inside an existing
+        ``asyncio`` event loop (e.g. when embedding the MCP server in a
+        larger async application).
 
         Args:
             transport: One of ``"stdio"``, ``"sse"``, or
                 ``"streamable-http"``.
         """
-        if transport == "stdio":
-            await self._mcp.run_stdio_async()
-        elif transport == "sse":
-            await self._mcp.run_sse_async()
-        elif transport == "streamable-http":
-            await self._mcp.run_streamable_http_async()
-        else:  # pragma: no cover — Literal type prevents this at type-check time
-            raise ValueError(f"Unsupported transport '{transport}'.")
+        await self._mcp.run_async(transport=transport, show_banner=False)
 
 
 def _safe_identifier(raw: str) -> str:

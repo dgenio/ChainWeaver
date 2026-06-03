@@ -84,7 +84,11 @@ openai-agents = [
     "openai-agents>=0.1",
 ]
 mcp = [
+    # ``FlowServer`` (outbound) runs on the standalone ``fastmcp`` package
+    # (issue #243); the inbound ``MCPToolAdapter`` still imports
+    # ``mcp.ClientSession`` from the official SDK, so both are required.
     "mcp>=1.0",
+    "fastmcp>=3.4",
 ]
 weaver-stack = [
     # Real Weaver Stack interop (issue #233).  ``weaver-contracts`` is the
@@ -126,6 +130,7 @@ dev = [
     "langgraph>=0.2",
     "openai-agents>=0.1",
     "mcp>=1.0",
+    "fastmcp>=3.4",
     # Weaver Stack interop (issue #233): the conformance + adapter suites import
     # the real weaver-contracts types, so CI's ``.[dev]`` install must carry them.
     "weaver-contracts>=0.6,<1.0",
