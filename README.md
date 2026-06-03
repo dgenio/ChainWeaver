@@ -273,7 +273,7 @@ execution. See the runnable
 | Context assembly | "What facts and tool descriptions belong in the prompt?" | `contextweaver` (#106) |
 | Agent kernel | The model-mediated tool-use loop itself | `agent-kernel` (#89) |
 | **Deterministic flow execution** | "Run this exact tool sequence with strict schemas, no LLM between steps" | **ChainWeaver — this repo** |
-| Lessons & evaluation | Turning traces into reviewed operational guidance | `lessonweaver` (#210) |
+| Lessons & evaluation | Turning traces into reviewed operational guidance ([how ChainWeaver feeds it](docs/lessons-from-traces.md)) | `lessonweaver` (#210) |
 
 ChainWeaver does **not** replace an agent framework.  It is meant to be
 called *from* one — see the [LangGraph

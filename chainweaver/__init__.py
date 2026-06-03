@@ -146,6 +146,12 @@ from chainweaver.fuzz import (
     FuzzReport,
     minimize_failure,
 )
+from chainweaver.lessons import (
+    LessonCandidate,
+    LessonEvidenceStep,
+    LessonReview,
+    trace_to_lesson_candidate,
+)
 from chainweaver.log_utils import RedactionPolicy
 from chainweaver.middleware import (
     BaseMiddleware,
@@ -278,6 +284,9 @@ __all__ = [
     "InvalidFlowVersionError",
     "KernelInvocationError",
     "LLMProposal",
+    "LessonCandidate",
+    "LessonEvidenceStep",
+    "LessonReview",
     "MCPError",
     "MCPSchemaConversionError",
     "MCPToolInvocationError",
@@ -346,6 +355,7 @@ __all__ = [
     "schema_fingerprint",
     "suggest_optimizations",
     "tool",
+    "trace_to_lesson_candidate",
     "validate_dag_topology",
     "write_proposals",
 ]

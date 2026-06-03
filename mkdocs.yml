@@ -12,6 +12,7 @@ copyright: Apache-2.0 licensed.
 # resolve when the docs site is mirrored.
 not_in_nav: |
   agent-context/
+  research/
   v1-release-criteria.md
 
 theme:
@@ -120,6 +121,7 @@ nav:
   - Integrations:
       - Use ChainWeaver as an MCP server: mcp-server.md
       - Validate flows in CI (GitHub Action): github-action.md
+      - Turn traces into reviewed lessons (lessonweaver): lessons-from-traces.md
       - Distribution & ecosystem listings: distribution.md
   - Reference:
       - CLI: cli.md

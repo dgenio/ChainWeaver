@@ -88,6 +88,7 @@ chainweaver/
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
+├── lessons.py         trace_to_lesson_candidate() + LessonCandidate/LessonEvidenceStep/LessonReview: normalise an ExecutionResult into a reviewable, workflow-scoped lesson candidate for lessonweaver (#210); no hard dep on lessonweaver; banned from executor.py
 ├── service.py         ChainWeaverService: continuous analyze→observe→propose→govern loop tying analyzer + observer + a proposal gate (#101); banned from executor.py
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
