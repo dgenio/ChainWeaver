@@ -18,6 +18,10 @@ Available commands
   an image (issue #46).
 - ``chainweaver run <file>`` — load a flow file from disk, register tools
   from one or more Python modules, and execute the flow (issue #129).
+- ``chainweaver serve <file>`` — load a flow file + tools and expose the
+  compiled flow as MCP tools over stdio/SSE/streamable-HTTP, so MCP-aware
+  agents call the whole flow as one deterministic tool (issues #72, #230).
+  Requires the ``mcp`` extra.
 - ``chainweaver profile <traces...>`` — analyze one or more
   ``ExecutionResult`` JSON files; surface bottlenecks, per-step p50/p95/p99,
   and per-step / per-tool reliability aggregates for retries, skips,
@@ -108,6 +112,7 @@ from chainweaver.viz import _render_step_bar_chart, flow_to_ascii, flow_to_dot
 if TYPE_CHECKING:
     from chainweaver.attest import AttestationReport
     from chainweaver.fuzz import FlowProperty, FuzzReport
+    from chainweaver.mcp import FlowServer
 
 app = typer.Typer(
     name="chainweaver",
@@ -623,6 +628,147 @@ def run_command(
 
     if not result.success:
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# serve command (issues #72, #230)
+# ---------------------------------------------------------------------------
+
+
+class ServeTransport(str, Enum):
+    """Transport options for ``chainweaver serve``.
+
+    Mirrors :data:`chainweaver.mcp.server.TransportName`.
+    """
+
+    STDIO = "stdio"
+    SSE = "sse"
+    STREAMABLE_HTTP = "streamable-http"
+
+
+_SERVE_FILE_ARG = typer.Argument(
+    ...,
+    help="Path to a .flow.yaml, .flow.yml, or .flow.json file to expose over MCP.",
+)
+_SERVE_TOOLS_OPTION = typer.Option(
+    [],
+    "--tools",
+    "-t",
+    help=(
+        "Python module path that exposes Tool instances at top level "
+        "(e.g. 'my_pkg.tools'). Repeatable."
+    ),
+)
+_SERVE_TRANSPORT_OPTION = typer.Option(
+    ServeTransport.STDIO,
+    "--transport",
+    case_sensitive=False,
+    help="MCP transport: 'stdio' (default), 'sse', or 'streamable-http'.",
+)
+_SERVE_NAME_OPTION = typer.Option(
+    "chainweaver",
+    "--name",
+    help="Server name advertised to MCP clients.",
+)
+_SERVE_PREFIX_OPTION = typer.Option(
+    "",
+    "--prefix",
+    help="Optional prefix for exposed tool names (e.g. 'cw' → 'cw__my_flow').",
+)
+
+
+def _import_flow_server() -> type[FlowServer]:
+    """Import :class:`~chainweaver.mcp.FlowServer`, guarding the optional extra.
+
+    The MCP SDK ships behind the ``chainweaver[mcp]`` extra, so the import is
+    deferred to call time — keeping the base CLI usable without it.  A missing
+    extra exits with code 1 and a clear remediation message instead of a raw
+    ``ImportError``.
+    """
+    try:
+        from chainweaver.mcp import FlowServer
+    except ImportError as exc:
+        typer.echo(
+            "chainweaver: the 'serve' command requires the MCP extra. "
+            "Install with: pip install 'chainweaver[mcp]'.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    return FlowServer
+
+
+def _build_flow_server(
+    flow_file: Path,
+    tools: list[str],
+    *,
+    name: str,
+    server_prefix: str,
+) -> FlowServer:
+    """Load *flow_file* + ``--tools`` modules and build a :class:`FlowServer`.
+
+    Factored out of :func:`serve_command` so tests can assert the exposed
+    tool set without entering the blocking transport loop.  Mirrors the
+    flow/tool loading performed by ``run`` (issue #129).
+
+    Exit codes match the CLI contract: ``2`` for a missing flow file or
+    un-importable tools module, ``1`` for a malformed flow file or a missing
+    ``mcp`` extra.
+    """
+    flow_server_cls = _import_flow_server()
+
+    _require_existing_file(flow_file)
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    executor = FlowExecutor(registry=registry)
+
+    seen_tool_names: set[str] = set()
+    for module_name in tools:
+        for tool_obj in _import_tools_from(module_name):
+            if tool_obj.name in seen_tool_names:
+                continue
+            executor.register_tool(tool_obj)
+            seen_tool_names.add(tool_obj.name)
+
+    return flow_server_cls(executor, name=name, server_prefix=server_prefix)
+
+
+@app.command("serve")
+def serve_command(
+    flow_file: Path = _SERVE_FILE_ARG,
+    tools: list[str] = _SERVE_TOOLS_OPTION,
+    transport: ServeTransport = _SERVE_TRANSPORT_OPTION,
+    name: str = _SERVE_NAME_OPTION,
+    prefix: str = _SERVE_PREFIX_OPTION,
+) -> None:
+    """Expose a flow's compiled tools over MCP (issues #72, #230).
+
+    Loads ``flow_file``, registers the tools from each ``--tools`` module,
+    and mounts the flow on a :class:`~chainweaver.mcp.FlowServer` so
+    MCP-aware agents see the whole compiled flow as a single deterministic
+    tool — the inverse of consuming MCP tools into a flow.  The process then
+    blocks serving the chosen transport (Ctrl-C to stop).
+
+    The startup banner is written to stderr so the ``stdio`` transport keeps
+    stdout as a clean MCP wire channel.
+
+    Requires the ``mcp`` extra: ``pip install 'chainweaver[mcp]'``.
+
+    Exit codes: ``1`` = malformed flow file or missing ``mcp`` extra,
+    ``2`` = flow file not found or tools module not importable.
+    """
+    server = _build_flow_server(flow_file, tools, name=name, server_prefix=prefix)
+    typer.echo(
+        f"chainweaver: serving {len(server.registered_tool_names)} flow tool(s) "
+        f"over {transport.value}: {', '.join(server.registered_tool_names)}",
+        err=True,
+    )
+    server.serve(transport=transport.value)
 
 
 # ---------------------------------------------------------------------------

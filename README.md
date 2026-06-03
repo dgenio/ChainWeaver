@@ -738,6 +738,28 @@ idempotency of side-effect tools, MCP authorisation).
 
 ---
 
+## Integrations
+
+ChainWeaver plugs into the MCP ecosystem and the major agent frameworks. Every
+entry point below ships with a runnable example or recipe.
+
+| Integration | What it does | Entry point |
+|---|---|---|
+| **MCP server** (outbound) | Expose your flows as MCP tools — agents call a whole compiled flow as one deterministic tool | [`chainweaver serve`](docs/cli.md) · [guide](docs/mcp-server.md) · [`FlowServer`](chainweaver/mcp/server.py) |
+| **MCP adapter** (inbound) | Wrap tools advertised by an MCP server as ChainWeaver `Tool`s | `chainweaver.mcp.MCPToolAdapter` |
+| **LangGraph** | Call a flow from a LangGraph node | [recipe](docs/cookbook/langgraph-node.md) · `examples/integrations/langgraph_node.py` |
+| **OpenAI Agents SDK** | Expose a flow as an Agents SDK `FunctionTool` | [recipe](docs/cookbook/openai-agents-tool.md) · `examples/integrations/openai_agents_tool.py` |
+| **LangChain / LlamaIndex** | Bidirectional tool bridges | `chainweaver.integrations.{langchain,llamaindex}` (see below) |
+
+Install the extra you need: `pip install 'chainweaver[mcp]'` (or `langgraph`,
+`openai-agents`, `langchain`, `llamaindex`). Importing any integration without its
+extra raises a clear `ImportError`.
+
+Looking to publish or list ChainWeaver in the MCP registry / awesome-lists / framework
+directories? See [`docs/distribution.md`](docs/distribution.md).
+
+---
+
 ## Error Handling
 
 All errors are typed and traceable:
@@ -1014,6 +1036,11 @@ invoked from the repository root.
 chainweaver run examples/double_add_format.flow.yaml \
     --tools examples.simple_linear_flow \
     --input '{"number": 5}'
+
+# Serve a flow as MCP tools (needs chainweaver[mcp]) — agents call the whole
+# compiled flow as one deterministic tool. See docs/mcp-server.md.
+chainweaver serve examples/double_add_format.flow.yaml \
+    --tools examples.simple_linear_flow
 
 # Validate a flow file (used by CI gates and editor tooling).
 chainweaver validate flows/etl.flow.yaml
