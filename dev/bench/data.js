@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780470297178,
+  "lastUpdate": 1780519175288,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -1872,6 +1872,78 @@ window.BENCHMARK_DATA = {
             "value": 0.3162339999107644,
             "unit": "ms",
             "extra": "min=0.31ms max=0.54ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "838428daf20e615ff2f946c5b32fdadd300f9058",
+          "message": "Merge pull request #246 from dgenio/claude/github-issue-triage-GGNsn\n\nfeat(mcp): migrate FlowServer to standalone fastmcp 3.x (#243)",
+          "timestamp": "2026-06-03T21:38:01+01:00",
+          "tree_id": "0581c9749df16863911ef52f312a8061745d0d81",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/838428daf20e615ff2f946c5b32fdadd300f9058"
+        },
+        "date": 1780519174420,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.22244900000600865,
+            "unit": "ms",
+            "extra": "min=0.16ms max=0.39ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.14621500002931498,
+            "unit": "ms",
+            "extra": "min=0.10ms max=0.33ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.31264899999428053,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.40ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.166764000027797,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.21ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.96924300001342,
+            "unit": "ms",
+            "extra": "min=101.39ms max=102.23ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.3707699999324632,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.43ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.67125400000145,
+            "unit": "ms",
+            "extra": "min=251.35ms max=251.84ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.3540989999351041,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.52ms repeats=5"
           }
         ]
       }
