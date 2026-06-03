@@ -22,43 +22,46 @@ from pathlib import Path
 from typing import Any
 
 
-def _escape(message: str) -> str:
-    """Escape a message for the data portion of a GitHub workflow command.
+def _escape_data(message: str) -> str:
+    """Escape the data (message) portion of a GitHub workflow command.
 
     See https://docs.github.com/actions/reference/workflow-commands-for-github-actions.
     """
     return message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
+def _escape_property(value: str) -> str:
+    """Escape a command *property* value (e.g. ``file=``).
+
+    Properties need the data escapes plus ``:`` and ``,`` so that Windows-style
+    paths (``C:\\...``) or paths containing commas cannot break parsing or
+    inject extra properties.
+    """
+    return _escape_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
 def _emit_error(path: str, message: str) -> None:
-    print(f"::error file={path}::{_escape(message)}")
+    print(f"::error file={_escape_property(path)}::{_escape_data(message)}")
 
 
 def render(payload: Any) -> int:
-    """Emit annotations for *payload* and return the number of invalid files."""
+    """Emit annotations for a ``check`` payload; return the invalid-file count.
+
+    Always prints a one-line summary for the recognised ``check`` shape
+    (``{"results": [...], ...}``); other shapes are ignored.
+    """
+    if not (isinstance(payload, dict) and isinstance(payload.get("results"), list)):
+        return 0
+
     invalid = 0
-
-    # ``check <dir>`` shape: {"results": [{"path", "valid", "error"?}, ...], ...}.
-    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
-        for entry in payload["results"]:
-            if isinstance(entry, dict) and entry.get("valid") is False:
-                invalid += 1
-                _emit_error(
-                    str(entry.get("path", "?")),
-                    str(entry.get("error", "invalid flow file")),
-                )
-        total = len(payload["results"])
-        print(f"chainweaver: {invalid} invalid / {total} flow file(s)")
-        return invalid
-
-    # Single-file ``validate`` shape: {"path", "valid", "error"?}.
-    if isinstance(payload, dict) and payload.get("valid") is False:
-        invalid = 1
-        _emit_error(
-            str(payload.get("path", "?")),
-            str(payload.get("error", "invalid flow file")),
-        )
-
+    for entry in payload["results"]:
+        if isinstance(entry, dict) and entry.get("valid") is False:
+            invalid += 1
+            _emit_error(
+                str(entry.get("path", "?")),
+                str(entry.get("error", "invalid flow file")),
+            )
+    print(f"chainweaver: {invalid} invalid / {len(payload['results'])} flow file(s)")
     return invalid
 
 

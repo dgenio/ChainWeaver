@@ -49,7 +49,6 @@ structural errors per file, not per line.
 | Input | Default | Description |
 |---|---|---|
 | `directory` | `.` | Directory scanned recursively for flow files. |
-| `command` | `check` | Subcommand to invoke. Designed for `check` / `validate`; other verbs run but produce no annotations. |
 | `annotations` | `true` | Emit `::error` annotations for invalid files. Set `false` to disable. |
 | `python-version` | `3.10` | Python used to install and run `chainweaver` (3.10–3.14). |
 | `chainweaver-version` | `0.11.0` | Exact PyPI version to install. Pass `""` for the latest published release. |

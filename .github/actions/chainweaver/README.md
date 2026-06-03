@@ -27,7 +27,6 @@ jobs:
 | Input | Default | Description |
 |---|---|---|
 | `directory` | `.` | Directory scanned recursively for flow files. |
-| `command` | `check` | Subcommand to invoke. Designed for `check` / `validate` (the verbs that accept `--format json`); other verbs run but produce no annotations. |
 | `annotations` | `true` | Emit GitHub `::error` annotations for each invalid flow file. Annotations are file-scoped — the flow serializer reports structural errors per file without line numbers. |
 | `python-version` | `3.10` | Python version used to install and run `chainweaver`. Must be one of ChainWeaver's supported versions (3.10–3.14). |
 | `chainweaver-version` | `0.11.0` | Exact version of `chainweaver` to install from PyPI (passed through to `pip install "chainweaver==<version>"`). Pinned by default; pass an empty string for the latest published version. |

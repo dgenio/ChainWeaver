@@ -9,13 +9,6 @@ inputs:
     description: "Directory to scan for flow files. Recursive."
     required: false
     default: "."
-  command:
-    description: |
-      Which ``chainweaver`` subcommand to invoke. Defaults to ``check``.
-      Designed for ``check`` / ``validate`` (the commands that accept
-      ``--format json``); other verbs run but produce no annotations.
-    required: false
-    default: "check"
   annotations:
     description: |
       Emit GitHub workflow ``::error`` annotations for each invalid flow file
@@ -73,11 +66,10 @@ runs:
         fi
         chainweaver --help > /dev/null
 
-    - name: Run chainweaver ${{ inputs.command }}
+    - name: Run chainweaver check
       id: run
       shell: bash
       env:
-        CW_COMMAND: ${{ inputs.command }}
         CW_DIRECTORY: ${{ inputs.directory }}
         CW_ANNOTATIONS: ${{ inputs.annotations }}
         CW_EXTRA_ARGS: ${{ inputs.extra-args }}
@@ -85,7 +77,7 @@ runs:
       run: |
         set +e
         # shellcheck disable=SC2086  # CW_EXTRA_ARGS is intentionally split.
-        chainweaver "${CW_COMMAND}" "${CW_DIRECTORY}" --format json ${CW_EXTRA_ARGS} > "${CW_RESULT}"
+        chainweaver check "${CW_DIRECTORY}" --format json ${CW_EXTRA_ARGS} > "${CW_RESULT}"
         rc=$?
         set -e
         # Surface the machine-readable result in the job log for debugging.
