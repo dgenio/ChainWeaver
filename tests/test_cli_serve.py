@@ -30,6 +30,20 @@ class TestServeCommandRegistration:
         names = [c.name for c in app.registered_commands]
         assert "serve" in names
 
+    def test_transport_enum_matches_library_literal(self) -> None:
+        """``ServeTransport`` must stay in sync with ``mcp.server.TransportName``.
+
+        The CLI mirrors the library's transport list as an ``Enum`` (typer needs
+        an enum for the option); this guard fails if a transport is added to one
+        source without the other.
+        """
+        pytest.importorskip("mcp")
+        from typing import get_args
+
+        from chainweaver.mcp.server import TransportName
+
+        assert {t.value for t in cli.ServeTransport} == set(get_args(TransportName))
+
 
 class TestBuildFlowServer:
     def test_exposes_one_tool_per_flow(self, monkeypatch: pytest.MonkeyPatch) -> None:

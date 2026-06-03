@@ -19,9 +19,9 @@ Available commands
 - ``chainweaver run <file>`` — load a flow file from disk, register tools
   from one or more Python modules, and execute the flow (issue #129).
 - ``chainweaver serve <file>`` — load a flow file + tools and expose the
-  compiled flow as MCP tools over stdio/SSE/HTTP, so MCP-aware agents call
-  the whole flow as one deterministic tool (issues #72, #230). Requires
-  the ``mcp`` extra.
+  compiled flow as MCP tools over stdio/SSE/streamable-HTTP, so MCP-aware
+  agents call the whole flow as one deterministic tool (issues #72, #230).
+  Requires the ``mcp`` extra.
 - ``chainweaver profile <traces...>`` — analyze one or more
   ``ExecutionResult`` JSON files; surface bottlenecks, per-step p50/p95/p99,
   and per-step / per-tool reliability aggregates for retries, skips,
