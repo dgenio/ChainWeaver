@@ -18,6 +18,21 @@ on:
       - ".github/workflows/action-smoke.yml"
 
 jobs:
+  unit:
+    name: annotate.py unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run annotate.py unit tests
+        # ``-o addopts=""`` drops the repo's coverage flags (pyproject scopes
+        # them to the chainweaver package, which this job does not install).
+        run: python -m pytest .github/actions/chainweaver/test_annotate.py -v -o addopts=""
+
   valid-flows:
     name: valid flows pass
     runs-on: ubuntu-latest

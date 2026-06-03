@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chainweaver check --format json` and emits inline `::error` PR annotations
   for each invalid flow file (new `annotate.py`), adds an `annotations` toggle
   input, and is covered by an `action-smoke` workflow that exercises the action
-  against valid and invalid fixtures. New docs page
+  against valid and invalid fixtures plus unit tests (`test_annotate.py`) that
+  lock the annotation escaping (`:` / `,` / `%` / CR / LF) against injection.
+  New docs page
   [`docs/github-action.md`](docs/github-action.md), surfaced from the README
   Integrations section and the distribution checklist. The `chainweaver-version`
   default is pinned to the current release (`0.11.0`); Marketplace publishing is
