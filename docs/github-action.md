@@ -32,7 +32,8 @@ If any file is malformed, the step fails and each bad file gets an inline
 ## How it works
 
 1. Sets up Python (`python-version`, default `3.10`) and `pip install`s the
-   pinned `chainweaver` release.
+   pinned `chainweaver` release with the `[yaml]` extra, so `.flow.yaml` files
+   parse out of the box.
 2. Runs `chainweaver check <directory> --format json` and prints the JSON
    result to the job log.
 3. Pipes that JSON through `annotate.py`, which emits one
