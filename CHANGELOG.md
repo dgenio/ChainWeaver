@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`chainweaver` GitHub Action — flow validation in CI** (#149): the reusable
+  composite action at `.github/actions/chainweaver` now runs
+  `chainweaver check --format json` and emits inline `::error` PR annotations
+  for each invalid flow file (new `annotate.py`), adds an `annotations` toggle
+  input, and is covered by an `action-smoke` workflow that exercises the action
+  against valid and invalid fixtures. New docs page
+  [`docs/github-action.md`](docs/github-action.md), surfaced from the README
+  Integrations section and the distribution checklist. The `chainweaver-version`
+  default is pinned to the current release (`0.11.0`); Marketplace publishing is
+  a release-time step tracked in `docs/distribution.md`.
+
 - **`chainweaver serve` — first-class MCP server** (#230): a new CLI command that
   loads a flow file plus its `--tools` modules and exposes the compiled flow as MCP
   tools over `stdio` / `sse` / `streamable-http`, so MCP-aware agents call a whole

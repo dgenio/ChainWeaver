@@ -119,6 +119,7 @@ nav:
           - Offline tool-description optimizer: cookbook/offline-description-optimizer.md
   - Integrations:
       - Use ChainWeaver as an MCP server: mcp-server.md
+      - Validate flows in CI (GitHub Action): github-action.md
       - Distribution & ecosystem listings: distribution.md
   - Reference:
       - CLI: cli.md

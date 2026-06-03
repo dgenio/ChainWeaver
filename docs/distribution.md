@@ -71,3 +71,22 @@ then submit to its community/integration surface:
       bridge.
 
 Once a listing is accepted, link it from the README **Integrations** section.
+
+## GitHub Marketplace (validation Action)
+
+The repo ships a reusable composite Action at
+[`.github/actions/chainweaver`](https://github.com/dgenio/ChainWeaver/tree/main/.github/actions/chainweaver)
+that runs `chainweaver check` against a downstream repo's flow files and emits
+inline PR annotations (see the [GitHub Action guide](github-action.md)). It is a
+distribution surface in its own right: a single `uses:` line lets other repos
+adopt flow validation.
+
+**Before submitting:**
+
+- [ ] Confirm the action's `chainweaver-version` default matches the published
+      PyPI release.
+- [ ] Tag the release so `uses: dgenio/ChainWeaver/.github/actions/chainweaver@<tag>`
+      resolves.
+- [ ] Publish the Action to the
+      [GitHub Marketplace](https://docs.github.com/actions/creating-actions/publishing-actions-in-github-marketplace)
+      from the tagged release.

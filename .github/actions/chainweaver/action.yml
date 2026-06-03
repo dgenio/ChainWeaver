@@ -1,8 +1,8 @@
 name: chainweaver
 description: |
-  Run ``chainweaver check`` (or another ``chainweaver`` CLI command) against
-  a directory of ``.flow.yaml`` / ``.flow.json`` files. Fails the workflow
-  step when validation finds an error.
+  Run ``chainweaver check`` against a directory of ``.flow.yaml`` /
+  ``.flow.json`` files and surface invalid files as inline PR annotations.
+  Fails the workflow step when validation finds an error.
 
 inputs:
   directory:
@@ -12,13 +12,17 @@ inputs:
   command:
     description: |
       Which ``chainweaver`` subcommand to invoke. Defaults to ``check``.
-      Set to ``validate``, ``inspect``, ``viz``, etc. as those verbs ship.
+      Designed for ``check`` / ``validate`` (the commands that accept
+      ``--format json``); other verbs run but produce no annotations.
     required: false
     default: "check"
-  format:
-    description: "Output format: ``table`` (human) or ``json`` (machine)."
+  annotations:
+    description: |
+      Emit GitHub workflow ``::error`` annotations for each invalid flow file
+      (``true``/``false``). Annotations are file-scoped — the flow serializer
+      reports structural errors per file without line numbers.
     required: false
-    default: "table"
+    default: "true"
   python-version:
     description: "Python version to set up. Must be one of ChainWeaver's supported versions (3.10-3.14)."
     required: false
@@ -30,7 +34,7 @@ inputs:
       Pinned by default to a known-good release; pass an empty string
       to install the latest published version.
     required: false
-    default: "0.4.0"
+    default: "0.11.0"
   extra-args:
     description: |
       Additional arguments appended verbatim to the ``chainweaver``
@@ -72,14 +76,20 @@ runs:
       env:
         CW_COMMAND: ${{ inputs.command }}
         CW_DIRECTORY: ${{ inputs.directory }}
-        CW_FORMAT: ${{ inputs.format }}
+        CW_ANNOTATIONS: ${{ inputs.annotations }}
         CW_EXTRA_ARGS: ${{ inputs.extra-args }}
+        CW_RESULT: ${{ runner.temp }}/chainweaver-result.json
       run: |
         set +e
         # shellcheck disable=SC2086  # CW_EXTRA_ARGS is intentionally split.
-        chainweaver "${CW_COMMAND}" "${CW_DIRECTORY}" --format "${CW_FORMAT}" ${CW_EXTRA_ARGS}
+        chainweaver "${CW_COMMAND}" "${CW_DIRECTORY}" --format json ${CW_EXTRA_ARGS} > "${CW_RESULT}"
         rc=$?
         set -e
+        # Surface the machine-readable result in the job log for debugging.
+        cat "${CW_RESULT}" || true
+        if [ "${CW_ANNOTATIONS}" = "true" ]; then
+          python "${GITHUB_ACTION_PATH}/annotate.py" "${CW_RESULT}"
+        fi
         echo "exit-code=${rc}" >> "${GITHUB_OUTPUT}"
         exit "${rc}"
 

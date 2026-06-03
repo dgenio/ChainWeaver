@@ -1,0 +1,52 @@
+name: action-smoke
+
+# Smoke-test the in-repo `chainweaver` composite action (#149) end-to-end:
+# a directory of valid flow files passes, an invalid file fails with a
+# non-zero exit code, and the annotation pass runs. Uses the local action
+# (`./.github/actions/chainweaver`) so changes to action.yml / annotate.py
+# are exercised on the PR that makes them.
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/chainweaver/**"
+      - ".github/workflows/action-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/chainweaver/**"
+      - ".github/workflows/action-smoke.yml"
+
+jobs:
+  valid-flows:
+    name: valid flows pass
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action against the bundled valid flow
+        id: cw
+        uses: ./.github/actions/chainweaver
+        with:
+          directory: examples
+      - name: Assert success
+        run: test "${{ steps.cw.outputs.exit-code }}" = "0"
+
+  invalid-flows:
+    name: invalid flow fails with annotation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create an invalid flow fixture
+        run: |
+          mkdir -p "${RUNNER_TEMP}/flows"
+          printf 'name: broken\nthis is: not a flow\n' > "${RUNNER_TEMP}/flows/bad.flow.yaml"
+      - name: Run action against the invalid fixture
+        id: cw
+        continue-on-error: true
+        uses: ./.github/actions/chainweaver
+        with:
+          directory: ${{ runner.temp }}/flows
+      - name: Assert failure
+        run: |
+          test "${{ steps.cw.outcome }}" = "failure"
+          test "${{ steps.cw.outputs.exit-code }}" = "1"
