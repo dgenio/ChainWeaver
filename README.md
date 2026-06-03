@@ -750,6 +750,7 @@ entry point below ships with a runnable example or recipe.
 | **LangGraph** | Call a flow from a LangGraph node | [recipe](docs/cookbook/langgraph-node.md) · `examples/integrations/langgraph_node.py` |
 | **OpenAI Agents SDK** | Expose a flow as an Agents SDK `FunctionTool` | [recipe](docs/cookbook/openai-agents-tool.md) · `examples/integrations/openai_agents_tool.py` |
 | **LangChain / LlamaIndex** | Bidirectional tool bridges | `chainweaver.integrations.{langchain,llamaindex}` (see below) |
+| **GitHub Action** | Validate `.flow.yaml` / `.flow.json` files in CI with inline PR annotations | [`.github/actions/chainweaver`](.github/actions/chainweaver) · [guide](docs/github-action.md) |
 
 Install the extra you need: `pip install 'chainweaver[mcp]'` (or `langgraph`,
 `openai-agents`, `langchain`, `llamaindex`). Importing any integration without its
