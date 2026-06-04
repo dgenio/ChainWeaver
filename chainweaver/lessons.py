@@ -31,15 +31,12 @@ Invariants
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-    from chainweaver.executor import ExecutionResult
+from chainweaver.executor import ExecutionResult
 
 
 class LessonReview(str, Enum):

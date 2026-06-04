@@ -43,7 +43,7 @@
 |-----------|----------------------------------------|-------------------------------------|-----------------|
 | **LangGraph** | No — nodes choose edges from LLM output | No (graph authored in Python; runtime LLM-routed) | *Confirmed:* opposite design. ChainWeaver is for the **known** path; LangGraph for the **decided-by-LLM** path. |
 | **LangChain LCEL** | Optional — can run model-free, ecosystem assumes models | No | *Confirmed:* closest neighbour; ChainWeaver makes determinism a hard invariant rather than an option. |
-| **LlamaIndex Workflows** | Possible — event-driven steps can be logic-driven, `run_step()` is manual | No (event topology, not a schema-compiled chain) | *Confirmed:* supports deterministic control flow but does **not** enforce no-LLM-between-steps as an invariant, and is LLM-centric by default. |
+| **LlamaIndex Workflows** | Possible — event-driven steps can be logic-driven, `run_step()` is manual | No (event topology, not a schema-compiled flow) | *Confirmed:* supports deterministic control flow but does **not** enforce no-LLM-between-steps as an invariant, and is LLM-centric by default. |
 | **OpenAI Agents SDK** | Code-first; "orchestrating via code" is a recommended deterministic pattern; handoffs are LLM tools | No — explicitly **does not** pre-define the whole graph upfront | *Confirmed:* deterministic orchestration is a *pattern you write*, not a compiled, schema-validated artifact the SDK provides. |
 | **Prefect / Dagster / Temporal** | N/A (no LLM concern) | Python DAGs / assets / durable workflows | *Confirmed:* different mission shape — scheduled/durable data jobs across time, not a single agent turn. Concepts worth borrowing: checkpoints (have: `Checkpointer` #128), retries (have: `RetryPolicy`), observability (have: OTel #126). |
 
@@ -85,7 +85,7 @@ does not cover them. Treat their positioning as open until a follow-up pass.
 LangGraph is the inverse (LLM-routed graphs). LangChain LCEL can be model-free
 but doesn't promise it. LlamaIndex Workflows and the OpenAI Agents SDK both
 *allow* deterministic control flow as a pattern, but neither **compiles a
-schema-validated tool chain** nor enforces "no LLM between steps" as an
+schema-validated tool flow** nor enforces "no LLM between steps" as an
 invariant. Prefect/Dagster/Temporal solve a different mission (durable,
 scheduled jobs), not a single agent turn.
 
@@ -103,7 +103,7 @@ external ecosystem presence and a benchmark-backed differentiator message.
 ### One-line differentiator
 
 > **ChainWeaver is the deterministic orchestration layer for MCP agents: it
-> compiles tool chains from schema metadata and runs them with no LLM between
+> compiles tool flows from schema metadata and runs them with no LLM between
 > steps — replacing repeatable model round-trips with one validated, cheaper
 > flow.**
 
