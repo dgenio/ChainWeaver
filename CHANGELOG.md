@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trace_to_lesson_candidate()` — runtime failures to reviewable lessons** (#210):
+  a new `chainweaver.lessons` module exposing `trace_to_lesson_candidate()` plus
+  `LessonCandidate`, `LessonEvidenceStep`, and the `LessonReview` outcome enum.
+  It projects an `ExecutionResult` into a neutral, workflow-scoped lesson
+  candidate the Weaver Stack's `lessonweaver` (or any reviewer) can promote into
+  a skill instruction, eval, guardrail, or workflow change. ChainWeaver
+  identifies *where* a deterministic workflow failed but never asserts the
+  lesson outcome, and the candidate is a plain Pydantic model — **no hard
+  dependency on `lessonweaver`**. New design note
+  [`docs/lessons-from-traces.md`](docs/lessons-from-traces.md), linked from the
+  README Weaver Stack table. Banned from `executor.py` like the other offline
+  analysis modules.
+- **Ecosystem-validation research synthesis** (#17): a one-time positioning
+  spike committed as [`docs/research/ecosystem-validation.md`](docs/research/ecosystem-validation.md)
+  — overlap analysis vs LangGraph / LangChain LCEL / LlamaIndex Workflows /
+  OpenAI Agents SDK / Prefect / Dagster / Temporal, the MCP context-bloat
+  evidence, a one-line differentiator, and a findings→backlog priority table.
 - **`chainweaver` GitHub Action — flow validation in CI** (#149): the reusable
   composite action at `.github/actions/chainweaver` now runs
   `chainweaver check --format json` and emits inline `::error` PR annotations

@@ -72,6 +72,9 @@
     "InvalidFlowVersionError",
     "KernelInvocationError",
     "LLMProposal",
+    "LessonCandidate",
+    "LessonEvidenceStep",
+    "LessonReview",
     "MCPError",
     "MCPSchemaConversionError",
     "MCPToolInvocationError",
@@ -141,6 +144,7 @@
     "schema_fingerprint",
     "suggest_optimizations",
     "tool",
+    "trace_to_lesson_candidate",
     "validate_dag_topology",
     "write_proposals"
   ],
@@ -743,6 +747,42 @@
       "qualname": "LLMProposal",
       "signature": "(proposed_flow: Flow, rationale: str, confidence: float, source: str = 'llm-compiler') -> None"
     },
+    "LessonCandidate": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "error_message": "str | NoneType",
+        "error_type": "str | NoneType",
+        "evidence": "tuple[chainweaver.lessons.LessonEvidenceStep, Ellipsis]",
+        "failing_step_index": "int | NoneType",
+        "failing_tool": "str | NoneType",
+        "scope": "str",
+        "succeeded": "bool",
+        "suggested_reviews": "tuple[chainweaver.lessons.LessonReview, Ellipsis]",
+        "summary": "str",
+        "trace_id": "str",
+        "workflow": "str",
+        "workflow_version": "str"
+      },
+      "module": "chainweaver.lessons",
+      "qualname": "LessonCandidate"
+    },
+    "LessonEvidenceStep": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "error_message": "str | NoneType",
+        "error_type": "str | NoneType",
+        "step_index": "int",
+        "success": "bool",
+        "tool_name": "str"
+      },
+      "module": "chainweaver.lessons",
+      "qualname": "LessonEvidenceStep"
+    },
+    "LessonReview": {
+      "kind": "enum",
+      "module": "chainweaver.lessons",
+      "qualname": "LessonReview"
+    },
     "MCPError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1266,6 +1306,12 @@
       "module": "chainweaver.decorators",
       "qualname": "tool",
       "signature": "(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None, output_schema: type[BaseModel] | None = None, timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool = True) -> _DecoratedTool | Callable[[Callable[..., Any]], _DecoratedTool]"
+    },
+    "trace_to_lesson_candidate": {
+      "kind": "function",
+      "module": "chainweaver.lessons",
+      "qualname": "trace_to_lesson_candidate",
+      "signature": "(result: ExecutionResult, *, workflow: str | None = None, suggested_reviews: Iterable[LessonReview] = ()) -> LessonCandidate"
     },
     "validate_dag_topology": {
       "kind": "function",
