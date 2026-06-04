@@ -37,14 +37,17 @@ conforming to the
 
 **Before submitting:**
 
+- [x] Finalize the package launch in the manifest so a fresh client can start a
+      working server: `server.json` now carries a `--from 'chainweaver[mcp]'`
+      `uvx` runtime argument (resolving the `mcp` extra) plus a required
+      `flow_file` positional. `tests/test_server_manifest.py` guards this.
+- [ ] Publish `chainweaver==0.11.0` (including the `mcp` extra) to PyPI so the
+      manifest `version` resolves to an installable release (currently PyPI's
+      latest is `0.1.0`; see [#250](https://github.com/dgenio/ChainWeaver/issues/250)).
 - [ ] Validate and publish with the official
       [`mcp-publisher`](https://github.com/modelcontextprotocol/registry) tool —
-      it validates `server.json` against the live schema on publish.
-- [ ] Confirm the `version` field matches the published PyPI release.
-- [ ] Because `serve` needs a flow-file argument and the `mcp` extra, finalize the
-      package launch in the manifest (e.g. a `--from 'chainweaver[mcp]'` runtime
-      argument for `uvx`, plus the flow path as a templated `packageArguments`
-      value) so a fresh client can launch a working server.
+      it validates `server.json` against the live schema on publish. Confirm the
+      `version` field matches the published PyPI release first.
 
 ## awesome-* lists
 
