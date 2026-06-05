@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780635350995,
+  "lastUpdate": 1780639057781,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2232,6 +2232,78 @@ window.BENCHMARK_DATA = {
             "value": 0.2437579998968431,
             "unit": "ms",
             "extra": "min=0.22ms max=0.26ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc100b5c19d79eee88c27ab37bf102c5668c7284",
+          "message": "Merge pull request #252 from dgenio/claude/copilot-agent-setup-dF6Jg\n\nfeat(playground): interactive zero-install Streamlit playground (#81)",
+          "timestamp": "2026-06-05T06:56:21+01:00",
+          "tree_id": "1990add65cbc74420d1d21c289aec48494fe97b3",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/dc100b5c19d79eee88c27ab37bf102c5668c7284"
+        },
+        "date": 1780639057065,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.20607899999447454,
+            "unit": "ms",
+            "extra": "min=0.18ms max=0.26ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.14376599999366135,
+            "unit": "ms",
+            "extra": "min=0.13ms max=0.19ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.2675019999998085,
+            "unit": "ms",
+            "extra": "min=0.25ms max=0.40ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.15821699999207794,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.05291399999794,
+            "unit": "ms",
+            "extra": "min=101.99ms max=102.19ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.3792290000177445,
+            "unit": "ms",
+            "extra": "min=0.38ms max=0.40ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.4313540000046,
+            "unit": "ms",
+            "extra": "min=251.10ms max=251.52ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.3067319999843221,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.33ms repeats=5"
           }
         ]
       }
