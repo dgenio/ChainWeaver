@@ -84,6 +84,12 @@ full end-to-end demo that talks to the server with a real MCP client lives in
 ## Publishing to the MCP ecosystem
 
 A ready-to-submit MCP registry manifest ships at
-[`server.json`](https://github.com/dgenio/ChainWeaver/blob/main/server.json). See
-[Distribution & ecosystem listings](distribution.md) for the registry and
+[`server.json`](https://github.com/dgenio/ChainWeaver/blob/main/server.json). It
+launches the server with a fresh-client command that resolves the `mcp` extra:
+
+```bash
+uvx --from 'chainweaver[mcp]' chainweaver serve /abs/path/to/your.flow.yaml
+```
+
+See [Distribution & ecosystem listings](distribution.md) for the registry and
 awesome-list submission checklist.

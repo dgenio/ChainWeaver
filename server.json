@@ -14,6 +14,14 @@
       "identifier": "chainweaver",
       "version": "0.11.0",
       "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "chainweaver[mcp]",
+          "description": "Resolve the MCP extra so a fresh client installs the fastmcp/mcp dependencies the serve command needs."
+        }
+      ],
       "transport": {
         "type": "stdio"
       },

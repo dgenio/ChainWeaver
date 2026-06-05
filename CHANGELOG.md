@@ -158,6 +158,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `pydantic>=2.11` (was `>=2.0`). Removed the speculative `mcp<2` upper-bound
   cap (now `mcp>=1.0`), per the no-caps policy.
 
+### Fixed
+
+- **MCP registry manifest now resolves the `mcp` extra on a fresh launch**
+  (#250): `server.json` carries a `--from 'chainweaver[mcp]'` `uvx` runtime
+  argument so a fresh client installs `fastmcp`/`mcp` before running
+  `chainweaver serve <flow_file>`, instead of launching bare `chainweaver`
+  (which lacks the MCP dependencies). New `tests/test_server_manifest.py` guards
+  the manifest version alignment and the `[mcp]`-extra launch. Publishing
+  `chainweaver==0.11.0` to PyPI and running `mcp-publisher` remain external
+  prerequisites tracked in #250 / #230.
+
 ## [0.11.0] - 2026-05-29
 
 ### Added

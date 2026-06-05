@@ -21,6 +21,11 @@ from chainweaver import (
 )
 from chainweaver.exceptions import FlowCancelledError
 
+# Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
+# never to trip on a loaded CI runner, yet bounded so a logic error fails fast
+# instead of hanging the suite.
+_BARRIER_TIMEOUT_S = 5.0
+
 # ---------------------------------------------------------------------------
 # Schemas + tools
 # ---------------------------------------------------------------------------
@@ -42,16 +47,29 @@ class _BOut(BaseModel):
     b: int
 
 
-def _make_executor(*, sleep_a: float = 0.0) -> FlowExecutor:
+def _make_executor(
+    *,
+    sleep_a: float = 0.0,
+    gate: tuple[threading.Event, threading.Event] | None = None,
+) -> FlowExecutor:
     """A 2-step linear flow ``slow_then_fast`` and a 2-level DAG ``slow_dag``.
 
     ``step_a`` (the first linear step / the DAG root) sleeps ``sleep_a``
-    seconds so a deadline or a cross-thread cancel can land at the boundary
-    *after* it completes and *before* the second step runs.
+    seconds so a deadline can land at the boundary *after* it completes and
+    *before* the second step runs.
+
+    When ``gate`` is supplied, ``step_a`` instead sets the first event on entry
+    and blocks on the second before returning. This lets a test drive a
+    cross-thread cancel to land mid-step deterministically — no sleep race
+    (#244).
     """
 
     def _slow_a(inp: _NIn) -> dict[str, Any]:
-        if sleep_a:
+        if gate is not None:
+            entered, proceed = gate
+            entered.set()
+            proceed.wait(timeout=_BARRIER_TIMEOUT_S)
+        elif sleep_a:
             time.sleep(sleep_a)
         return {"a": inp.n + 1}
 
@@ -163,16 +181,20 @@ class TestLinearCancellation:
         assert err.result.execution_log[0].outputs == {"a": 2}
 
     def test_token_cancel_between_steps(self) -> None:
-        executor = _make_executor(sleep_a=0.15)
+        entered = threading.Event()
+        proceed = threading.Event()
+        executor = _make_executor(gate=(entered, proceed))
         token = CancellationToken()
 
-        # Cancel partway through step 0 so the request is visible at the
-        # boundary before step 1.
-        def _cancel_soon() -> None:
-            time.sleep(0.05)
+        # Deterministic barrier (#244): cancel while step 0 is in-flight, then
+        # release it so the request is guaranteed visible at the boundary
+        # before step 1 — no reliance on thread scheduling.
+        def _cancel_in_step() -> None:
+            entered.wait(timeout=_BARRIER_TIMEOUT_S)
             token.cancel()
+            proceed.set()
 
-        canceller = threading.Thread(target=_cancel_soon)
+        canceller = threading.Thread(target=_cancel_in_step)
         canceller.start()
         try:
             with pytest.raises(FlowCancelledError) as exc_info:

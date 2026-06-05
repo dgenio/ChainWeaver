@@ -26,6 +26,11 @@ from chainweaver.exceptions import (
     FlowExecutionError,
 )
 
+# Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
+# never to trip on a loaded CI runner, yet bounded so a logic error fails fast
+# instead of hanging the suite.
+_BARRIER_TIMEOUT_S = 5.0
+
 # ---------------------------------------------------------------------------
 # Schemas + tools
 # ---------------------------------------------------------------------------
@@ -382,17 +387,29 @@ class TestDagAndAsync:
 # ---------------------------------------------------------------------------
 
 
-def _slow_subflow_executor(*, sleep_a: float) -> FlowExecutor:
+def _slow_subflow_executor(
+    *,
+    sleep_a: float = 0.0,
+    gate: tuple[threading.Event, threading.Event] | None = None,
+) -> FlowExecutor:
     """Parent flows that compose a 2-step sub-flow whose first tool sleeps.
 
-    ``t_slow`` sleeps ``sleep_a`` seconds so a deadline or cross-thread cancel
-    lands at the boundary *inside* the sub-flow — after its first step, before
-    its second — which only the parent's forwarded ``deadline`` /
-    ``cancel_token`` can observe.
+    ``t_slow`` sleeps ``sleep_a`` seconds so a deadline lands at the boundary
+    *inside* the sub-flow — after its first step, before its second — which
+    only the parent's forwarded ``deadline`` / ``cancel_token`` can observe.
+
+    When ``gate`` is supplied, ``t_slow`` instead sets the first event on entry
+    and blocks on the second before returning, so a test can drive a
+    cross-thread cancel into the sub-flow deterministically — no sleep race
+    (#244).
     """
 
     def _slow_inc(inp: _NIn) -> dict[str, Any]:
-        if sleep_a:
+        if gate is not None:
+            entered, proceed = gate
+            entered.set()
+            proceed.wait(timeout=_BARRIER_TIMEOUT_S)
+        elif sleep_a:
             time.sleep(sleep_a)
         return {"a": inp.n + 1}
 
@@ -470,14 +487,20 @@ class TestCompositionCancellation:
         assert composed.sub_result.execution_log[0].outputs == {"a": 2}
 
     def test_token_cancel_observed_in_subflow(self) -> None:
-        ex = _slow_subflow_executor(sleep_a=0.15)
+        entered = threading.Event()
+        proceed = threading.Event()
+        ex = _slow_subflow_executor(gate=(entered, proceed))
         token = CancellationToken()
 
-        def _cancel_soon() -> None:
-            time.sleep(0.05)
+        # Deterministic barrier (#244): cancel while the sub-flow's first step
+        # is in-flight, then release it so the request is guaranteed visible at
+        # the boundary before the sub-flow's second step.
+        def _cancel_in_step() -> None:
+            entered.wait(timeout=_BARRIER_TIMEOUT_S)
             token.cancel()
+            proceed.set()
 
-        canceller = threading.Thread(target=_cancel_soon)
+        canceller = threading.Thread(target=_cancel_in_step)
         canceller.start()
         try:
             with pytest.raises(FlowCancelledError) as exc_info:
