@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Interactive web playground — zero-install onboarding** (#81): a new
+  `playground/` directory with a Streamlit app (`playground/app.py`) that lets
+  visitors pick a pre-loaded flow, edit its JSON input, run it, and inspect the
+  step-by-step LLM-free trace and a Mermaid execution diagram — driven by the
+  real `FlowExecutor`. Ships three example flows (arithmetic, a data flow,
+  an MCP-style search), stateless `?share=<token>` links that round-trip a run
+  through the URL, and deploy instructions for Streamlit Community Cloud. All
+  flow-building/execution/diagram/share logic lives in a Streamlit-free
+  `playground/core.py` covered by `tests/test_playground.py`; the app shell is a
+  thin UI layer. Linked from the README.
+
 - **`trace_to_lesson_candidate()` — runtime failures to reviewable lessons** (#210):
   a new `chainweaver.lessons` module exposing `trace_to_lesson_candidate()` plus
   `LessonCandidate`, `LessonEvidenceStep`, and the `LessonReview` outcome enum.
