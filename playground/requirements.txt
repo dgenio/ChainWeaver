@@ -1,0 +1,13 @@
+# Dependencies for the ChainWeaver interactive playground (issue #81).
+#
+# Run locally:
+#   pip install -r playground/requirements.txt
+#   streamlit run playground/app.py
+#
+# For Streamlit Community Cloud, point the app at playground/app.py and this
+# file as the requirements path. Replace the released package below with
+# `-e .` (an editable install of this repo) to run the playground against
+# local, unreleased changes.
+streamlit>=1.40
+streamlit-mermaid>=0.3.0
+chainweaver

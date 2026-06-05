@@ -104,6 +104,10 @@ examples/
 ├── coding_agent_*.py        Coding-agent workflow templates (#173): PR review, changelog, debug-log triage
 ├── cookbook/                Paired scripts for docs/cookbook/ recipes (#146)
 └── (other domain-specific demos)
+playground/                  Streamlit zero-install onboarding playground (#81); outside the package, not lint/type-gated
+├── app.py                   Thin Streamlit UI shell
+├── core.py                  Streamlit-free flow builders + headless runner + Mermaid + share codec (tests/test_playground.py)
+└── requirements.txt         streamlit + streamlit-mermaid + chainweaver
 docs/
 ├── index.md                 Hosted-site landing page
 ├── boundaries.md            Fit / non-fit guidance (#169)

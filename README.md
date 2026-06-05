@@ -52,7 +52,7 @@ result = executor.execute_flow("calc", {"number": 5})
 
 > See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
 
-**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Playground](#interactive-playground) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
 
 ---
 
@@ -522,6 +522,27 @@ flow = (
 - **`.with_trigger(conditions)`** — optional free-form trigger metadata.
 - **`.build()`** — returns a validated `Flow`; raises `FlowBuilderError` if
   `name` or `description` is missing.
+
+---
+
+## Interactive playground
+
+Want to try ChainWeaver without installing anything locally? The
+[`playground/`](playground/) directory ships a Streamlit app that lets you pick
+a pre-loaded flow, edit its JSON input, run it, and watch the step-by-step,
+**LLM-free** execution trace with a Mermaid diagram — the same `FlowExecutor`
+the library ships.
+
+```bash
+pip install -r playground/requirements.txt
+streamlit run playground/app.py
+```
+
+It ships three example flows (arithmetic, a data pipeline, and an MCP-style
+search), produces shareable `?share=<token>` links that round-trip a run through
+the URL, and is fully stateless so it deploys to Streamlit Community Cloud with
+no backend. See [`playground/README.md`](playground/README.md) for local-run and
+deployment instructions.
 
 ---
 
