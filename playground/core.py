@@ -331,6 +331,7 @@ def trace_rows(result: ExecutionResult) -> list[dict[str, Any]]:
             "tool": record.tool_name,
             "success": record.success,
             "duration_ms": round(record.duration_ms, 3),
+            "inputs": record.inputs,
             "outputs": record.outputs,
             "error": record.error_message,
         }

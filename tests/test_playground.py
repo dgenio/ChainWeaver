@@ -57,6 +57,9 @@ def test_every_example_runs_on_its_default_input(core: ModuleType) -> None:
         rows = core.trace_rows(result)
         assert len(rows) == 3
         assert all(row["success"] for row in rows)
+        # Issue #81 acceptance: the trace exposes inputs *and* outputs per step.
+        assert all("inputs" in row and "outputs" in row for row in rows), name
+        assert all(row["inputs"] is not None for row in rows), name
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +135,12 @@ def test_share_roundtrip(core: ModuleType) -> None:
 def test_decode_rejects_malformed_token(core: ModuleType) -> None:
     with pytest.raises(ValueError, match="Malformed share token"):
         core.decode_share("!!!not-base64!!!")
+
+
+def test_decode_rejects_oversized_token(core: ModuleType) -> None:
+    oversized = "A" * (core._MAX_SHARE_TOKEN_LEN + 1)
+    with pytest.raises(ValueError, match="too long"):
+        core.decode_share(oversized)
 
 
 def test_decode_rejects_token_missing_fields(core: ModuleType) -> None:
