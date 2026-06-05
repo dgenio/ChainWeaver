@@ -26,6 +26,11 @@ from chainweaver.exceptions import (
     FlowExecutionError,
 )
 
+# Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
+# never to trip on a loaded CI runner, yet bounded so a logic error fails fast
+# instead of hanging the suite.
+_BARRIER_TIMEOUT_S = 5.0
+
 # ---------------------------------------------------------------------------
 # Schemas + tools
 # ---------------------------------------------------------------------------
@@ -403,7 +408,7 @@ def _slow_subflow_executor(
         if gate is not None:
             entered, proceed = gate
             entered.set()
-            proceed.wait(timeout=5.0)
+            proceed.wait(timeout=_BARRIER_TIMEOUT_S)
         elif sleep_a:
             time.sleep(sleep_a)
         return {"a": inp.n + 1}
@@ -491,7 +496,7 @@ class TestCompositionCancellation:
         # is in-flight, then release it so the request is guaranteed visible at
         # the boundary before the sub-flow's second step.
         def _cancel_in_step() -> None:
-            entered.wait(timeout=5.0)
+            entered.wait(timeout=_BARRIER_TIMEOUT_S)
             token.cancel()
             proceed.set()
 

@@ -21,6 +21,11 @@ from chainweaver import (
 )
 from chainweaver.exceptions import FlowCancelledError
 
+# Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
+# never to trip on a loaded CI runner, yet bounded so a logic error fails fast
+# instead of hanging the suite.
+_BARRIER_TIMEOUT_S = 5.0
+
 # ---------------------------------------------------------------------------
 # Schemas + tools
 # ---------------------------------------------------------------------------
@@ -63,7 +68,7 @@ def _make_executor(
         if gate is not None:
             entered, proceed = gate
             entered.set()
-            proceed.wait(timeout=5.0)
+            proceed.wait(timeout=_BARRIER_TIMEOUT_S)
         elif sleep_a:
             time.sleep(sleep_a)
         return {"a": inp.n + 1}
@@ -185,7 +190,7 @@ class TestLinearCancellation:
         # release it so the request is guaranteed visible at the boundary
         # before step 1 — no reliance on thread scheduling.
         def _cancel_in_step() -> None:
-            entered.wait(timeout=5.0)
+            entered.wait(timeout=_BARRIER_TIMEOUT_S)
             token.cancel()
             proceed.set()
 
