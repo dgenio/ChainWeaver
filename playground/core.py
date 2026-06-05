@@ -104,7 +104,7 @@ def _build_arithmetic() -> tuple[Flow, list[Tool]]:
 
 
 # ---------------------------------------------------------------------------
-# Example 2 — data pipeline: extract → filter_positive → summarize
+# Example 2 — data flow: extract → filter_positive → summarize
 # ---------------------------------------------------------------------------
 
 
@@ -140,7 +140,7 @@ def _summarize_fn(inp: _NumbersInput) -> dict[str, Any]:
     return {"count": len(inp.numbers), "total": sum(inp.numbers)}
 
 
-def _build_data_pipeline() -> tuple[Flow, list[Tool]]:
+def _build_data_flow() -> tuple[Flow, list[Tool]]:
     tools = [
         Tool(
             name="extract",
@@ -165,7 +165,7 @@ def _build_data_pipeline() -> tuple[Flow, list[Tool]]:
         ),
     ]
     flow = Flow(
-        name="data_pipeline",
+        name="data_flow",
         description="Extract numbers from a source, drop non-positives, and summarize.",
         steps=[
             FlowStep(tool_name="extract", input_mapping={"source": "source"}),
@@ -280,10 +280,10 @@ EXAMPLES: dict[str, Example] = {
         builder=_build_arithmetic,
         default_input={"number": 5},
     ),
-    "data_pipeline": Example(
-        name="data_pipeline",
-        description="Data pipeline: extract numbers, drop non-positives, summarize.",
-        builder=_build_data_pipeline,
+    "data_flow": Example(
+        name="data_flow",
+        description="Data flow: extract numbers, drop non-positives, summarize.",
+        builder=_build_data_flow,
         default_input={"source": "sales"},
     ),
     "mcp_search": Example(
@@ -354,6 +354,12 @@ def result_diagram(result: ExecutionResult) -> str:
 # Share codec — encode a (flow, input) selection into a URL-safe token
 # ---------------------------------------------------------------------------
 
+# Cap the size of a share token we are willing to decode. The token base64-
+# encodes a small JSON ``{"flow", "input"}`` payload, so a few KB is generous;
+# the cap stops an accidental or malicious huge query string from forcing a
+# large base64 + JSON parse on a shared deployment.
+_MAX_SHARE_TOKEN_LEN = 4096
+
 
 def encode_share(name: str, initial_input: dict[str, Any]) -> str:
     """Encode a flow name + initial input into a URL-safe base64 token."""
@@ -365,9 +371,13 @@ def decode_share(token: str) -> tuple[str, dict[str, Any]]:
     """Decode a share token back into ``(flow_name, initial_input)``.
 
     Raises:
-        ValueError: when the token is not valid base64 / JSON or is missing the
-            expected ``flow`` / ``input`` fields.
+        ValueError: when the token is too long, is not valid base64 / JSON, or
+            is missing the expected ``flow`` / ``input`` fields.
     """
+    if len(token) > _MAX_SHARE_TOKEN_LEN:
+        raise ValueError(
+            f"Share token is too long ({len(token)} > {_MAX_SHARE_TOKEN_LEN} characters)."
+        )
     try:
         raw = base64.urlsafe_b64decode(token.encode("ascii"))
         data = json.loads(raw.decode("utf-8"))

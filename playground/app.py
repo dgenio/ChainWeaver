@@ -20,8 +20,11 @@ import streamlit as st
 
 # ``streamlit run`` executes this file as a script, so the sibling ``core``
 # module is not importable as ``playground.core`` without help.  Add this
-# directory to the path and import it as a top-level module.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# directory to the path and import it as a top-level module.  Streamlit reruns
+# this script on most UI interactions, so guard the insertion to keep
+# ``sys.path`` free of accumulating duplicate entries.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import core
 
@@ -55,8 +58,15 @@ def main() -> None:
     shared_name: str | None = None
     shared_input: dict[str, object] | None = None
     if "share" in params:
+        share_param = params["share"]
+        # ``st.query_params`` returns a single string in the current API, but a
+        # repeated ``?share=a&share=b`` (or the legacy list-valued API) can hand
+        # back a list — normalize to the last value before decoding so a stray
+        # list never reaches ``decode_share`` and raises an uncaught error.
+        if isinstance(share_param, (list, tuple)):
+            share_param = share_param[-1] if share_param else ""
         try:
-            shared_name, shared_input = core.decode_share(params["share"])
+            shared_name, shared_input = core.decode_share(share_param)
         except ValueError as exc:
             st.warning(f"Ignoring invalid share link: {exc}")
 

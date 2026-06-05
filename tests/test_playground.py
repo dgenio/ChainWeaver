@@ -69,8 +69,8 @@ def test_arithmetic_example_exact_output(core: ModuleType) -> None:
     assert result.final_output == {"number": 5, "value": 20, "result": "Final value: 20"}
 
 
-def test_data_pipeline_drops_non_positive(core: ModuleType) -> None:
-    result = core.run_example("data_pipeline", {"source": "sales"})
+def test_data_flow_drops_non_positive(core: ModuleType) -> None:
+    result = core.run_example("data_flow", {"source": "sales"})
     # "sales" → seed = sum(ord) % 7 = 4 → [1, 4, -4, 6, 0] → positives [1, 4, 6].
     assert result.final_output == {
         "source": "sales",
@@ -123,9 +123,9 @@ def test_result_diagram_marks_steps(core: ModuleType) -> None:
 
 
 def test_share_roundtrip(core: ModuleType) -> None:
-    token = core.encode_share("data_pipeline", {"source": "demo"})
+    token = core.encode_share("data_flow", {"source": "demo"})
     name, initial_input = core.decode_share(token)
-    assert name == "data_pipeline"
+    assert name == "data_flow"
     assert initial_input == {"source": "demo"}
 
 

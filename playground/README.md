@@ -8,7 +8,7 @@ flow, edit its initial input as JSON, run it, and watch the step-by-step,
 ## Features
 
 - **Three pre-loaded example flows** — arithmetic (`double → add_ten → format`),
-  a data pipeline (`extract → filter_positive → summarize`), and an MCP-style
+  a data flow (`extract → filter_positive → summarize`), and an MCP-style
   flow (`search → extract_facts → format_answer`). All deterministic, no I/O,
   no randomness.
 - **Editable JSON input** — change the input and re-run to see results change.
@@ -18,6 +18,15 @@ flow, edit its initial input as JSON, run it, and watch the step-by-step,
 - **Share links** — every run produces a `?share=<token>` query string that
   encodes the flow + input so a run round-trips through the URL. No server-side
   state.
+
+## Scope
+
+The playground demonstrates **deterministic, LLM-free execution** with an
+editable **input**. Editing tool *functions* live (arbitrary user-supplied
+Python) is intentionally out of scope: the hosted app runs untrusted input, so
+executing user code would be a security risk and would break the determinism the
+playground exists to show. To author your own tools and flows, use the library
+directly — see the top-level [README](../README.md).
 
 ## Run locally
 

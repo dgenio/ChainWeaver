@@ -538,7 +538,7 @@ pip install -r playground/requirements.txt
 streamlit run playground/app.py
 ```
 
-It ships three example flows (arithmetic, a data pipeline, and an MCP-style
+It ships three example flows (arithmetic, a data flow, and an MCP-style
 search), produces shareable `?share=<token>` links that round-trip a run through
 the URL, and is fully stateless so it deploys to Streamlit Community Cloud with
 no backend. See [`playground/README.md`](playground/README.md) for local-run and
