@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780897162596,
+  "lastUpdate": 1780906467783,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2376,6 +2376,78 @@ window.BENCHMARK_DATA = {
             "value": 0.39028499986670795,
             "unit": "ms",
             "extra": "min=0.38ms max=0.39ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c14116f6893977c5705d4f5234537b464fd3698c",
+          "message": "Merge pull request #310 from dgenio/codex/fix-230-mcp-registry-publish\n\n[codex] Fix MCP registry publication prerequisites",
+          "timestamp": "2026-06-08T09:13:02+01:00",
+          "tree_id": "59f9e56879f2c686924f640c4ddc4cdc8b04b1ee",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/c14116f6893977c5705d4f5234537b464fd3698c"
+        },
+        "date": 1780906466555,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.1814630000467332,
+            "unit": "ms",
+            "extra": "min=0.16ms max=0.21ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.12728100006142995,
+            "unit": "ms",
+            "extra": "min=0.11ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.2138919999765676,
+            "unit": "ms",
+            "extra": "min=0.21ms max=0.35ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.13201700005538441,
+            "unit": "ms",
+            "extra": "min=0.13ms max=0.15ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.75989900000104,
+            "unit": "ms",
+            "extra": "min=101.74ms max=102.08ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.33712700002297424,
+            "unit": "ms",
+            "extra": "min=0.33ms max=0.39ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.27373599997327,
+            "unit": "ms",
+            "extra": "min=251.24ms max=251.33ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.2698960000770967,
+            "unit": "ms",
+            "extra": "min=0.27ms max=0.29ms repeats=5"
           }
         ]
       }
