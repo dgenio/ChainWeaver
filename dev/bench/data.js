@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780639057781,
+  "lastUpdate": 1780897162596,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2304,6 +2304,78 @@ window.BENCHMARK_DATA = {
             "value": 0.3067319999843221,
             "unit": "ms",
             "extra": "min=0.28ms max=0.33ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "diogo.ansantos@nos.pt",
+            "name": "Diogo Andre Santos",
+            "username": "dgenio"
+          },
+          "distinct": true,
+          "id": "013b71530fdee64ad8419f283b2d153afd2a6825",
+          "message": "release: bump version to 0.12.0\n\n- pyproject.toml: 0.11.0 -> 0.12.0\n\n- chainweaver/__init__.py: __version__ 0.11.0 -> 0.12.0\n\n- server.json: MCP manifest version 0.11.0 -> 0.12.0\n\n- CHANGELOG.md: promote [Unreleased] to [0.12.0] - 2026-06-08\n\n- .github/actions/chainweaver: action.yml default + README examples 0.11.0 -> 0.12.0\n\n- docs/github-action.md: version references 0.11.0 -> 0.12.0\n\n- docs/SPEC_COMPAT.md: weaver-contracts version 0.6.0 -> 0.7.0",
+          "timestamp": "2026-06-08T06:37:02+01:00",
+          "tree_id": "c59f26f6fdd544a8857150e24c653fa56165dc7b",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/013b71530fdee64ad8419f283b2d153afd2a6825"
+        },
+        "date": 1780897162263,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.2192729999705989,
+            "unit": "ms",
+            "extra": "min=0.20ms max=0.27ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.15416799999456998,
+            "unit": "ms",
+            "extra": "min=0.14ms max=0.20ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.27218200000334036,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.43ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.16338999978415814,
+            "unit": "ms",
+            "extra": "min=0.16ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.63831800000389,
+            "unit": "ms",
+            "extra": "min=102.11ms max=102.88ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.5018199998403361,
+            "unit": "ms",
+            "extra": "min=0.44ms max=0.57ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.8403630000421,
+            "unit": "ms",
+            "extra": "min=251.71ms max=251.87ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.39028499986670795,
+            "unit": "ms",
+            "extra": "min=0.38ms max=0.39ms repeats=5"
           }
         ]
       }
