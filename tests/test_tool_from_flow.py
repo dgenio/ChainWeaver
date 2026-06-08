@@ -548,7 +548,7 @@ class TestFromFlowSafetyDerivation:
     - ``side_effects`` and ``stability`` and ``determinism_level`` pick the
       worst (highest-ordered) value seen.
     - ``idempotent`` and ``cacheable`` use ``all()`` — one False contaminates.
-    - ``requires_review`` uses ``any()`` — one True contaminates.
+    - ``requires_approval`` uses ``any()`` — one True contaminates.
 
     A caller can override the derivation entirely by passing
     ``safety=ToolSafetyContract(...)`` to :meth:`Tool.from_flow`.
@@ -643,7 +643,7 @@ class TestFromFlowSafetyDerivation:
         wrapped = Tool.from_flow(flow, ex)
         assert wrapped.safety.side_effects is SideEffectLevel.EXTERNAL
 
-    def test_requires_review_propagates(
+    def test_requires_approval_propagates(
         self,
         double_tool: Tool,
         add_ten_tool: Tool,
@@ -655,7 +655,10 @@ class TestFromFlowSafetyDerivation:
             input_schema=double_tool.input_schema,
             output_schema=double_tool.output_schema,
             fn=double_tool.fn,
-            safety=ToolSafetyContract(requires_review=True),
+            safety=ToolSafetyContract(
+                requires_approval=True,
+                approval_reason="Human review required.",
+            ),
         )
         flow = self._three_step_flow()
         registry = FlowRegistry()
@@ -666,7 +669,8 @@ class TestFromFlowSafetyDerivation:
         ex.register_tool(format_tool)
 
         wrapped = Tool.from_flow(flow, ex)
-        assert wrapped.safety.requires_review is True
+        assert wrapped.safety.requires_approval is True
+        assert wrapped.safety.approval_reason == "Human review required."
 
     def test_explicit_override_wins(
         self,
@@ -690,7 +694,8 @@ class TestFromFlowSafetyDerivation:
             determinism_level=DeterminismLevel.NONE,
             idempotent=False,
             cacheable=False,
-            requires_review=True,
+            requires_approval=True,
+            approval_reason="Explicit override.",
         )
         wrapped = Tool.from_flow(flow, ex, safety=override)
         assert wrapped.safety == override
@@ -807,6 +812,7 @@ class TestToolCacheableReconciliation:
 class TestToolSafetyAttribute:
     def test_default_safety_present_on_tool(self, double_tool: Tool) -> None:
         assert double_tool.safety == ToolSafetyContract()
+        assert double_tool.safety_declared is False
 
     def test_explicit_safety_preserved(self) -> None:
         explicit = ToolSafetyContract(
@@ -828,3 +834,4 @@ class TestToolSafetyAttribute:
             safety=explicit,
         )
         assert tool.safety is explicit
+        assert tool.safety_declared is True

@@ -9,7 +9,17 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import BaseModel
 
-from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep, Tool
+from chainweaver import (
+    Flow,
+    FlowExecutor,
+    FlowGovernance,
+    FlowLifecycle,
+    FlowRegistry,
+    FlowStep,
+    SideEffectLevel,
+    Tool,
+    ToolSafetyContract,
+)
 from chainweaver.mcp import FlowServer
 
 
@@ -47,6 +57,16 @@ def executor_with_flow() -> FlowExecutor:
         ],
         input_schema_ref=Flow.schema_ref_from(_NumIn),
         output_schema_ref=Flow.schema_ref_from(_NumOut),
+        governance=FlowGovernance(
+            owner="platform",
+            replaces_tools=("double", "add_one"),
+            estimated_model_calls_removed=2,
+            estimated_token_savings=500,
+        ),
+        safety=ToolSafetyContract(
+            side_effects=SideEffectLevel.NONE,
+            supports_dry_run=True,
+        ),
     )
     registry.register_flow(flow)
     executor = FlowExecutor(registry=registry)
@@ -98,6 +118,144 @@ class TestFlowServerRegistration:
         server = FlowServer(executor_with_flow, name="cw-test")
         assert isinstance(server.fastmcp, FastMCP)
 
+    def test_implicit_exposure_skips_missing_safety(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="unknown",
+                description="Unknown safety.",
+                steps=[FlowStep(tool_name="double")],
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="double",
+                description="",
+                input_schema=_NumIn,
+                output_schema=_NumOut,
+                fn=_double,
+            )
+        )
+        assert FlowServer(executor).registered_tool_names == []
+
+    def test_missing_safety_emits_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="unknown",
+                description="Unknown safety.",
+                steps=[FlowStep(tool_name="double")],
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        with caplog.at_level("WARNING", logger="chainweaver.mcp.server"):
+            FlowServer(executor)
+        assert "safety metadata is missing" in caplog.text
+
+    def test_implicit_exposure_skips_draft_and_writing_flows(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="draft",
+                description="Draft.",
+                steps=[FlowStep(tool_name="double")],
+                governance=FlowGovernance(lifecycle=FlowLifecycle.DRAFT),
+                safety=ToolSafetyContract(),
+            )
+        )
+        registry.register_flow(
+            Flow(
+                name="writer",
+                description="Writes.",
+                steps=[FlowStep(tool_name="double")],
+                safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        assert FlowServer(executor).registered_tool_names == []
+
+    def test_filters_by_lifecycle_owner_and_approval(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="reviewed",
+                description="Reviewed.",
+                steps=[FlowStep(tool_name="double")],
+                governance=FlowGovernance(
+                    lifecycle=FlowLifecycle.REVIEWED,
+                    owner="platform",
+                ),
+                safety=ToolSafetyContract(),
+            )
+        )
+        registry.register_flow(
+            Flow(
+                name="approval",
+                description="Approval.",
+                steps=[FlowStep(tool_name="double")],
+                governance=FlowGovernance(owner="platform"),
+                safety=ToolSafetyContract(
+                    requires_approval=True,
+                    approval_reason="Writes billing state.",
+                ),
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        server = FlowServer(
+            executor,
+            allowed_lifecycles={FlowLifecycle.ACTIVE, FlowLifecycle.REVIEWED},
+            owners={"platform"},
+        )
+        assert server.registered_tool_names == ["reviewed"]
+
+    def test_derives_safety_from_explicit_tool_contracts(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="derived",
+                description="Derived.",
+                steps=[FlowStep(tool_name="double")],
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="double",
+                description="",
+                input_schema=_NumIn,
+                output_schema=_NumOut,
+                fn=_double,
+                safety=ToolSafetyContract(side_effects=SideEffectLevel.READ),
+            )
+        )
+        assert FlowServer(executor).registered_tool_names == ["derived"]
+
+    def test_explicit_names_override_default_filters(self) -> None:
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="writer",
+                description="Writes.",
+                steps=[FlowStep(tool_name="double")],
+                governance=FlowGovernance(lifecycle=FlowLifecycle.REVIEWED),
+                safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        server = FlowServer(executor, flow_names=["writer"])
+        assert server.registered_tool_names == ["writer"]
+
+    def test_duplicate_explicit_names_raise(self, executor_with_flow: FlowExecutor) -> None:
+        with pytest.raises(ValueError, match="collision"):
+            FlowServer(
+                executor_with_flow,
+                flow_names=["number_flow", "number_flow"],
+            )
+
 
 class TestFlowServerOverMCP:
     def test_client_sees_advertised_flow(self, executor_with_flow: FlowExecutor) -> None:
@@ -136,6 +294,7 @@ class TestFlowServerOverMCP:
             description="",
             steps=[FlowStep(tool_name="boom", input_mapping={"n": "n"})],
             input_schema_ref=Flow.schema_ref_from(_NumIn),
+            safety=ToolSafetyContract(),
         )
         registry.register_flow(flow)
         executor = FlowExecutor(registry=registry)
@@ -177,3 +336,28 @@ class TestFlowServerOverMCP:
         flow_tool = _run(go())
         props = flow_tool.inputSchema.get("properties", {})
         assert "n" in props
+
+    def test_advertises_safety_and_savings_metadata(
+        self,
+        executor_with_flow: FlowExecutor,
+    ) -> None:
+        flow_server = FlowServer(executor_with_flow, name="cw-test")
+
+        async def go() -> Any:
+            async with create_connected_server_and_client_session(
+                flow_server.fastmcp._mcp_server
+            ) as client:
+                listing = await client.list_tools()
+                return next(t for t in listing.tools if t.name == "number_flow")
+
+        flow_tool = _run(go())
+        assert flow_tool.annotations is not None
+        assert flow_tool.annotations.readOnlyHint is True
+        assert flow_tool.annotations.destructiveHint is False
+        assert flow_tool.annotations.idempotentHint is True
+        assert flow_tool.meta is not None
+        metadata = flow_tool.meta["chainweaver"]
+        assert metadata["lifecycle"] == "active"
+        assert metadata["replaces_tools"] == ["double", "add_one"]
+        assert metadata["estimated_token_savings"] == 500
+        assert "requires_approval=false" in flow_tool.description

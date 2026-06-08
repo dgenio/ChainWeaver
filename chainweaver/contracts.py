@@ -38,7 +38,7 @@ from collections.abc import Callable, Iterable
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from chainweaver.exceptions import PredicateSyntaxError
 
@@ -59,12 +59,14 @@ class SideEffectLevel(str, Enum):
             inherently outside the caller's control (LLM, payments, paid
             APIs).  Implies WRITE-grade risk plus reputational / monetary
             cost.
+        DESTRUCTIVE: Irreversibly deletes or mutates state.
     """
 
     NONE = "none"
     READ = "read"
     WRITE = "write"
     EXTERNAL = "external"
+    DESTRUCTIVE = "destructive"
 
 
 class StabilityLevel(str, Enum):
@@ -112,6 +114,7 @@ _SIDE_EFFECT_ORDER: dict[SideEffectLevel, int] = {
     SideEffectLevel.READ: 1,
     SideEffectLevel.WRITE: 2,
     SideEffectLevel.EXTERNAL: 3,
+    SideEffectLevel.DESTRUCTIVE: 4,
 }
 
 _STABILITY_ORDER: dict[StabilityLevel, int] = {
@@ -152,19 +155,49 @@ class ToolSafetyContract(BaseModel):
             mirrors :attr:`Tool.cacheable` but lives on the contract for
             downstream consumers that don't import the ``Tool`` class
             directly (e.g., serialized flow catalog entries).
-        requires_review: When ``True``, the tool should not be invoked
+        safe_to_retry: Whether a failed invocation may be retried without
+            creating duplicate effects.
+        supports_dry_run: Whether callers can request an effect-free preview.
+        requires_approval: When ``True``, the tool should not be invoked
             without explicit human approval.  Governance hooks key off
             this field.
+        approval_reason: Human-readable explanation for the approval gate.
     """
 
     model_config = ConfigDict(frozen=True)
 
     side_effects: SideEffectLevel = SideEffectLevel.NONE
+    read_only: bool = True
     stability: StabilityLevel = StabilityLevel.STABLE
     determinism_level: DeterminismLevel = DeterminismLevel.FULL
     idempotent: bool = True
     cacheable: bool = True
-    requires_review: bool = False
+    safe_to_retry: bool = True
+    supports_dry_run: bool = False
+    requires_approval: bool = False
+    approval_reason: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_read_only(cls, data: Any) -> Any:
+        """Derive ``read_only`` when omitted so serialized contracts are explicit."""
+        if not isinstance(data, dict) or "read_only" in data:
+            return data
+        side_effects = SideEffectLevel(data.get("side_effects", SideEffectLevel.NONE))
+        return {
+            **data,
+            "read_only": side_effects in {SideEffectLevel.NONE, SideEffectLevel.READ},
+        }
+
+    @model_validator(mode="after")
+    def _validate_read_only(self) -> ToolSafetyContract:
+        expected = self.side_effects in {SideEffectLevel.NONE, SideEffectLevel.READ}
+        if self.read_only is not expected:
+            raise ValueError(
+                f"read_only={self.read_only} conflicts with "
+                f"side_effects='{self.side_effects.value}'."
+            )
+        return self
 
 
 def merge_safety(
@@ -211,7 +244,17 @@ def merge_safety(
         ),
         idempotent=all(c.idempotent for c in materialised),
         cacheable=all(c.cacheable for c in materialised),
-        requires_review=any(c.requires_review for c in materialised),
+        safe_to_retry=all(c.safe_to_retry for c in materialised),
+        supports_dry_run=all(c.supports_dry_run for c in materialised),
+        requires_approval=any(c.requires_approval for c in materialised),
+        approval_reason="; ".join(
+            dict.fromkeys(
+                c.approval_reason
+                for c in materialised
+                if c.requires_approval and c.approval_reason
+            )
+        )
+        or None,
     )
 
 

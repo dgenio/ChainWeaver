@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from chainweaver.flow import Flow
+from chainweaver.flow import Flow, FlowLifecycle
 from chainweaver.observation import ObservedTrace
 from chainweaver.observer import ChainObserver, FlowSuggestion
 from chainweaver.registry import FlowRegistry
@@ -237,5 +237,11 @@ class TestSuggestedFlow:
             _record_trace(observer, "a", "b", "c")
         suggestion = observer.suggest_flows(min_occurrences=3, min_length=2)[0]
         assert isinstance(suggestion, FlowSuggestion)
+        assert suggestion.flow.governance.lifecycle is FlowLifecycle.SUGGESTED
+        assert suggestion.flow.governance.replaces_tools == suggestion.tools
+        assert (
+            suggestion.flow.governance.estimated_model_calls_removed
+            == suggestion.estimated_llm_calls_avoided
+        )
         # 3 tools x 4 occurrences.
         assert suggestion.estimated_llm_calls_avoided == 12

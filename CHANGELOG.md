@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Governed macro-flow lifecycle and safe MCP exposure** (#259, #268, #294):
+  flows now carry serializable `FlowGovernance` metadata with explicit
+  `observed → suggested → draft → reviewed → active` promotion states plus
+  `ignored` and `archived`. `chainweaver record` writes draft candidates,
+  persists ignored decisions, and reports lifecycle state; `chainweaver flows
+  promote` / `flows ignore` update candidate files deterministically.
+  `FlowServer` now exposes only active, read-only, approval-free flows with
+  known safety by default, while explicit `flow_names` remains an operator
+  override. MCP descriptions and `_meta` include replacement-tool, review,
+  version, model-call, and token-saving metadata.
+- **First-class operational safety metadata** (#293): `ToolSafetyContract`
+  now covers destructive effects, derived read-only status, retry safety,
+  dry-run support, approval requirements, and approval rationale. Flows can
+  persist an explicit safety contract in JSON/YAML, tools report whether their
+  safety was explicitly declared, and MCP annotations are derived from the
+  effective contract.
 - **Interactive web playground — zero-install onboarding** (#81): a new
   `playground/` directory with a Streamlit app (`playground/app.py`) that lets
   visitors pick a pre-loaded flow, edit its JSON input, run it, and inspect the

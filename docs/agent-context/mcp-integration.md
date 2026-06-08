@@ -76,7 +76,7 @@ Policy choices baked in (issue #150):
 from chainweaver import FlowRegistry, FlowExecutor
 from chainweaver.mcp import FlowServer
 
-server = FlowServer(executor, name="my-flows")  # all ACTIVE flows
+server = FlowServer(executor, name="my-flows")  # safe active flows only
 # or:
 server = FlowServer(executor, flow_names=["flow_a"], server_prefix="cw")
 server.serve()  # blocks; stdio transport by default
@@ -99,6 +99,18 @@ dispatcher function's signature from `input_schema.model_fields`.
 
 Flow failures surface as raised `FlowExecutionError` instances, which
 FastMCP wraps as `CallToolResult(isError=True)` for the client.
+
+Default exposure requires `FlowLifecycle.ACTIVE` and a known effective
+`ToolSafetyContract` whose side effects are `NONE` or `READ` and which does
+not require approval. Flow-level safety wins; otherwise the server derives a
+contract only when every constituent tool explicitly declared one. Operators
+can narrow discovery with `allowed_lifecycles`, `allowed_side_effects`, and
+`owners`. Passing `flow_names` is an explicit override and logs warnings for
+unknown or restrictive metadata.
+
+MCP annotations come from the effective contract, not from the flow's
+deterministic flag. `_meta.chainweaver` and the rendered description carry
+the flow's version, lifecycle, owner, replaced tools, and model/token savings.
 
 ## Async lane (#80)
 

@@ -1012,7 +1012,9 @@ for suggestion in observer.suggest_flows(min_occurrences=3):
   and emits ranked `FlowSuggestion`s — never auto-registered.
 - **`chainweaver record`** (#226) does the same from a recorded JSONL trace on
   the command line, writing candidate `.flow.yaml` files ranked by projected
-  LLM calls avoided.
+  LLM calls avoided. Candidates persist as `draft`; use `chainweaver flows
+  promote ... --to reviewed`, then `--to active`. Ignored candidates remain
+  suppressed in later runs unless `--include-ignored` is passed.
 - **`ChainWeaverService`** (#101) ties the observer, the static
   [`ChainAnalyzer`](#core-abstractions), and an optional offline LLM proposer
   into a continuous *analyze → propose → govern → promote* loop with an
@@ -1091,6 +1093,8 @@ chainweaver suggest flows/etl.flow.yaml --tools my_pkg.tools --trace trace_a.jso
 
 # Mine candidate flows from a recorded JSONL tool trace (offline, no LLM).
 chainweaver record examples/agent_tool_trace.jsonl --output-dir candidates/
+chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to reviewed
+chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to active
 
 # Run one continuous-analysis service pass and report flow proposals.
 chainweaver service --tools my_pkg.tools --trace trace.jsonl

@@ -32,7 +32,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.flow import Flow, FlowGovernance, FlowLifecycle, FlowStep
 from chainweaver.observation import ObservedTrace, TraceRecorder
 
 _DEFAULT_SOURCE = "observer"
@@ -381,4 +381,9 @@ class ChainObserver:
                 f"(seen {occurrences}x, confidence {confidence})."
             ),
             steps=steps,
+            governance=FlowGovernance(
+                lifecycle=FlowLifecycle.SUGGESTED,
+                replaces_tools=pattern,
+                estimated_model_calls_removed=len(pattern) * occurrences,
+            ),
         )

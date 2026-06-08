@@ -101,7 +101,7 @@ from chainweaver.exceptions import (
     FlowSerializationError,
 )
 from chainweaver.executor import ExecutionResult, FlowExecutor
-from chainweaver.flow import DAGFlow, Flow
+from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
 from chainweaver.observer import ChainObserver
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml, flow_to_yaml
@@ -119,6 +119,12 @@ app = typer.Typer(
     help="ChainWeaver CLI — inspect, validate, and check flows.",
     no_args_is_help=True,
 )
+flows_app = typer.Typer(
+    name="flows",
+    help="Review and promote persisted macro-flow candidates.",
+    no_args_is_help=True,
+)
+app.add_typer(flows_app, name="flows")
 
 
 @app.callback()
@@ -714,9 +720,8 @@ def _build_flow_server(
     un-importable tools module, ``1`` for a malformed flow file or a missing
     ``mcp`` extra.
     """
-    flow_server_cls = _import_flow_server()
-
     _require_existing_file(flow_file)
+    flow_server_cls = _import_flow_server()
     try:
         flow = _load_flow_file(flow_file)
     except FlowSerializationError as exc:
@@ -735,7 +740,12 @@ def _build_flow_server(
             executor.register_tool(tool_obj)
             seen_tool_names.add(tool_obj.name)
 
-    return flow_server_cls(executor, name=name, server_prefix=server_prefix)
+    return flow_server_cls(
+        executor,
+        name=name,
+        flow_names=[flow.name],
+        server_prefix=server_prefix,
+    )
 
 
 @app.command("serve")
@@ -1850,6 +1860,102 @@ _RECORD_FORMAT_OPTION = typer.Option(
     case_sensitive=False,
     help="Output format: 'table' (human-readable) or 'json'.",
 )
+_RECORD_INCLUDE_IGNORED_OPTION = typer.Option(
+    False,
+    "--include-ignored",
+    help="Include candidates whose persisted flow file is marked ignored.",
+)
+_FLOW_FILE_ARG = typer.Argument(..., help="Path to a persisted .flow.yaml candidate.")
+_FLOW_PROMOTE_TARGET_OPTION = typer.Option(
+    ...,
+    "--to",
+    help="Promotion target: reviewed or active.",
+)
+
+
+def _load_persisted_candidate(path: Path) -> Flow | DAGFlow:
+    """Load a candidate flow file and surface a concise CLI error."""
+    try:
+        return flow_from_yaml(path.read_text(encoding="utf-8"))
+    except (OSError, FlowSerializationError) as exc:
+        detail = exc.detail if isinstance(exc, FlowSerializationError) else str(exc)
+        raise ValueError(f"cannot read candidate '{path}': {detail}") from exc
+
+
+def _write_candidate(path: Path, flow: Flow | DAGFlow) -> None:
+    """Write a candidate flow file with deterministic YAML formatting."""
+    try:
+        path.write_text(flow_to_yaml(flow), encoding="utf-8")
+    except (OSError, FlowSerializationError) as exc:
+        detail = exc.detail if isinstance(exc, FlowSerializationError) else str(exc)
+        raise ValueError(f"cannot write candidate '{path}': {detail}") from exc
+
+
+def _transition_candidate(
+    flow_file: Path,
+    target: FlowLifecycle,
+    *,
+    reviewed_by: str | None = None,
+    review_notes: str | None = None,
+) -> None:
+    """Apply one validated lifecycle transition to a persisted flow."""
+    _require_existing_file(flow_file)
+    try:
+        flow = _load_persisted_candidate(flow_file)
+        previous = flow.governance.lifecycle
+        flow.governance = flow.governance.transition_to(
+            target,
+            reviewed_by=reviewed_by,
+            review_notes=review_notes,
+        )
+        _write_candidate(flow_file, flow)
+    except ValueError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"Flow '{flow.name}' transitioned from '{previous.value}' to '{target.value}' "
+        f"in '{flow_file}'."
+    )
+
+
+@flows_app.command("promote")
+def promote_flow_command(
+    flow_file: Path = _FLOW_FILE_ARG,
+    target: FlowLifecycle = _FLOW_PROMOTE_TARGET_OPTION,
+    reviewed_by: str | None = typer.Option(
+        None,
+        "--reviewed-by",
+        help="Reviewer identity to persist with the transition.",
+    ),
+    review_notes: str | None = typer.Option(
+        None,
+        "--notes",
+        help="Optional review notes to persist with the transition.",
+    ),
+) -> None:
+    """Promote a draft to reviewed, or a reviewed flow to active."""
+    if target not in {FlowLifecycle.REVIEWED, FlowLifecycle.ACTIVE}:
+        typer.echo("chainweaver: --to must be 'reviewed' or 'active'.", err=True)
+        raise typer.Exit(code=2)
+    _transition_candidate(
+        flow_file,
+        target,
+        reviewed_by=reviewed_by,
+        review_notes=review_notes,
+    )
+
+
+@flows_app.command("ignore")
+def ignore_flow_command(
+    flow_file: Path = _FLOW_FILE_ARG,
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="Optional explanation recorded as review notes.",
+    ),
+) -> None:
+    """Mark a suggested or draft candidate ignored."""
+    _transition_candidate(flow_file, FlowLifecycle.IGNORED, review_notes=reason)
 
 
 @app.command("record")
@@ -1860,6 +1966,7 @@ def record_command(
     min_length: int = _RECORD_MIN_LEN_OPTION,
     max_length: int | None = _RECORD_MAX_LEN_OPTION,
     output_format: OutputFormat = _RECORD_FORMAT_OPTION,
+    include_ignored: bool = _RECORD_INCLUDE_IGNORED_OPTION,
 ) -> None:
     """Mine candidate flows from a recorded JSONL tool trace (issue #226).
 
@@ -1891,22 +1998,45 @@ def record_command(
 
     # Rank by projected savings (frequency x per-run calls avoided), then by
     # raw occurrences, then name for a stable order.
-    ranked = sorted(
+    ranked_all = sorted(
         suggestions,
         key=lambda s: (-s.estimated_llm_calls_avoided, -s.occurrences, s.flow.name),
     )
 
     written: dict[str, str] = {}
+    persisted: dict[str, Flow | DAGFlow] = {}
+    suppressed_ignored = 0
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
-        for suggestion in ranked:
+        for suggestion in ranked_all:
             dest = output_dir / f"{suggestion.flow.name}.flow.yaml"
             try:
-                dest.write_text(flow_to_yaml(suggestion.flow), encoding="utf-8")
-            except FlowSerializationError as exc:
-                typer.echo(f"chainweaver: {exc.detail}", err=True)
+                if dest.exists():
+                    existing = _load_persisted_candidate(dest)
+                    persisted[suggestion.flow.name] = existing
+                    if (
+                        existing.governance.lifecycle is FlowLifecycle.IGNORED
+                        and not include_ignored
+                    ):
+                        suppressed_ignored += 1
+                    written[suggestion.flow.name] = str(dest)
+                    continue
+                draft = suggestion.flow.model_copy(deep=True)
+                draft.governance = draft.governance.transition_to(FlowLifecycle.DRAFT)
+                _write_candidate(dest, draft)
+                persisted[suggestion.flow.name] = draft
+            except ValueError as exc:
+                typer.echo(f"chainweaver: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
             written[suggestion.flow.name] = str(dest)
+
+    ranked = [
+        suggestion
+        for suggestion in ranked_all
+        if include_ignored
+        or suggestion.flow.name not in persisted
+        or persisted[suggestion.flow.name].governance.lifecycle is not FlowLifecycle.IGNORED
+    ]
 
     if output_format is OutputFormat.JSON:
         _emit_json(
@@ -1914,6 +2044,7 @@ def record_command(
                 "trace_file": str(trace_file),
                 "traces_analyzed": len(observer),
                 "candidate_count": len(ranked),
+                "suppressed_ignored_count": suppressed_ignored,
                 "output_dir": str(output_dir) if output_dir is not None else None,
                 "candidates": [
                     {
@@ -1923,8 +2054,9 @@ def record_command(
                         "traces_with_pattern": s.traces_with_pattern,
                         "confidence": s.confidence,
                         "estimated_llm_calls_avoided": s.estimated_llm_calls_avoided,
+                        "lifecycle": persisted.get(s.flow.name, s.flow).governance.lifecycle.value,
                         "output_path": written.get(s.flow.name),
-                        "flow": _flow_to_dict(s.flow),
+                        "flow": _flow_to_dict(persisted.get(s.flow.name, s.flow)),
                     }
                     for s in ranked
                 ],
@@ -1944,6 +2076,8 @@ def record_command(
     ]
     for rank, suggestion in enumerate(ranked, start=1):
         lines.append(f"  {rank}. {suggestion.flow.name}")
+        lifecycle = persisted.get(suggestion.flow.name, suggestion.flow).governance.lifecycle
+        lines.append(f"     lifecycle:   {lifecycle.value}")
         lines.append(f"     tools:       {' → '.join(suggestion.tools)}")
         lines.append(
             f"     occurrences: {suggestion.occurrences}  "
@@ -1955,6 +2089,12 @@ def record_command(
     if output_dir is None:
         lines.append("")
         lines.append("(dry run — pass --output-dir to write .flow.yaml files)")
+    elif suppressed_ignored:
+        lines.append("")
+        lines.append(
+            f"Suppressed {suppressed_ignored} ignored candidate(s); "
+            f"pass --include-ignored to report them."
+        )
     typer.echo("\n".join(lines))
 
 

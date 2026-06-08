@@ -40,10 +40,10 @@ chainweaver/
 ├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal + llm_propose_flows() + write_proposals() (#28); banned from executor.py
 ├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() (#100); banned from executor.py
 ├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml() + render_tool_catalogue() (#28, #100)
-├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + safety vocabulary (#19, #125, #9, #8)
+├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
-├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus enum + DriftInfo dataclass + ConditionalEdge (#9) + determinism_level property (#8)
+├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8)
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
@@ -66,7 +66,7 @@ chainweaver/
 │   ├── __init__.py    Public surface: MCPToolAdapter, FlowServer, jsonschema_to_pydantic
 │   ├── _schema.py     JSON Schema ↔ Pydantic bridge
 │   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150)
-│   └── server.py      FlowServer: expose flows as MCP tools via FastMCP (#72)
+│   └── server.py      FlowServer: safely expose governed flows as MCP tools via FastMCP (#72, #259, #294)
 ├── contrib/           Curated deterministic stdlib tools (#145); pip install 'chainweaver[contrib]'
 │   ├── __init__.py    Re-exports the public tool set
 │   └── tools.py       passthrough, json_pluck, json_set, assert_equal, map_list, filter_list
@@ -93,7 +93,7 @@ chainweaver/
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, doctor, dump-schema, service
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, flows promote/ignore, doctor, dump-schema, service
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
@@ -197,13 +197,15 @@ see the `DAGFlowStep` subsection below).
 | `description` | `str` | — (required) | Human-readable description of what the flow does. |
 | `steps` | `list[FlowStep]` | — (required) | Ordered list of tool invocations. |
 | `deterministic` | `bool` | `True` | Metadata annotation for downstream orchestrators. `FlowExecutor` is unconditionally LLM-free and does not evaluate this flag. |
-| `status` | `FlowStatus` | `ACTIVE` | Lifecycle gate (`active` / `needs_review` / `disabled`). Non-`ACTIVE` flows are refused by `execute_flow` unless `force=True`. |
+| `status` | `FlowStatus` | `ACTIVE` | Operational execution gate (`active` / `needs_review` / `disabled`). Non-`ACTIVE` flows are refused by `execute_flow` unless `force=True`. |
 | `trigger_conditions` | `dict[str, Any] \| None` | `None` | Free-form metadata for higher-level orchestrators; ChainWeaver itself does not evaluate these. |
 | `input_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref to a Pydantic model validating `initial_input` before the first step runs. Resolved lazily by the `input_schema` property. |
 | `output_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref to a Pydantic model validating the final merged context. Resolved lazily by the `output_schema` property. |
 | `context_schema_ref` | `str \| None` | `None` | `"module:qualname"` ref for the accumulated execution context (#152). Resolved lazily by the `context_schema` property; validated at flow end. |
 | `tool_schema_hashes` | `dict[str, str] \| None` | `None` | Snapshot of per-tool schema fingerprints (#50). Drives drift detection and `doctor --check-drift`. |
 | `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
+| `governance` | `FlowGovernance` | active defaults | Review lifecycle, owner, replacement-tool list, savings estimates, and review notes (#259, #268). Separate from `FlowStatus`. |
+| `safety` | `ToolSafetyContract \| None` | `None` | Explicit flow-level side-effect, retry, dry-run, idempotency, and approval metadata (#293). `None` means unknown, not safe. |
 
 **Read-only properties (not fields):** `input_schema`, `output_schema`, and
 `context_schema` resolve their `*_schema_ref` counterparts to a

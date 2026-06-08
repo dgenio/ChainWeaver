@@ -162,6 +162,7 @@ class Tool:
         # ``Tool(...)`` constructors keep working unchanged.  It is consumed by
         # :meth:`Tool.from_flow` (issue #125) and downstream consumers; the
         # executor itself does not enforce contract fields in v1.
+        self._safety_declared = safety is not None
         if safety is None:
             effective_cacheable = True if cacheable is None else cacheable
             self.cacheable = effective_cacheable
@@ -180,6 +181,11 @@ class Tool:
         # callables whose ``__call__`` is async, so we also inspect the
         # callable's ``__call__`` attribute (issue #80).
         self.is_async = _is_async_callable(fn)
+
+    @property
+    def safety_declared(self) -> bool:
+        """Whether the caller explicitly supplied safety metadata."""
+        return self._safety_declared
 
     @cached_property
     def input_schema_hash(self) -> str:
@@ -392,7 +398,7 @@ class Tool:
                 :class:`SideEffectLevel`, worst :class:`StabilityLevel`,
                 worst :class:`DeterminismLevel`, AND across
                 ``idempotent`` / ``cacheable``, OR across
-                ``requires_review``).  When explicitly set, the override
+                ``requires_approval``).  When explicitly set, the override
                 wins outright with no merge.  Step tools that have not
                 yet been registered on *executor* are skipped during
                 derivation — their contracts are unknown, so they
@@ -522,6 +528,8 @@ class Tool:
         # --- Safety derivation (issue #125) -------------------------------
         if safety is not None:
             resolved_safety: ToolSafetyContract = safety
+        elif flow.safety is not None:
+            resolved_safety = flow.safety
         else:
             constituent_contracts: list[ToolSafetyContract] = []
             for step in flow.steps:

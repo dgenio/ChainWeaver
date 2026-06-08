@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from chainweaver import cli
+from chainweaver.flow import FlowLifecycle
 from chainweaver.serialization import flow_from_yaml
 
 
@@ -75,6 +76,72 @@ class TestRecordHappyPath:
         flow = flow_from_yaml(written[0].read_text(encoding="utf-8"))
         assert flow.name == "suggested__fetch__validate__transform"
         assert [s.tool_name for s in flow.steps] == ["fetch", "validate", "transform"]
+        assert flow.governance.lifecycle is FlowLifecycle.DRAFT
+        assert flow.governance.replaces_tools == ("fetch", "validate", "transform")
+        assert flow.governance.estimated_model_calls_removed == 9
+
+    def test_ignored_candidate_is_suppressed_on_later_runs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "trace.jsonl"
+        _write_trace(path, _repeated_trace(3))
+        out_dir = tmp_path / "out"
+        assert cli.main(["record", str(path), "--output-dir", str(out_dir)]) == 0
+        capsys.readouterr()
+        candidate = next(out_dir.glob("*.flow.yaml"))
+        assert cli.main(["flows", "ignore", str(candidate), "--reason", "Not useful."]) == 0
+        capsys.readouterr()
+
+        assert (
+            cli.main(
+                [
+                    "record",
+                    str(path),
+                    "--output-dir",
+                    str(out_dir),
+                    "--format",
+                    "json",
+                ]
+            )
+            == 0
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["candidate_count"] == 0
+        assert payload["suppressed_ignored_count"] == 1
+        persisted = flow_from_yaml(candidate.read_text(encoding="utf-8"))
+        assert persisted.governance.lifecycle is FlowLifecycle.IGNORED
+        assert persisted.governance.review_notes == "Not useful."
+
+    def test_candidate_can_be_promoted_to_active(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "trace.jsonl"
+        _write_trace(path, _repeated_trace(3))
+        out_dir = tmp_path / "out"
+        cli.main(["record", str(path), "--output-dir", str(out_dir)])
+        capsys.readouterr()
+        candidate = next(out_dir.glob("*.flow.yaml"))
+
+        assert (
+            cli.main(
+                [
+                    "flows",
+                    "promote",
+                    str(candidate),
+                    "--to",
+                    "reviewed",
+                    "--reviewed-by",
+                    "maintainer",
+                ]
+            )
+            == 0
+        )
+        capsys.readouterr()
+        assert cli.main(["flows", "promote", str(candidate), "--to", "active"]) == 0
+        capsys.readouterr()
+        promoted = flow_from_yaml(candidate.read_text(encoding="utf-8"))
+        assert promoted.governance.lifecycle is FlowLifecycle.ACTIVE
+        assert promoted.governance.reviewed_by == "maintainer"
 
     def test_ranking_prefers_higher_savings(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

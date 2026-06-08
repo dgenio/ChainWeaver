@@ -55,6 +55,9 @@
           "title": "Deterministic",
           "type": "boolean"
         },
+        "governance": {
+          "$ref": "#/$defs/FlowGovernance"
+        },
         "input_schema_ref": {
           "anyOf": [
             {
@@ -82,6 +85,17 @@
           ],
           "default": null,
           "title": "Output Schema Ref"
+        },
+        "safety": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolSafetyContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/$defs/FlowStatus",
@@ -287,6 +301,16 @@
       "title": "DAGFlowStep",
       "type": "object"
     },
+    "DeterminismLevel": {
+      "description": "How predictable a tool's or flow's execution path is.\n\nThe three levels collapse the planning grid in issue #8:\n\nAttributes:\n    FULL: Same input + same tools + same flow always produce the same\n        output (this is the contract :class:`FlowExecutor` itself\n        guarantees for the executor surface).  No randomness, no LLM\n        calls, no network I/O at the orchestration boundary.\n    PARTIAL: The graph structure is fixed, but the *path* through it\n        depends on runtime data \u2014 i.e., the flow contains conditional\n        branches (issue #9), or a tool that is stable-but-best-effort.\n    NONE: Outputs cannot be predicted ahead of time \u2014 an LLM tool, a\n        randomized sampler, an external service that changes between\n        calls.  Compiled execution still works, but determinism is\n        not a useful claim.",
+      "enum": [
+        "full",
+        "partial",
+        "none"
+      ],
+      "title": "DeterminismLevel",
+      "type": "string"
+    },
     "Flow": {
       "description": "A deterministic, ordered sequence of tool invocations.\n\nAttributes:\n    name: Unique identifier for the flow.\n    description: Human-readable description of what the flow does.\n    steps: Ordered list of :class:`FlowStep` objects.\n    deterministic: Metadata annotation for downstream orchestrators.\n        When ``True`` (the default) this signals the flow is designed\n        to run without LLM calls.  ``FlowExecutor`` is unconditionally\n        LLM-free and does not evaluate this flag.\n    trigger_conditions: Optional free-form metadata that an agent or\n        higher-level orchestrator can use to decide when to invoke this\n        flow.  ChainWeaver itself does not evaluate these conditions.\n    input_schema_ref: An optional ``\"module:qualname\"`` reference to a\n        Pydantic :class:`~pydantic.BaseModel` subclass describing the\n        shape of the *initial_input* dictionary that a caller must\n        provide when executing this flow.  When set, the\n        :class:`~chainweaver.executor.FlowExecutor` validates\n        *initial_input* against the resolved schema **before** the first\n        step runs.\n\n        String refs (rather than live class objects) keep the flow\n        JSON/YAML-serializable; use :meth:`schema_ref_from` to derive\n        the ref from a class.  The :attr:`input_schema` property\n        resolves the ref lazily.\n    output_schema_ref: An optional ``\"module:qualname\"`` reference to a\n        Pydantic :class:`~pydantic.BaseModel` subclass describing the\n        shape of the final merged context produced after every step has\n        completed.  When set, the\n        :class:`~chainweaver.executor.FlowExecutor` validates the\n        accumulated context against the resolved schema **after** the\n        last step finishes.\n    capability_id: Optional Weaver Stack capability identifier (issue\n        #90).  When set, this flow is exposed as a routable capability\n        via :func:`chainweaver.integrations.weaver_spec.flow_to_selectable_item`\n        and can be addressed by a ``RoutingDecision`` from\n        contextweaver.  Should be a stable, dotted identifier (e.g.\n        ``\"data.ingest\"``); ``None`` (the default) means the flow is\n        not exposed as a capability.\n    context_schema_ref: An optional ``\"module:qualname\"`` reference to\n        a :class:`~pydantic.BaseModel` subclass describing the shape\n        of the *accumulated execution context* (issue #152).  The\n        executor validates the context against the resolved schema\n        at flow end, once every step has completed successfully\n        (skipped when an earlier step aborts the flow, since no\n        ``final_output`` is produced in that case).  The primary\n        value of this field is static typing \u2014 flow authors get\n        mypy + IDE autocomplete + a single source of truth for\n        context keys; runtime validation at the flow boundary is a\n        secondary safety net.\n\nExample::\n\n    flow = Flow(\n        name=\"double_add_format\",\n        version=\"1.0.0\",\n        description=\"Doubles a number, adds 10, and formats the result.\",\n        steps=[\n            FlowStep(tool_name=\"double\",    input_mapping={\"number\": \"number\"}),\n            FlowStep(tool_name=\"add_ten\",   input_mapping={\"value\": \"value\"}),\n            FlowStep(tool_name=\"format_result\", input_mapping={\"value\": \"value\"}),\n        ],\n        input_schema_ref=Flow.schema_ref_from(NumberInput),\n        output_schema_ref=Flow.schema_ref_from(FormattedOutput),\n        context_schema_ref=Flow.schema_ref_from(MyFlowContext),\n    )",
       "properties": {
@@ -323,6 +347,9 @@
           "title": "Deterministic",
           "type": "boolean"
         },
+        "governance": {
+          "$ref": "#/$defs/FlowGovernance"
+        },
         "input_schema_ref": {
           "anyOf": [
             {
@@ -350,6 +377,17 @@
           ],
           "default": null,
           "title": "Output Schema Ref"
+        },
+        "safety": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolSafetyContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/$defs/FlowStatus",
@@ -409,6 +447,94 @@
       ],
       "title": "Flow",
       "type": "object"
+    },
+    "FlowGovernance": {
+      "description": "Review, ownership, and savings metadata for a macro-flow.",
+      "properties": {
+        "estimated_model_calls_removed": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Estimated Model Calls Removed",
+          "type": "integer"
+        },
+        "estimated_token_savings": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Token Savings"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/FlowLifecycle",
+          "default": "active"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "replaces_tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Replaces Tools",
+          "type": "array"
+        },
+        "review_notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Notes"
+        },
+        "reviewed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By"
+        }
+      },
+      "title": "FlowGovernance",
+      "type": "object"
+    },
+    "FlowLifecycle": {
+      "description": "Review lifecycle for a macro-flow candidate.\n\nThis is intentionally separate from :class:`FlowStatus`: lifecycle\ndescribes governance and promotion, while status controls whether the\nexecutor may run an already-registered flow.",
+      "enum": [
+        "observed",
+        "suggested",
+        "draft",
+        "reviewed",
+        "active",
+        "ignored",
+        "archived"
+      ],
+      "title": "FlowLifecycle",
+      "type": "string"
     },
     "FlowStatus": {
       "description": "Lifecycle status of a flow.\n\nAttributes:\n    ACTIVE: Normal operation \u2014 the flow can be executed.\n    NEEDS_REVIEW: Flagged by drift detection or manual review.\n    DISABLED: Manually disabled \u2014 excluded from execution.",
@@ -549,6 +675,89 @@
         }
       },
       "title": "RetryPolicy",
+      "type": "object"
+    },
+    "SideEffectLevel": {
+      "description": "How a tool interacts with state outside its own process.\n\nOrdered most-permissive to most-restrictive.  :func:`merge_safety` uses\nthis ordering to pick the most-restrictive level across constituent\ntools when deriving a wrapped flow's safety contract.\n\nAttributes:\n    NONE: Pure computation \u2014 no state read or written outside the call.\n    READ: Reads external state (HTTP GET, DB SELECT, filesystem read).\n    WRITE: Modifies external state (HTTP POST, DB UPDATE, filesystem\n        write).\n    EXTERNAL: Calls out to a third-party service whose response is\n        inherently outside the caller's control (LLM, payments, paid\n        APIs).  Implies WRITE-grade risk plus reputational / monetary\n        cost.\n    DESTRUCTIVE: Irreversibly deletes or mutates state.",
+      "enum": [
+        "none",
+        "read",
+        "write",
+        "external",
+        "destructive"
+      ],
+      "title": "SideEffectLevel",
+      "type": "string"
+    },
+    "StabilityLevel": {
+      "description": "How reliably a tool returns the same outputs across calls.\n\nAttributes:\n    STABLE: Same inputs always produce the same outputs.\n    BEST_EFFORT: Usually the same, but external factors (network jitter,\n        third-party rate limits) may make outputs vary.\n    UNSTABLE: Outputs are not expected to match across calls (e.g.,\n        wall-clock-dependent, LLM-mediated).",
+      "enum": [
+        "stable",
+        "best_effort",
+        "unstable"
+      ],
+      "title": "StabilityLevel",
+      "type": "string"
+    },
+    "ToolSafetyContract": {
+      "description": "Structured safety metadata attached to a :class:`~chainweaver.tools.Tool`.\n\nThe contract is *advisory* in v1 \u2014 :class:`~chainweaver.executor.FlowExecutor`\ndoes not enforce any rule based on these fields, but downstream consumers\n(agent kernels, governance reviewers, MCP / OpenAI / Anthropic exporters)\nuse them to decide what's safe to invoke unattended.\n\nDefaults are maximally permissive so a bare ``Tool(...)`` constructor keeps\nworking unchanged.\n\nAttributes:\n    side_effects: How the tool interacts with state outside its own\n        process.  See :class:`SideEffectLevel`.\n    stability: How reliably the tool returns the same outputs across\n        calls.  See :class:`StabilityLevel`.\n    determinism_level: How predictable the tool's execution is.  See\n        :class:`DeterminismLevel`.\n    idempotent: Whether calling the tool twice with identical inputs\n        has the same effect as calling it once.\n    cacheable: Whether the tool's outputs may be safely cached and\n        re-served by :class:`~chainweaver.cache.StepCache`.  Note: this\n        mirrors :attr:`Tool.cacheable` but lives on the contract for\n        downstream consumers that don't import the ``Tool`` class\n        directly (e.g., serialized flow catalog entries).\n    safe_to_retry: Whether a failed invocation may be retried without\n        creating duplicate effects.\n    supports_dry_run: Whether callers can request an effect-free preview.\n    requires_approval: When ``True``, the tool should not be invoked\n        without explicit human approval.  Governance hooks key off\n        this field.\n    approval_reason: Human-readable explanation for the approval gate.",
+      "properties": {
+        "approval_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Reason"
+        },
+        "cacheable": {
+          "default": true,
+          "title": "Cacheable",
+          "type": "boolean"
+        },
+        "determinism_level": {
+          "$ref": "#/$defs/DeterminismLevel",
+          "default": "full"
+        },
+        "idempotent": {
+          "default": true,
+          "title": "Idempotent",
+          "type": "boolean"
+        },
+        "read_only": {
+          "default": true,
+          "title": "Read Only",
+          "type": "boolean"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "safe_to_retry": {
+          "default": true,
+          "title": "Safe To Retry",
+          "type": "boolean"
+        },
+        "side_effects": {
+          "$ref": "#/$defs/SideEffectLevel",
+          "default": "none"
+        },
+        "stability": {
+          "$ref": "#/$defs/StabilityLevel",
+          "default": "stable"
+        },
+        "supports_dry_run": {
+          "default": false,
+          "title": "Supports Dry Run",
+          "type": "boolean"
+        }
+      },
+      "title": "ToolSafetyContract",
       "type": "object"
     }
   },
