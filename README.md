@@ -1,5 +1,7 @@
 # ChainWeaver
 
+<!-- mcp-name: io.github.dgenio/chainweaver -->
+
 **Observe the tool paths your agent repeats. Compile them into typed, deterministic flows. Replace the LLM-in-the-loop with governed, auditable execution.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)

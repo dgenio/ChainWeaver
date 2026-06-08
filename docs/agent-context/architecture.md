@@ -196,5 +196,5 @@ standalone; the only seams that reach into integrations are:
 - The `_execute_capability_step` hook — overridden by
   `KernelBackedExecutor`, not by the base class.
 
-`docs/SPEC_COMPAT.md` declares the targeted weaver-spec version; bumping it
+`docs/SPEC_COMPAT.md` declares the supported weaver-spec range; changing it
 follows the procedure documented there.

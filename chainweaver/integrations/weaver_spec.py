@@ -22,9 +22,9 @@ and `agent-kernel` (capability execution).  Four concerns sit here:
    resolves a routing decision to a registered flow so a Weaver router
    can hand a verdict straight to ChainWeaver for execution.
 4. **Conformance signal** — :data:`WEAVER_SPEC_VERSION` mirrors the
-   installed contract version (issue #91).  The conformance test suite
-   (``tests/test_weaver_spec_conformance.py``) verifies the declaration
-   matches ``docs/SPEC_COMPAT.md``.
+   installed contract version (issue #91). The conformance test suite
+   (``tests/test_weaver_spec_conformance.py``) verifies that version is
+   inside the supported range documented in ``docs/SPEC_COMPAT.md``.
 
 No agent-kernel or contextweaver imports live in
 :mod:`chainweaver.executor` — per the Weaver Stack guardrail
@@ -73,9 +73,8 @@ if TYPE_CHECKING:
 
 #: Version string of the ``weaver-contracts`` package ChainWeaver
 #: consumes.  Sourced from the installed distribution so the declaration
-#: cannot drift from what is actually importable.  The conformance test
-#: in ``tests/test_weaver_spec_conformance.py`` keeps
-#: ``docs/SPEC_COMPAT.md`` and this constant in sync.
+#: cannot drift from what is actually importable. The conformance test
+#: verifies this version satisfies the package's supported dependency range.
 WEAVER_SPEC_VERSION = _CONTRACT_VERSION
 
 

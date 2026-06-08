@@ -1,32 +1,32 @@
 # Weaver-spec compatibility
 
-ChainWeaver consumes a specific revision of the
+ChainWeaver consumes a supported range of the
 [weaver-spec](https://github.com/dgenio/weaver-spec) contract, published
 to PyPI as the [`weaver-contracts`](https://pypi.org/project/weaver-contracts/)
-distribution.  The declared version lives in source so CI fails any
-change that bumps the contract without also touching this document.
+distribution. The dependency range lives in `pyproject.toml`;
+`WEAVER_SPEC_VERSION` reports the version installed at runtime.
 
 ## Declared compatibility
 
-- **Validated weaver-contracts versions:** `0.6.0`, `0.7.0`
-- **Source of truth:**
+- **Supported `weaver-contracts` range:** `>=0.6,<1.0`
+- **Minimum version tested in CI:** `0.6.0`
+- **Runtime version signal:**
   `chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION`
   (read from the installed `weaver_contracts.version.CONTRACT_VERSION`)
 - **Optional extra:** `pip install 'chainweaver[weaver-stack]'`
 - **Conformance test suite:**
   `tests/test_weaver_spec_conformance.py`
 - **CI gate:**
-  `.github/workflows/ci.yml` — the
-  `conformance` job runs `pytest -m conformance` on the canonical
-  Python 3.10 / `ubuntu-latest` lane.
+  `.github/workflows/ci.yml` — the `conformance` job validates the normally
+  resolved dependency, while `floor-deps` validates the declared minimum.
 
-The installed `WEAVER_SPEC_VERSION` must appear in the validated list above.
-The conformance test asserts this across both the minimum-dependency and
-normal dependency lanes.
+The conformance test asserts that the installed `WEAVER_SPEC_VERSION`
+satisfies the package metadata's declared range and that this document
+lists the same lower and upper bounds.
 
 ## Supported invariants
 
-ChainWeaver consumes `weaver-contracts` 0.6.0 / 0.7.0's three core routing /
+ChainWeaver consumes `weaver-contracts>=0.6,<1.0`'s three core routing /
 execution invariants directly (no internal mirror types):
 
 | Invariant | What it requires | Where it lives in ChainWeaver |
@@ -36,12 +36,12 @@ execution invariants directly (no internal mirror types):
 | **I-07 — `CapabilityToken`** | Capability execution is delegated to a kernel via a scoped bearer token. | `CapabilityToken` is the upstream type; `KernelBackedExecutor` dispatches `step_type="capability"` steps through a `KernelProtocol`, gating each call against the token's `scope`. |
 
 ChainWeaver consumes the upstream dataclasses directly, so there is no
-mirror-vs-spec drift to police — the only seam is the declared version
+mirror-vs-spec drift to police — the only seam is the declared range
 above.  Importing `chainweaver.integrations.weaver_spec` (or the
 `contextweaver` / `agent_kernel` adapters that build on it) requires the
 `weaver-stack` extra; the base install is unaffected.
 
-## How to bump the declared version
+## How to change the supported range
 
 1. Install the new `weaver-contracts` release and review its changelog
    for shape changes to `SelectableItem` / `RoutingDecision` /
@@ -50,8 +50,8 @@ above.  Importing `chainweaver.integrations.weaver_spec` (or the
    `chainweaver/integrations/weaver_spec.py`,
    `contextweaver.py`, and `agent_kernel.py` if any consumed field
    changed.
-3. Bump the pin in `pyproject.toml` (`weaver-stack` extra and `dev`).
-   `WEAVER_SPEC_VERSION` tracks the installed package automatically.
+3. Update the range in `pyproject.toml` (`weaver-stack` extra and `dev`).
+   `WEAVER_SPEC_VERSION` continues to track the installed package.
 4. Update this document — the "Declared compatibility" section *and*
    any invariant rows that changed.
 5. Update `tests/test_weaver_spec_conformance.py` to cover any new

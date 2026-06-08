@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -489,6 +490,23 @@ def _module_sys_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestRunCommand:
+    def test_imports_tools_module_from_current_working_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        module_name = _write_tools_module(tmp_path, name="cwd_double")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "path",
+            [entry for entry in sys.path if entry not in {"", str(tmp_path)}],
+        )
+
+        imported = cli._import_tools_from(module_name)
+
+        assert [tool.name for tool in imported] == ["cwd_double"]
+
     def test_happy_path_table_output(
         self,
         _module_sys_path: Path,

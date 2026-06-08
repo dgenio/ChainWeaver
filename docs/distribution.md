@@ -41,14 +41,24 @@ conforming to the
       working server: `server.json` now carries a `--from 'chainweaver[mcp]'`
       `uvx` runtime argument (resolving the `mcp` extra) plus a required
       `flow_file` positional. `tests/test_server_manifest.py` guards this.
-- [ ] Publish the manifest's `version` (including the `mcp` extra) to PyPI so it
+- [x] Add the required PyPI ownership marker
+      `<!-- mcp-name: io.github.dgenio/chainweaver -->` to `README.md`.
+- [ ] Publish the manifest's `version` (including the README marker and `mcp`
+      extra) to PyPI so it
       resolves to an installable release. Confirm the version is live on
       [PyPI](https://pypi.org/project/chainweaver/) before publishing the
-      manifest; see [#250](https://github.com/dgenio/ChainWeaver/issues/250).
+      manifest.
 - [ ] Validate and publish with the official
       [`mcp-publisher`](https://github.com/modelcontextprotocol/registry) tool —
       it validates `server.json` against the live schema on publish. Confirm the
       `version` field matches the published PyPI release first.
+
+Fresh-client verification command:
+
+```bash
+uvx --from 'chainweaver[mcp]==<VERSION>' chainweaver serve \
+  examples/double_add_format.flow.yaml --tools examples.simple_linear_flow
+```
 
 ## awesome-* lists
 

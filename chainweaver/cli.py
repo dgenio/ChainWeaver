@@ -453,8 +453,10 @@ def _import_tools_from(module_name: str) -> list[Tool]:
     """Import *module_name* and return every :class:`Tool` found at top level.
 
     Args:
-        module_name: A Python import path (e.g. ``"my_pkg.tools"``).  The
-            module must be importable from the current ``sys.path``.
+        module_name: A Python import path (e.g. ``"my_pkg.tools"``). Modules
+            in the current working directory are importable, matching normal
+            ``python -m`` behavior even when ChainWeaver runs as an installed
+            console script.
 
     Returns:
         A list of :class:`Tool` instances, in the order they appear in
@@ -467,6 +469,11 @@ def _import_tools_from(module_name: str) -> list[Tool]:
             with a clear stderr message; exit code is ``2`` (module is treated
             like a missing file, consistent with the CLI's exit-code contract).
     """
+    # Installed console scripts put their own scripts directory at sys.path[0],
+    # so explicitly preserve the documented ability to import local tool modules.
+    if "" not in sys.path:
+        sys.path.insert(0, "")
+
     try:
         module: ModuleType = importlib.import_module(module_name)
     except (ImportError, ModuleNotFoundError) as exc:

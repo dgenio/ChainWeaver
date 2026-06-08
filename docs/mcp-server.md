@@ -125,7 +125,8 @@ A ready-to-submit MCP registry manifest ships at
 launches the server with a fresh-client command that resolves the `mcp` extra:
 
 ```bash
-uvx --from 'chainweaver[mcp]' chainweaver serve /abs/path/to/your.flow.yaml
+uvx --from 'chainweaver[mcp]' chainweaver serve /abs/path/to/your.flow.yaml \
+  --tools your_package.tools
 ```
 
 See [Distribution & ecosystem listings](distribution.md) for the registry and
