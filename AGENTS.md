@@ -371,7 +371,7 @@ Full checklist: [review-checklist.md](docs/agent-context/review-checklist.md).
 | [review-checklist.md](docs/agent-context/review-checklist.md) | Definition-of-done, review gates | Before submitting a PR, during code review |
 | [versioning-policy.md](docs/versioning-policy.md) | SemVer policy, public-API scope, deprecation process | Adding / removing / renaming public symbols, planning a release |
 | [flow-as-capability.md](docs/agent-context/flow-as-capability.md) | Treating a flow as a Weaver Stack capability (#90); `Flow.capability_id`; `flow_to_selectable_item` exporter | Setting capability identity on a flow, exporting to contextweaver |
-| [SPEC_COMPAT.md](docs/SPEC_COMPAT.md) | Declared `weaver-contracts` 0.6.0 compatibility (#91, #233); conformance test + CI gate | Bumping the pinned contract version, changing the weaver_spec adapters |
+| [SPEC_COMPAT.md](docs/SPEC_COMPAT.md) | Declared `weaver-contracts>=0.6,<1.0` compatibility (#91, #233); conformance test + CI gates | Changing the supported contract range or weaver_spec adapters |
 | [v1-release-criteria.md](docs/v1-release-criteria.md) | Measurable v1.0.0 release bar | Before tagging a release, when scoping issues against the v1.0 milestone |
 
 ---

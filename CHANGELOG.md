@@ -23,6 +23,9 @@ _No changes yet._
   now import `--tools` modules from the client's current working directory, so
   `uvx --from "chainweaver[mcp]" chainweaver serve <flow_file> --tools
   <tools_module>` works outside an editable repository install.
+- **Floor-dependency conformance** (#311): validate the installed
+  `weaver-contracts` version against the declared `>=0.6,<1.0` range instead
+  of requiring the compatibility document to name one exact installed release.
 
 ## [0.12.0] - 2026-06-08
 
