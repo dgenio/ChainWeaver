@@ -8,7 +8,7 @@ change that bumps the contract without also touching this document.
 
 ## Declared compatibility
 
-- **weaver-contracts version:** `0.6.0`
+- **Validated weaver-contracts versions:** `0.6.0`, `0.7.0`
 - **Source of truth:**
   `chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION`
   (read from the installed `weaver_contracts.version.CONTRACT_VERSION`)
@@ -20,14 +20,13 @@ change that bumps the contract without also touching this document.
   `conformance` job runs `pytest -m conformance` on the canonical
   Python 3.10 / `ubuntu-latest` lane.
 
-The version above must match
-`WEAVER_SPEC_VERSION`
-verbatim.  The conformance test asserts this — bumping the package
-without updating this document, or vice versa, breaks CI.
+The installed `WEAVER_SPEC_VERSION` must appear in the validated list above.
+The conformance test asserts this across both the minimum-dependency and
+normal dependency lanes.
 
 ## Supported invariants
 
-ChainWeaver consumes `weaver-contracts` 0.6.0's three core routing /
+ChainWeaver consumes `weaver-contracts` 0.6.0 / 0.7.0's three core routing /
 execution invariants directly (no internal mirror types):
 
 | Invariant | What it requires | Where it lives in ChainWeaver |
