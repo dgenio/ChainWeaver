@@ -8,7 +8,7 @@ change that bumps the contract without also touching this document.
 
 ## Declared compatibility
 
-- **weaver-contracts version:** `0.6.0`
+- **weaver-contracts version:** `0.7.0`
 - **Source of truth:**
   `chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION`
   (read from the installed `weaver_contracts.version.CONTRACT_VERSION`)
@@ -27,7 +27,7 @@ without updating this document, or vice versa, breaks CI.
 
 ## Supported invariants
 
-ChainWeaver consumes `weaver-contracts` 0.6.0's three core routing /
+ChainWeaver consumes `weaver-contracts` 0.7.0's three core routing /
 execution invariants directly (no internal mirror types):
 
 | Invariant | What it requires | Where it lives in ChainWeaver |

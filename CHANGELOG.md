@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [0.12.0] - 2026-06-08
+
 ### Added
 
 - **Interactive web playground — zero-install onboarding** (#81): a new
@@ -48,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New docs page
   [`docs/github-action.md`](docs/github-action.md), surfaced from the README
   Integrations section and the distribution checklist. The `chainweaver-version`
-  default is pinned to the current release (`0.11.0`); Marketplace publishing is
+  default is pinned to the current release (`0.12.0`); Marketplace publishing is
   a release-time step tracked in `docs/distribution.md`.
 
 - **`chainweaver serve` — first-class MCP server** (#230): a new CLI command that
@@ -177,7 +181,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chainweaver serve <flow_file>`, instead of launching bare `chainweaver`
   (which lacks the MCP dependencies). New `tests/test_server_manifest.py` guards
   the manifest version alignment and the `[mcp]`-extra launch. Publishing
-  `chainweaver==0.11.0` to PyPI and running `mcp-publisher` remain external
+  `chainweaver==0.12.0` to PyPI and running `mcp-publisher` remain external
   prerequisites tracked in #250 / #230.
 
 ## [0.11.0] - 2026-05-29
@@ -962,7 +966,6 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/dgenio/ChainWeaver/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/dgenio/ChainWeaver/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/dgenio/ChainWeaver/compare/v0.7.0...v0.8.0
