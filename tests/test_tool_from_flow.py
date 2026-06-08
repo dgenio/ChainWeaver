@@ -583,6 +583,7 @@ class TestFromFlowSafetyDerivation:
 
         wrapped = Tool.from_flow(flow, ex)
         assert wrapped.safety == ToolSafetyContract()
+        assert wrapped.safety_declared is False
 
     def test_write_constituent_propagates(
         self,
@@ -609,6 +610,7 @@ class TestFromFlowSafetyDerivation:
 
         wrapped = Tool.from_flow(flow, ex)
         assert wrapped.safety.side_effects is SideEffectLevel.WRITE
+        assert wrapped.safety_declared is False
 
     def test_external_outranks_write(
         self,
@@ -699,6 +701,7 @@ class TestFromFlowSafetyDerivation:
         )
         wrapped = Tool.from_flow(flow, ex, safety=override)
         assert wrapped.safety == override
+        assert wrapped.safety_declared is True
 
     def test_unregistered_constituent_skipped_during_derivation(
         self,
@@ -721,6 +724,32 @@ class TestFromFlowSafetyDerivation:
         # Constituent contracts were the default ToolSafetyContract().
         # The "skipped" unregistered tool contributed nothing.
         assert wrapped.safety == ToolSafetyContract()
+        assert wrapped.safety_declared is False
+
+    def test_all_explicit_constituents_produce_declared_safety(
+        self,
+        double_tool: Tool,
+        add_ten_tool: Tool,
+        format_tool: Tool,
+    ) -> None:
+        flow = self._three_step_flow()
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        ex = FlowExecutor(registry=registry)
+        for tool in (double_tool, add_ten_tool, format_tool):
+            ex.register_tool(
+                Tool(
+                    name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                    output_schema=tool.output_schema,
+                    fn=tool.fn,
+                    safety=ToolSafetyContract(),
+                )
+            )
+
+        wrapped = Tool.from_flow(flow, ex)
+        assert wrapped.safety_declared is True
 
 
 # ---------------------------------------------------------------------------

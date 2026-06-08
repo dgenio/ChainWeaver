@@ -61,6 +61,24 @@ class TestToolSafetyContractDefaults:
                 read_only=True,
             )
 
+    def test_legacy_requires_review_maps_to_requires_approval(self) -> None:
+        contract = ToolSafetyContract.model_validate({"requires_review": True})
+        assert contract.requires_approval is True
+
+    def test_conflicting_legacy_and_current_approval_fields_raise(self) -> None:
+        with pytest.raises(ValidationError, match="conflicts"):
+            ToolSafetyContract.model_validate(
+                {
+                    "requires_review": True,
+                    "requires_approval": False,
+                }
+            )
+
+    def test_requires_review_attribute_is_deprecated_alias(self) -> None:
+        contract = ToolSafetyContract(requires_approval=True)
+        with pytest.warns(DeprecationWarning, match="requires_approval"):
+            assert contract.requires_review is True
+
 
 # ---------------------------------------------------------------------------
 # merge_safety — most-restrictive wins

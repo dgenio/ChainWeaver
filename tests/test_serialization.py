@@ -308,6 +308,22 @@ class TestMiscFieldsRoundTrip:
         restored = Flow.from_json(flow.to_json())
         assert restored.governance == flow.governance
 
+    def test_legacy_requires_review_is_preserved_on_yaml_load(self) -> None:
+        restored = flow_from_yaml(
+            """
+type: Flow
+name: legacy-safety
+version: 1.0.0
+description: Legacy safety payload.
+steps:
+  - tool_name: x
+safety:
+  requires_review: true
+"""
+        )
+        assert restored.safety is not None
+        assert restored.safety.requires_approval is True
+
 
 class TestFlowLifecycle:
     def test_valid_promotion_path(self) -> None:

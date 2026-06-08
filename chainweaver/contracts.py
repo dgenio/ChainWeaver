@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import operator
+import warnings
 from collections.abc import Callable, Iterable
 from enum import Enum
 from typing import Any
@@ -179,15 +180,26 @@ class ToolSafetyContract(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _derive_read_only(cls, data: Any) -> Any:
-        """Derive ``read_only`` when omitted so serialized contracts are explicit."""
-        if not isinstance(data, dict) or "read_only" in data:
+    def _normalise_input(cls, data: Any) -> Any:
+        """Map legacy fields and derive values omitted by older payloads."""
+        if not isinstance(data, dict):
             return data
-        side_effects = SideEffectLevel(data.get("side_effects", SideEffectLevel.NONE))
-        return {
-            **data,
-            "read_only": side_effects in {SideEffectLevel.NONE, SideEffectLevel.READ},
-        }
+        normalised = dict(data)
+        if "requires_review" in normalised:
+            legacy_value = normalised.pop("requires_review")
+            if (
+                "requires_approval" in normalised
+                and normalised["requires_approval"] != legacy_value
+            ):
+                raise ValueError("requires_review conflicts with requires_approval.")
+            normalised.setdefault("requires_approval", legacy_value)
+        if "read_only" not in normalised:
+            side_effects = SideEffectLevel(normalised.get("side_effects", SideEffectLevel.NONE))
+            normalised["read_only"] = side_effects in {
+                SideEffectLevel.NONE,
+                SideEffectLevel.READ,
+            }
+        return normalised
 
     @model_validator(mode="after")
     def _validate_read_only(self) -> ToolSafetyContract:
@@ -198,6 +210,16 @@ class ToolSafetyContract(BaseModel):
                 f"side_effects='{self.side_effects.value}'."
             )
         return self
+
+    @property
+    def requires_review(self) -> bool:
+        """Deprecated alias for :attr:`requires_approval`."""
+        warnings.warn(
+            "ToolSafetyContract.requires_review is deprecated; use requires_approval instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.requires_approval
 
 
 def merge_safety(

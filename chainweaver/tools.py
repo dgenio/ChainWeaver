@@ -184,7 +184,7 @@ class Tool:
 
     @property
     def safety_declared(self) -> bool:
-        """Whether the caller explicitly supplied safety metadata."""
+        """Whether safety is explicit or fully derived from explicit contracts."""
         return self._safety_declared
 
     @cached_property
@@ -398,11 +398,13 @@ class Tool:
                 :class:`SideEffectLevel`, worst :class:`StabilityLevel`,
                 worst :class:`DeterminismLevel`, AND across
                 ``idempotent`` / ``cacheable``, OR across
-                ``requires_approval``).  When explicitly set, the override
-                wins outright with no merge.  Step tools that have not
-                yet been registered on *executor* are skipped during
-                derivation — their contracts are unknown, so they
-                cannot contribute.
+                 ``requires_approval``).  When explicitly set, the override
+                 wins outright with no merge.  Step tools that have not
+                 yet been registered on *executor* are skipped during
+                 derivation — their contracts are unknown, so they
+                 cannot contribute.  The wrapper reports
+                 :attr:`safety_declared` only when the override, flow contract,
+                 or every constituent tool contract is explicit.
 
         Returns:
             A :class:`Tool` instance whose ``fn`` executes *flow*.  The
@@ -528,14 +530,18 @@ class Tool:
         # --- Safety derivation (issue #125) -------------------------------
         if safety is not None:
             resolved_safety: ToolSafetyContract = safety
+            safety_declared = True
         elif flow.safety is not None:
             resolved_safety = flow.safety
+            safety_declared = True
         else:
             constituent_contracts: list[ToolSafetyContract] = []
+            safety_declared = True
             for step in flow.steps:
                 if step.tool_name is None:
                     # Composed sub-flow step (issue #75): its safety contract is
-                    # the sub-flow's own; skip here (callers can pass safety=...).
+                    # unknown here; callers can pass safety=... explicitly.
+                    safety_declared = False
                     continue
                 try:
                     inner_tool = executor.get_tool(step.tool_name)
@@ -543,11 +549,14 @@ class Tool:
                     # Tool unregistered at composition time — its contract
                     # is unknown.  Skip rather than guess; callers that
                     # care can pass ``safety=...`` explicitly.
+                    safety_declared = False
                     continue
                 constituent_contracts.append(inner_tool.safety)
+                if not inner_tool.safety_declared:
+                    safety_declared = False
             resolved_safety = merge_safety(constituent_contracts)
 
-        return cls(
+        wrapped = cls(
             name=tool_name,
             description=tool_description,
             input_schema=resolved_input,
@@ -555,6 +564,8 @@ class Tool:
             fn=_flow_fn,
             safety=resolved_safety,
         )
+        wrapped._safety_declared = safety_declared
+        return wrapped
 
 
 def _terminal_step(flow: Flow | DAGFlow) -> FlowStep:

@@ -235,6 +235,34 @@ class TestFlowServerRegistration:
         )
         assert FlowServer(executor).registered_tool_names == ["derived"]
 
+    def test_nested_flow_with_undeclared_safety_is_not_exposed(self) -> None:
+        registry = FlowRegistry()
+        inner = Flow(
+            name="inner",
+            description="Uses a tool without declared safety.",
+            steps=[FlowStep(tool_name="double")],
+        )
+        outer = Flow(
+            name="outer",
+            description="Wraps the inner flow as a tool.",
+            steps=[FlowStep(tool_name="inner")],
+        )
+        registry.register_flow(inner)
+        registry.register_flow(outer)
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="double",
+                description="",
+                input_schema=_NumIn,
+                output_schema=_NumOut,
+                fn=_double,
+            )
+        )
+        executor.register_tool(Tool.from_flow(inner, executor))
+
+        assert FlowServer(executor).registered_tool_names == []
+
     def test_explicit_names_override_default_filters(self) -> None:
         registry = FlowRegistry()
         registry.register_flow(
