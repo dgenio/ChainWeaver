@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780906467783,
+  "lastUpdate": 1780917198111,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2448,6 +2448,78 @@ window.BENCHMARK_DATA = {
             "value": 0.2698960000770967,
             "unit": "ms",
             "extra": "min=0.27ms max=0.29ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "444e1fcf151e3e2ae90bc4324c34f99d435f02e5",
+          "message": "Merge pull request #303 from dgenio/feat/259-governed-mcp-flows\n\nAdd governed macro-flow safety and MCP exposure",
+          "timestamp": "2026-06-08T12:11:48+01:00",
+          "tree_id": "dcb323c1c2a099541a150190bb97cfd78706d768",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/444e1fcf151e3e2ae90bc4324c34f99d435f02e5"
+        },
+        "date": 1780917197170,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.17048000017894083,
+            "unit": "ms",
+            "extra": "min=0.16ms max=0.24ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.1029019999805314,
+            "unit": "ms",
+            "extra": "min=0.09ms max=0.16ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.3396170000087295,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.55ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.16709200008335756,
+            "unit": "ms",
+            "extra": "min=0.16ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 101.99853800031633,
+            "unit": "ms",
+            "extra": "min=101.98ms max=102.11ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.37983099991834024,
+            "unit": "ms",
+            "extra": "min=0.37ms max=0.38ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.10225699972943,
+            "unit": "ms",
+            "extra": "min=251.04ms max=251.19ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.24296499987030984,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.27ms repeats=5"
           }
         ]
       }
