@@ -41,6 +41,7 @@ import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
+from packaging.version import Version
 from pydantic import BaseModel
 
 from chainweaver.contracts import SideEffectLevel, ToolSafetyContract, merge_safety
@@ -161,19 +162,16 @@ class FlowServer:
     def _register_all_flows(self) -> None:
         registry = self.executor.registry
         if self._explicit_flow_names is None:
-            # ``list_flows`` returns every (name, version) pair; collapse
-            # to the latest per name via ``get_flow`` (no version arg).
-            seen: set[str] = set()
-            flow_names: list[str] = []
+            latest_active: dict[str, Flow | DAGFlow] = {}
             for flow in registry.get_active_flows():
-                if flow.name not in seen:
-                    seen.add(flow.name)
-                    flow_names.append(flow.name)
+                current = latest_active.get(flow.name)
+                if current is None or Version(flow.version) > Version(current.version):
+                    latest_active[flow.name] = flow
+            flows = list(latest_active.values())
         else:
-            flow_names = list(self._explicit_flow_names)
+            flows = [registry.get_flow(flow_name) for flow_name in self._explicit_flow_names]
 
-        for flow_name in flow_names:
-            flow = registry.get_flow(flow_name)
+        for flow in flows:
             safety = _resolve_flow_safety(flow, self.executor)
             if self._explicit_flow_names is None:
                 reason = self._implicit_exclusion_reason(flow, safety)
@@ -231,6 +229,7 @@ class FlowServer:
         flow_tool = _build_flow_tool_dispatcher(
             mcp_name=mcp_name,
             flow_name=flow.name,
+            flow_version=flow.version,
             flow_description=description,
             input_schema=input_schema,
             output_schema=output_schema,
@@ -302,6 +301,7 @@ def _build_flow_tool_dispatcher(
     *,
     mcp_name: str,
     flow_name: str,
+    flow_version: str,
     flow_description: str,
     input_schema: type[BaseModel],
     output_schema: type[BaseModel] | None,
@@ -320,7 +320,7 @@ def _build_flow_tool_dispatcher(
     async def _dispatcher(**kwargs: Any) -> dict[str, Any]:
         validated = input_schema.model_validate(kwargs)
         data = validated.model_dump(exclude_none=False)
-        result = await executor.execute_flow_async(flow_name, data)
+        result = await executor.execute_flow_async(flow_name, data, version=flow_version)
         if not result.success:
             last = result.execution_log[-1] if result.execution_log else None
             detail = (

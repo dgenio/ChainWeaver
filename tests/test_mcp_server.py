@@ -15,6 +15,7 @@ from chainweaver import (
     FlowGovernance,
     FlowLifecycle,
     FlowRegistry,
+    FlowStatus,
     FlowStep,
     SideEffectLevel,
     Tool,
@@ -285,6 +286,38 @@ class TestFlowServerOverMCP:
         assert result.structuredContent is not None
         # (5 * 2) + 1 == 11
         assert result.structuredContent.get("value") == 11
+
+    def test_implicit_exposure_uses_latest_active_version(
+        self,
+        executor_with_flow: FlowExecutor,
+    ) -> None:
+        executor_with_flow.registry.register_flow(
+            Flow(
+                name="number_flow",
+                version="2.0.0",
+                description="Disabled replacement.",
+                steps=[FlowStep(tool_name="double", input_mapping={"n": "n"})],
+                status=FlowStatus.DISABLED,
+                input_schema_ref=Flow.schema_ref_from(_NumIn),
+                output_schema_ref=Flow.schema_ref_from(_NumOut),
+                safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
+            )
+        )
+        flow_server = FlowServer(executor_with_flow, name="cw-test")
+
+        async def go() -> tuple[Any, Any]:
+            async with create_connected_server_and_client_session(
+                flow_server.fastmcp._mcp_server
+            ) as client:
+                listing = await client.list_tools()
+                advertised = next(t for t in listing.tools if t.name == "number_flow")
+                result = await client.call_tool("number_flow", {"n": 5})
+                return advertised, result
+
+        advertised, result = _run(go())
+        assert advertised.meta["chainweaver"]["flow_version"] == "1.0.0"
+        assert result.isError is False
+        assert result.structuredContent == {"value": 11}
 
     def test_flow_failure_surfaces_as_mcp_error(self) -> None:
         registry = FlowRegistry()
