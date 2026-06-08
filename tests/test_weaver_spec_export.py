@@ -9,7 +9,14 @@ pytest.importorskip("weaver_contracts")
 from helpers import NumberInput, ValueInput, ValueOutput, _double_fn
 
 from chainweaver.executor import FlowExecutor
-from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
+from chainweaver.flow import (
+    DAGFlow,
+    DAGFlowStep,
+    Flow,
+    FlowGovernance,
+    FlowLifecycle,
+    FlowStep,
+)
 from chainweaver.integrations.weaver_spec import (
     SelectableItem,
     flow_to_selectable_item,
@@ -77,6 +84,23 @@ def test_flow_to_selectable_item_pulls_json_schema_into_metadata() -> None:
     assert "value" in item.metadata["output_schema"]["properties"]
     assert item.metadata["tags"] == ["data", "ingest"]
     _ = ValueInput  # imported for symmetry with other suites
+
+
+def test_flow_to_selectable_item_includes_governance_metadata() -> None:
+    flow = _flow(
+        governance=FlowGovernance(
+            lifecycle=FlowLifecycle.REVIEWED,
+            owner="platform",
+            replaces_tools=("fetch", "transform"),
+            estimated_model_calls_removed=8,
+            estimated_token_savings=900,
+        )
+    )
+    item = flow_to_selectable_item(flow)
+    assert item.metadata["lifecycle"] == "reviewed"
+    assert item.metadata["owner"] == "platform"
+    assert item.metadata["replaces_tools"] == ["fetch", "transform"]
+    assert item.metadata["estimated_token_savings"] == 900
 
 
 def test_flow_to_selectable_item_supports_dagflow() -> None:

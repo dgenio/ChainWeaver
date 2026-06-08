@@ -74,10 +74,11 @@ durable meaning.  ChainWeaver only generates the UUID.
 
 ## 3. Describing tools with side effects
 
-`Tool` does not distinguish read-only tools from tools that mutate the
-world.  As far as `FlowExecutor` is concerned, every tool is a pure
-function from `inputs → outputs`.  In reality, your `send_email` tool
-sends email.
+`Tool` and `Flow` can carry a `ToolSafetyContract` describing read-only
+status, side-effect severity, idempotency, retry safety, dry-run support,
+and approval requirements. `FlowExecutor` deliberately does not enforce
+that metadata: it still invokes the declared tool. Hosts and policy
+boundaries such as `FlowServer` decide which contracts are acceptable.
 
 What the host owns:
 
@@ -95,10 +96,10 @@ What the host owns:
   that as an upstream tool that blocks until approved — *outside* the
   flow.  Do not embed approval logic in a ChainWeaver step; the
   executor's wall-clock budget is the only knob it offers for waiting.
-- **Documentation.** Use the tool's `description` (which appears in
-  every introspection surface, including MCP listings) to declare
-  side-effect semantics so downstream agents and reviewers can audit
-  what a flow will actually do when invoked.
+- **Accurate declarations.** Supply `safety=ToolSafetyContract(...)` on
+  tools and flows. A bare tool still receives convenient safe defaults,
+  but `tool.safety_declared` remains false so security-sensitive exporters
+  can distinguish an explicit claim from missing metadata.
 
 This split — pure executor, host-described side effects — is what
 makes ChainWeaver's "no LLM between steps" guarantee meaningful at
@@ -152,6 +153,10 @@ What the host owns when wearing an MCP-server hat:
   to a no-op variant for the MCP transport "for safety" — that breaks
   the host's contract with its callers.  If you want a no-op variant
   for testing, expose it as a separately named flow.
+- **Exposure policy.** `FlowServer` defaults to active, read-only,
+  approval-free flows with known safety. Use `flow_names=[...]` only as a
+  deliberate operator override; explicit risky flows are exposed with
+  conservative annotations and a warning.
 - **Schema fidelity.** The MCP `inputSchema` should reflect the flow's
   *actual* first-step input schema (or its `input_schema_ref` if set),
   not a hand-written summary.  `flow_to_selectable_item` derives this

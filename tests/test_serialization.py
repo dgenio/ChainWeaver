@@ -10,6 +10,8 @@ from chainweaver.flow import (
     DAGFlow,
     DAGFlowStep,
     Flow,
+    FlowGovernance,
+    FlowLifecycle,
     FlowStatus,
     FlowStep,
     RetryPolicy,
@@ -287,6 +289,96 @@ class TestMiscFieldsRoundTrip:
         )
         restored = Flow.from_json(flow.to_json())
         assert restored.status is FlowStatus.DISABLED
+
+    def test_governance_round_trips(self) -> None:
+        flow = Flow(
+            name="candidate",
+            version="0.0.0",
+            description="Candidate.",
+            steps=[FlowStep(tool_name="x")],
+            governance=FlowGovernance(
+                lifecycle=FlowLifecycle.REVIEWED,
+                owner="platform",
+                replaces_tools=("x",),
+                estimated_model_calls_removed=7,
+                estimated_token_savings=1200,
+                reviewed_by="maintainer",
+            ),
+        )
+        restored = Flow.from_json(flow.to_json())
+        assert restored.governance == flow.governance
+
+    def test_legacy_requires_review_is_preserved_on_yaml_load(self) -> None:
+        restored = flow_from_yaml(
+            """
+type: Flow
+name: legacy-safety
+version: 1.0.0
+description: Legacy safety payload.
+steps:
+  - tool_name: x
+safety:
+  requires_review: true
+"""
+        )
+        assert restored.safety is not None
+        assert restored.safety.requires_approval is True
+
+
+class TestFlowLifecycle:
+    def test_valid_promotion_path(self) -> None:
+        governance = FlowGovernance(lifecycle=FlowLifecycle.SUGGESTED)
+        governance = governance.transition_to(FlowLifecycle.DRAFT)
+        governance = governance.transition_to(
+            FlowLifecycle.REVIEWED,
+            reviewed_by="maintainer",
+        )
+        governance = governance.transition_to(FlowLifecycle.ACTIVE)
+        assert governance.lifecycle is FlowLifecycle.ACTIVE
+        assert governance.reviewed_by == "maintainer"
+
+    def test_invalid_transition_raises(self) -> None:
+        governance = FlowGovernance(lifecycle=FlowLifecycle.DRAFT)
+        with pytest.raises(ValueError, match="cannot transition"):
+            governance.transition_to(FlowLifecycle.ACTIVE)
+
+    @pytest.mark.parametrize(
+        ("source", "target"),
+        [
+            (FlowLifecycle.OBSERVED, FlowLifecycle.SUGGESTED),
+            (FlowLifecycle.OBSERVED, FlowLifecycle.IGNORED),
+            (FlowLifecycle.SUGGESTED, FlowLifecycle.DRAFT),
+            (FlowLifecycle.SUGGESTED, FlowLifecycle.IGNORED),
+            (FlowLifecycle.DRAFT, FlowLifecycle.REVIEWED),
+            (FlowLifecycle.DRAFT, FlowLifecycle.IGNORED),
+            (FlowLifecycle.REVIEWED, FlowLifecycle.DRAFT),
+            (FlowLifecycle.REVIEWED, FlowLifecycle.ACTIVE),
+            (FlowLifecycle.REVIEWED, FlowLifecycle.ARCHIVED),
+            (FlowLifecycle.ACTIVE, FlowLifecycle.ARCHIVED),
+            (FlowLifecycle.IGNORED, FlowLifecycle.SUGGESTED),
+            (FlowLifecycle.ARCHIVED, FlowLifecycle.REVIEWED),
+        ],
+    )
+    def test_supported_transition(self, source: FlowLifecycle, target: FlowLifecycle) -> None:
+        governance = FlowGovernance(lifecycle=source)
+        assert governance.transition_to(target).lifecycle is target
+
+    @pytest.mark.parametrize(
+        ("source", "target"),
+        [
+            (FlowLifecycle.OBSERVED, FlowLifecycle.ACTIVE),
+            (FlowLifecycle.DRAFT, FlowLifecycle.ARCHIVED),
+            (FlowLifecycle.ACTIVE, FlowLifecycle.DRAFT),
+            (FlowLifecycle.IGNORED, FlowLifecycle.ACTIVE),
+        ],
+    )
+    def test_unsupported_transition_raises(
+        self,
+        source: FlowLifecycle,
+        target: FlowLifecycle,
+    ) -> None:
+        with pytest.raises(ValueError, match="cannot transition"):
+            FlowGovernance(lifecycle=source).transition_to(target)
 
 
 # ---------------------------------------------------------------------------

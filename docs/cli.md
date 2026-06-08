@@ -498,7 +498,7 @@ Each non-blank line of the trace file is a JSON object describing one tool call.
 `tool` (or its alias `tool_name`) is required; `inputs` defaults to `{}` and `outputs` to `null`.
 
 ```
-chainweaver record <trace.jsonl> [--output-dir DIR] [--min-occurrences N] [--min-length N] [--max-length N] [--format table|json]
+chainweaver record <trace.jsonl> [--output-dir DIR] [--min-occurrences N] [--min-length N] [--max-length N] [--include-ignored] [--format table|json]
 ```
 
 | Flag | Default | Description |
@@ -507,6 +507,7 @@ chainweaver record <trace.jsonl> [--output-dir DIR] [--min-occurrences N] [--min
 | `--min-occurrences` | `3` | Minimum contiguous appearances for a pattern to be suggested. |
 | `--min-length` | `2` | Minimum pattern length (number of tools). |
 | `--max-length` | (none) | Maximum pattern length. Omit for no upper bound. |
+| `--include-ignored` | `False` | Report persisted ignored candidates instead of suppressing them. Ignored files are never overwritten. |
 | `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON. |
 
 **Exit codes**: `0` = ran successfully (regardless of candidate count), `1` = malformed trace or serialization error, `2` = file not found.
@@ -518,7 +519,18 @@ chainweaver record examples/agent_tool_trace.jsonl
 chainweaver record examples/agent_tool_trace.jsonl --output-dir candidates/ --format json
 ```
 
-The emitted files are ordinary flow files — review them, then register and run them like any other flow. Suggested flows ship as version `0.0.0` to signal they are auto-generated and should be reviewed before promotion.
+New files are persisted with lifecycle `draft`; repeated runs preserve an
+existing candidate's governance state. Promote a candidate deterministically:
+
+```bash
+chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to reviewed --reviewed-by alice
+chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to active
+chainweaver flows ignore candidates/suggested__noisy.flow.yaml --reason "Not useful for this workspace"
+```
+
+The lifecycle is `observed → suggested → draft → reviewed → active`.
+`ignored` candidates are suppressed by later `record` runs, and `archived`
+flows remain auditable but are not exposed by default.
 
 ---
 

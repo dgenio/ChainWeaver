@@ -28,7 +28,11 @@ class TestToolSafetyContractDefaults:
         assert contract.determinism_level is DeterminismLevel.FULL
         assert contract.idempotent is True
         assert contract.cacheable is True
-        assert contract.requires_review is False
+        assert contract.safe_to_retry is True
+        assert contract.supports_dry_run is False
+        assert contract.requires_approval is False
+        assert contract.approval_reason is None
+        assert contract.read_only is True
 
     def test_is_frozen(self) -> None:
         contract = ToolSafetyContract()
@@ -42,10 +46,38 @@ class TestToolSafetyContractDefaults:
             determinism_level=DeterminismLevel.PARTIAL,
             idempotent=False,
             cacheable=False,
-            requires_review=True,
+            safe_to_retry=False,
+            supports_dry_run=True,
+            requires_approval=True,
+            approval_reason="Deletes remote state.",
         )
         roundtripped = ToolSafetyContract.model_validate_json(contract.model_dump_json())
         assert roundtripped == contract
+
+    def test_read_only_must_match_side_effect_level(self) -> None:
+        with pytest.raises(ValidationError, match="conflicts"):
+            ToolSafetyContract(
+                side_effects=SideEffectLevel.WRITE,
+                read_only=True,
+            )
+
+    def test_legacy_requires_review_maps_to_requires_approval(self) -> None:
+        contract = ToolSafetyContract.model_validate({"requires_review": True})
+        assert contract.requires_approval is True
+
+    def test_conflicting_legacy_and_current_approval_fields_raise(self) -> None:
+        with pytest.raises(ValidationError, match="conflicts"):
+            ToolSafetyContract.model_validate(
+                {
+                    "requires_review": True,
+                    "requires_approval": False,
+                }
+            )
+
+    def test_requires_review_attribute_is_deprecated_alias(self) -> None:
+        contract = ToolSafetyContract(requires_approval=True)
+        with pytest.warns(DeprecationWarning, match="requires_approval"):
+            assert contract.requires_review is True
 
 
 # ---------------------------------------------------------------------------
@@ -122,14 +154,32 @@ class TestMergeSafety:
         )
         assert merged.cacheable is False
 
-    def test_requires_review_uses_any(self) -> None:
+    def test_approval_and_retry_fields_merge_conservatively(self) -> None:
         merged = merge_safety(
             [
-                ToolSafetyContract(requires_review=False),
-                ToolSafetyContract(requires_review=True),
+                ToolSafetyContract(safe_to_retry=True, supports_dry_run=True),
+                ToolSafetyContract(
+                    safe_to_retry=False,
+                    supports_dry_run=False,
+                    requires_approval=True,
+                    approval_reason="Paid operation.",
+                ),
             ]
         )
-        assert merged.requires_review is True
+        assert merged.safe_to_retry is False
+        assert merged.supports_dry_run is False
+        assert merged.requires_approval is True
+        assert merged.approval_reason == "Paid operation."
+
+    def test_destructive_outranks_external(self) -> None:
+        merged = merge_safety(
+            [
+                ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL),
+                ToolSafetyContract(side_effects=SideEffectLevel.DESTRUCTIVE),
+            ]
+        )
+        assert merged.side_effects is SideEffectLevel.DESTRUCTIVE
+        assert merged.read_only is False
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,8 @@
     "FlowExecutor",
     "FlowExecutorMiddleware",
     "FlowFuzzer",
+    "FlowGovernance",
+    "FlowLifecycle",
     "FlowNotFoundError",
     "FlowProperty",
     "FlowRegistry",
@@ -150,7 +152,7 @@
   ],
   "python_version": [
     3,
-    11
+    14
   ],
   "symbols": {
     "AttestationInputError": {
@@ -336,9 +338,11 @@
         "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
+        "governance": "chainweaver.flow.FlowGovernance",
         "input_schema_ref": "str | NoneType",
         "name": "str",
         "output_schema_ref": "str | NoneType",
+        "safety": "chainweaver.contracts.ToolSafetyContract | NoneType",
         "status": "chainweaver.flow.FlowStatus",
         "steps": "list[chainweaver.flow.DAGFlowStep]",
         "tool_schema_hashes": "dict[str, str] | NoneType",
@@ -495,9 +499,11 @@
         "context_schema_ref": "str | NoneType",
         "description": "str",
         "deterministic": "bool",
+        "governance": "chainweaver.flow.FlowGovernance",
         "input_schema_ref": "str | NoneType",
         "name": "str",
         "output_schema_ref": "str | NoneType",
+        "safety": "chainweaver.contracts.ToolSafetyContract | NoneType",
         "status": "chainweaver.flow.FlowStatus",
         "steps": "list[chainweaver.flow.FlowStep]",
         "tool_schema_hashes": "dict[str, str] | NoneType",
@@ -589,6 +595,25 @@
       "module": "chainweaver.fuzz",
       "qualname": "FlowFuzzer",
       "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, properties: list[FlowProperty], fault_config: FaultConfig = <factory>, fault_hook: FaultHook | None = None) -> None"
+    },
+    "FlowGovernance": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "estimated_model_calls_removed": "int",
+        "estimated_token_savings": "int | NoneType",
+        "lifecycle": "chainweaver.flow.FlowLifecycle",
+        "owner": "str | NoneType",
+        "replaces_tools": "tuple[str, Ellipsis]",
+        "review_notes": "str | NoneType",
+        "reviewed_by": "str | NoneType"
+      },
+      "module": "chainweaver.flow",
+      "qualname": "FlowGovernance"
+    },
+    "FlowLifecycle": {
+      "kind": "enum",
+      "module": "chainweaver.flow",
+      "qualname": "FlowLifecycle"
     },
     "FlowNotFoundError": {
       "kind": "class",
@@ -1118,12 +1143,16 @@
     "ToolSafetyContract": {
       "kind": "pydantic-model",
       "model_fields": {
+        "approval_reason": "str | NoneType",
         "cacheable": "bool",
         "determinism_level": "chainweaver.contracts.DeterminismLevel",
         "idempotent": "bool",
-        "requires_review": "bool",
+        "read_only": "bool",
+        "requires_approval": "bool",
+        "safe_to_retry": "bool",
         "side_effects": "chainweaver.contracts.SideEffectLevel",
-        "stability": "chainweaver.contracts.StabilityLevel"
+        "stability": "chainweaver.contracts.StabilityLevel",
+        "supports_dry_run": "bool"
       },
       "module": "chainweaver.contracts",
       "qualname": "ToolSafetyContract"

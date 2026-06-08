@@ -38,12 +38,15 @@ deep inside ``serve``.
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import TYPE_CHECKING, Any, Literal
 
+from packaging.version import Version
 from pydantic import BaseModel
 
+from chainweaver.contracts import SideEffectLevel, ToolSafetyContract, merge_safety
 from chainweaver.exceptions import FlowExecutionError
-from chainweaver.flow import DAGFlow, Flow
+from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
 
 try:  # Optional dependency.
     from fastmcp import FastMCP
@@ -62,6 +65,9 @@ if TYPE_CHECKING:  # pragma: no cover — type-checking only
 
 
 TransportName = Literal["stdio", "sse", "streamable-http"]
+_LOGGER = logging.getLogger(__name__)
+_DEFAULT_LIFECYCLES = frozenset({FlowLifecycle.ACTIVE})
+_DEFAULT_SIDE_EFFECTS = frozenset({SideEffectLevel.NONE, SideEffectLevel.READ})
 
 
 class FlowServer:
@@ -76,13 +82,21 @@ class FlowServer:
         name: Human-readable server name advertised over MCP.  Defaults
             to ``"chainweaver"``.
         flow_names: Optional iterable of flow names to expose.  When
-            ``None`` (the default), every ``ACTIVE`` flow in the
-            executor's registry is exposed.  Pass an explicit subset
-            for least-privilege deployments.
+            ``None`` (the default), only flows allowed by the lifecycle,
+            ownership, side-effect, and approval filters are exposed.
+            Explicit names are an owner override and bypass those filters.
         server_prefix: Optional prefix applied to the MCP tool name
             for each flow (so the same server can sit alongside other
             MCP servers without name collisions).  Default ``""``
             keeps flow names verbatim.
+        allowed_lifecycles: Review lifecycle states eligible for implicit
+            exposure.  Defaults to ``{ACTIVE}``.
+        allowed_side_effects: Side-effect levels eligible for implicit
+            exposure.  Defaults to read-only levels ``NONE`` and ``READ``.
+        owners: Optional allow-list of governance owners for implicit
+            exposure.
+        allow_requires_approval: Whether implicit exposure may include
+            flows whose safety contract requires approval.
 
     Example::
 
@@ -106,6 +120,10 @@ class FlowServer:
         name: str = "chainweaver",
         flow_names: Iterable[str] | None = None,
         server_prefix: str = "",
+        allowed_lifecycles: Iterable[FlowLifecycle] | None = None,
+        allowed_side_effects: Iterable[SideEffectLevel] | None = None,
+        owners: Iterable[str] | None = None,
+        allow_requires_approval: bool = False,
     ) -> None:
         self.executor = executor
         self.name = name
@@ -113,6 +131,16 @@ class FlowServer:
         self._explicit_flow_names: list[str] | None = (
             list(flow_names) if flow_names is not None else None
         )
+        self.allowed_lifecycles = (
+            _DEFAULT_LIFECYCLES if allowed_lifecycles is None else frozenset(allowed_lifecycles)
+        )
+        self.allowed_side_effects = (
+            _DEFAULT_SIDE_EFFECTS
+            if allowed_side_effects is None
+            else frozenset(allowed_side_effects)
+        )
+        self.owners = frozenset(owners) if owners is not None else None
+        self.allow_requires_approval = allow_requires_approval
         self._mcp = FastMCP(name=name)
         self._registered_tool_names: list[str] = []
         self._register_all_flows()
@@ -134,42 +162,82 @@ class FlowServer:
     def _register_all_flows(self) -> None:
         registry = self.executor.registry
         if self._explicit_flow_names is None:
-            # ``list_flows`` returns every (name, version) pair; collapse
-            # to the latest per name via ``get_flow`` (no version arg).
-            seen: set[str] = set()
-            flow_names: list[str] = []
+            latest_active: dict[str, Flow | DAGFlow] = {}
             for flow in registry.get_active_flows():
-                if flow.name not in seen:
-                    seen.add(flow.name)
-                    flow_names.append(flow.name)
+                current = latest_active.get(flow.name)
+                if current is None or Version(flow.version) > Version(current.version):
+                    latest_active[flow.name] = flow
+            flows = list(latest_active.values())
         else:
-            flow_names = list(self._explicit_flow_names)
+            flows = [registry.get_flow(flow_name) for flow_name in self._explicit_flow_names]
 
-        for flow_name in flow_names:
-            flow = registry.get_flow(flow_name)
-            self._register_flow(flow)
+        for flow in flows:
+            safety = _resolve_flow_safety(flow, self.executor)
+            if self._explicit_flow_names is None:
+                reason = self._implicit_exclusion_reason(flow, safety)
+                if reason is not None:
+                    _LOGGER.warning("Skipping MCP flow '%s': %s", flow.name, reason)
+                    continue
+            elif safety is None:
+                _LOGGER.warning(
+                    "Explicitly exposing MCP flow '%s' with unknown safety metadata.",
+                    flow.name,
+                )
+            elif (
+                safety.side_effects not in self.allowed_side_effects
+                or safety.requires_approval
+                or flow.governance.lifecycle not in self.allowed_lifecycles
+            ):
+                _LOGGER.warning(
+                    "Explicitly exposing MCP flow '%s' despite restrictive "
+                    "lifecycle or safety metadata.",
+                    flow.name,
+                )
+            self._register_flow(flow, safety)
 
-    def _register_flow(self, flow: Flow | DAGFlow) -> None:
+    def _implicit_exclusion_reason(
+        self,
+        flow: Flow | DAGFlow,
+        safety: ToolSafetyContract | None,
+    ) -> str | None:
+        """Return why *flow* is excluded from default exposure, if any."""
+        if flow.governance.lifecycle not in self.allowed_lifecycles:
+            return f"lifecycle is '{flow.governance.lifecycle.value}'"
+        if self.owners is not None and flow.governance.owner not in self.owners:
+            return f"owner {flow.governance.owner!r} is not allowed"
+        if safety is None:
+            return "safety metadata is missing or cannot be derived"
+        if safety.side_effects not in self.allowed_side_effects:
+            return f"side effects are '{safety.side_effects.value}'"
+        if safety.requires_approval and not self.allow_requires_approval:
+            return "human approval is required"
+        return None
+
+    def _register_flow(
+        self,
+        flow: Flow | DAGFlow,
+        safety: ToolSafetyContract | None,
+    ) -> None:
         input_schema = _resolve_input_schema(flow, self.executor)
         output_schema = _resolve_output_schema(flow, self.executor)
 
         mcp_name = f"{self.server_prefix}__{flow.name}" if self.server_prefix else flow.name
+        if mcp_name in self._registered_tool_names:
+            raise ValueError(f"MCP tool name collision for '{mcp_name}'.")
 
+        description = _flow_description(flow, safety)
         flow_tool = _build_flow_tool_dispatcher(
             mcp_name=mcp_name,
             flow_name=flow.name,
-            flow_description=flow.description,
+            flow_version=flow.version,
+            flow_description=description,
             input_schema=input_schema,
             output_schema=output_schema,
             executor=self.executor,
         )
 
-        annotations = ToolAnnotations(
-            title=mcp_name,
-            readOnlyHint=False,
-            destructiveHint=False,
-            idempotentHint=getattr(flow, "deterministic", False),
-        )
+        annotations = _tool_annotations(mcp_name, safety)
+        metadata = _flow_metadata(flow, safety)
 
         # fastmcp 3.x takes a pre-built ``Tool`` rather than ``add_tool``
         # keyword arguments.  Passing ``output_schema`` as a JSON-Schema dict
@@ -180,9 +248,10 @@ class FlowServer:
         tool = _FastMCPTool.from_function(
             flow_tool,
             name=mcp_name,
-            description=flow.description or f"ChainWeaver flow '{flow.name}'.",
+            description=description,
             annotations=annotations,
             output_schema=out_schema,
+            meta={"chainweaver": metadata},
         )
         self._mcp.add_tool(tool)
         self._registered_tool_names.append(mcp_name)
@@ -232,6 +301,7 @@ def _build_flow_tool_dispatcher(
     *,
     mcp_name: str,
     flow_name: str,
+    flow_version: str,
     flow_description: str,
     input_schema: type[BaseModel],
     output_schema: type[BaseModel] | None,
@@ -250,7 +320,7 @@ def _build_flow_tool_dispatcher(
     async def _dispatcher(**kwargs: Any) -> dict[str, Any]:
         validated = input_schema.model_validate(kwargs)
         data = validated.model_dump(exclude_none=False)
-        result = await executor.execute_flow_async(flow_name, data)
+        result = await executor.execute_flow_async(flow_name, data, version=flow_version)
         if not result.success:
             last = result.execution_log[-1] if result.execution_log else None
             detail = (
@@ -371,6 +441,98 @@ class _PermissiveInput(BaseModel):
     """Fallback model used when a flow's input schema can't be determined."""
 
     model_config = {"extra": "allow"}
+
+
+def _resolve_flow_safety(
+    flow: Flow | DAGFlow,
+    executor: FlowExecutor,
+) -> ToolSafetyContract | None:
+    """Return explicit or fully-derived safety, never an optimistic guess."""
+    if flow.safety is not None:
+        return flow.safety
+    contracts: list[ToolSafetyContract] = []
+    for step in flow.steps:
+        if step.tool_name is None:
+            return None
+        try:
+            tool = executor.get_tool(step.tool_name)
+        except Exception:
+            return None
+        if not tool.safety_declared:
+            return None
+        contracts.append(tool.safety)
+    if not contracts:
+        return None
+    return merge_safety(contracts)
+
+
+def _tool_annotations(
+    mcp_name: str,
+    safety: ToolSafetyContract | None,
+) -> ToolAnnotations:
+    """Map ChainWeaver safety metadata to MCP tool hints."""
+    if safety is None:
+        return ToolAnnotations(
+            title=mcp_name,
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        )
+    return ToolAnnotations(
+        title=mcp_name,
+        readOnlyHint=safety.read_only,
+        destructiveHint=safety.side_effects is SideEffectLevel.DESTRUCTIVE,
+        idempotentHint=safety.idempotent,
+        openWorldHint=safety.side_effects is SideEffectLevel.EXTERNAL,
+    )
+
+
+def _flow_metadata(
+    flow: Flow | DAGFlow,
+    safety: ToolSafetyContract | None,
+) -> dict[str, Any]:
+    """Build structured ChainWeaver metadata for an MCP tool."""
+    return {
+        "flow_name": flow.name,
+        "flow_version": flow.version,
+        "lifecycle": flow.governance.lifecycle.value,
+        "owner": flow.governance.owner,
+        "reviewed_by": flow.governance.reviewed_by,
+        "review_notes": flow.governance.review_notes,
+        "replaces_tools": list(flow.governance.replaces_tools),
+        "estimated_model_calls_removed": flow.governance.estimated_model_calls_removed,
+        "estimated_token_savings": flow.governance.estimated_token_savings,
+        "safety": safety.model_dump(mode="json") if safety is not None else None,
+    }
+
+
+def _flow_description(
+    flow: Flow | DAGFlow,
+    safety: ToolSafetyContract | None,
+) -> str:
+    """Build an MCP description that carries review and savings context."""
+    base = flow.description or f"ChainWeaver flow '{flow.name}'."
+    details = [
+        f"lifecycle={flow.governance.lifecycle.value}",
+        f"version={flow.version}",
+    ]
+    if flow.governance.replaces_tools:
+        details.append(f"replaces={','.join(flow.governance.replaces_tools)}")
+    if flow.governance.estimated_model_calls_removed:
+        details.append(
+            f"estimated_model_calls_removed={flow.governance.estimated_model_calls_removed}"
+        )
+    if flow.governance.estimated_token_savings is not None:
+        details.append(f"estimated_token_savings={flow.governance.estimated_token_savings}")
+    if safety is None:
+        details.append("safety=unknown")
+    else:
+        details.append(f"side_effects={safety.side_effects.value}")
+        details.append(f"requires_approval={str(safety.requires_approval).lower()}")
+        if safety.approval_reason:
+            details.append(f"approval_reason={safety.approval_reason}")
+    return f"{base} [{'; '.join(details)}]"
 
 
 # Re-export so callers don't import private symbols.
