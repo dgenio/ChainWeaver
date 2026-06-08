@@ -1,10 +1,10 @@
 """Weaver-spec conformance gate (issues #91, #233).
 
 This module is the CI conformance signal for ChainWeaver's declared
-weaver-spec compatibility.  It is collected by the default ``pytest``
+weaver-spec compatibility. It is collected by the default ``pytest``
 run *and* by the dedicated CI job in ``.github/workflows/ci.yml`` so
-drift between :data:`chainweaver.integrations.weaver_spec.WEAVER_SPEC_VERSION`
-and ``docs/SPEC_COMPAT.md`` fails the build.
+drift between the package metadata and ``docs/SPEC_COMPAT.md`` fails
+the build.
 
 The tests are intentionally narrow:
 
@@ -15,18 +15,21 @@ The tests are intentionally narrow:
   :mod:`chainweaver.integrations.weaver_spec` are the upstream
   dataclasses and that the exporter/resolvers are at their documented
   paths.
-- They cross-check the declared version against
-  ``docs/SPEC_COMPAT.md`` so the compat statement and the code stay
-  in sync.
+- They cross-check the declared dependency range against the installed
+  version and ``docs/SPEC_COMPAT.md``.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+from importlib.metadata import requires as distribution_requires
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
 pytest.importorskip("weaver_contracts")
 
@@ -44,6 +47,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SPEC_COMPAT_PATH = REPO_ROOT / "docs" / "SPEC_COMPAT.md"
 
 
+def _declared_weaver_specifier() -> SpecifierSet:
+    """Return the unique weaver-contracts range from package metadata."""
+    specifiers = {
+        str(requirement.specifier)
+        for raw_requirement in distribution_requires("chainweaver") or ()
+        if (requirement := Requirement(raw_requirement)).name == "weaver-contracts"
+    }
+    assert len(specifiers) == 1, (
+        "Expected one consistent weaver-contracts range in package metadata; "
+        f"got {sorted(specifiers)!r}."
+    )
+    return SpecifierSet(specifiers.pop())
+
+
 @pytest.mark.conformance
 def test_weaver_spec_version_format() -> None:
     """The declared version is a PEP 440-style ``major.minor.patch`` string."""
@@ -59,19 +76,20 @@ def test_declared_version_matches_installed_contract() -> None:
     from weaver_contracts.version import CONTRACT_VERSION
 
     assert WEAVER_SPEC_VERSION == CONTRACT_VERSION
+    assert Version(WEAVER_SPEC_VERSION) in _declared_weaver_specifier()
     assert is_compatible(WEAVER_SPEC_VERSION) is True
 
 
 @pytest.mark.conformance
-def test_spec_compat_doc_references_declared_version() -> None:
-    """``docs/SPEC_COMPAT.md`` must mention the declared spec version."""
+def test_spec_compat_doc_references_declared_range() -> None:
+    """``docs/SPEC_COMPAT.md`` must mention every declared range bound."""
     assert SPEC_COMPAT_PATH.is_file(), f"Missing {SPEC_COMPAT_PATH}"
     text = SPEC_COMPAT_PATH.read_text(encoding="utf-8")
-    assert WEAVER_SPEC_VERSION in text, (
-        f"docs/SPEC_COMPAT.md does not reference declared "
-        f"WEAVER_SPEC_VERSION={WEAVER_SPEC_VERSION!r}. "
-        f"Update the doc or bump the constant in lock-step."
-    )
+    for bound in _declared_weaver_specifier():
+        assert str(bound) in text, (
+            f"docs/SPEC_COMPAT.md does not reference declared "
+            f"weaver-contracts bound {str(bound)!r}."
+        )
 
 
 @pytest.mark.conformance

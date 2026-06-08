@@ -17,6 +17,8 @@ from typing import Any
 import chainweaver
 
 _MANIFEST = Path(__file__).resolve().parents[1] / "server.json"
+_README = Path(__file__).resolve().parents[1] / "README.md"
+_MCP_NAME_MARKER = "<!-- mcp-name: io.github.dgenio/chainweaver -->"
 
 
 def _load_manifest() -> dict[str, Any]:
@@ -34,7 +36,11 @@ def _pypi_package(manifest: dict[str, Any]) -> dict[str, Any]:
 
 def test_manifest_is_valid_json() -> None:
     manifest = _load_manifest()
+    assert manifest["$schema"] == (
+        "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+    )
     assert manifest["name"] == "io.github.dgenio/chainweaver"
+    assert len(manifest["description"]) <= 100
 
 
 def test_manifest_version_matches_package() -> None:
@@ -46,7 +52,10 @@ def test_manifest_version_matches_package() -> None:
 def test_uvx_launch_resolves_mcp_extra() -> None:
     """A fresh client must install ``chainweaver[mcp]``, not bare ``chainweaver``."""
     package = _pypi_package(_load_manifest())
+    assert package["registryBaseUrl"] == "https://pypi.org"
+    assert package["identifier"] == "chainweaver"
     assert package["runtimeHint"] == "uvx"
+    assert package["transport"] == {"type": "stdio"}
     runtime_args = package.get("runtimeArguments", [])
     from_args = [
         arg for arg in runtime_args if arg.get("type") == "named" and arg.get("name") == "--from"
@@ -64,3 +73,20 @@ def test_serve_command_takes_required_flow_file() -> None:
     ]
     assert required_positional, "server.json must require a flow-file positional."
     assert required_positional[0]["valueHint"] == "flow_file"
+    assert required_positional[0]["format"] == "filepath"
+
+
+def test_tools_module_argument_is_optional_and_repeatable() -> None:
+    package_args = _pypi_package(_load_manifest())["packageArguments"]
+    tools_args = [
+        arg for arg in package_args if arg.get("type") == "named" and arg.get("name") == "--tools"
+    ]
+    assert len(tools_args) == 1
+    assert tools_args[0]["isRepeated"] is True
+    assert tools_args[0]["isRequired"] is False
+    assert "value" not in tools_args[0]
+
+
+def test_pypi_readme_contains_registry_ownership_marker() -> None:
+    readme = _README.read_text(encoding="utf-8")
+    assert readme.count(_MCP_NAME_MARKER) == 1
