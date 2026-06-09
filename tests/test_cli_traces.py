@@ -1,6 +1,6 @@
 """Tests for the ``chainweaver traces`` CLI group and ``doctor --preflight``.
 
-Covers the coding-agent pipeline surface (#254, #256, #257, #266, #267) and
+Covers the coding-agent macro-flow surface (#254, #256, #257, #266, #267) and
 the structural preflight checker (#314).
 """
 

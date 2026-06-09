@@ -4,7 +4,7 @@
 # -----------------------
 # Two deterministic macro-flows that compress repeated coding-agent tool paths
 # into a single high-level operation — the kind of path the ``chainweaver
-# traces`` pipeline (#254/#256/#257/#266/#267) mines, scores, and drafts:
+# traces`` flow loop (#254/#256/#257/#266/#267) mines, scores, and drafts:
 #
 #   repo_context_pack:
 #       search_files → read_file → inspect_config → summarize_context
