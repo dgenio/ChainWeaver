@@ -43,6 +43,10 @@ jobs:
         uses: ./.github/actions/chainweaver
         with:
           directory: examples
+          # Pre-publish CI exercises action code at HEAD against the latest
+          # already-published package. distribution-check.yml verifies the
+          # exact new pin after PyPI publication.
+          chainweaver-version: ""
       - name: Assert success
         run: test "${{ steps.cw.outputs.exit-code }}" = "0"
 
@@ -61,6 +65,7 @@ jobs:
         uses: ./.github/actions/chainweaver
         with:
           directory: ${{ runner.temp }}/flows
+          chainweaver-version: ""
       - name: Assert failure
         run: |
           test "${{ steps.cw.outcome }}" = "failure"

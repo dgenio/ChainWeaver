@@ -1,0 +1,107 @@
+name: Distribution check
+
+# Verify public release surfaces only after Publish to PyPI finishes. The
+# workflow_run trigger executes from the default branch, then checks out the
+# exact release SHA reported by the publication run.
+
+on:
+  workflow_run:
+    workflows: ["Publish to PyPI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published version to verify (X.Y.Z)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify published distribution
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: "1.7.9"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Resolve and verify release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="$(python scripts/release.py version)"
+          fi
+          python scripts/release.py check --expected-version "${version}"
+          git fetch --force origin "refs/tags/v${version}:refs/tags/v${version}"
+          test "$(git rev-list -n 1 "v${version}")" = "$(git rev-parse HEAD)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for exact PyPI version
+        run: >-
+          python scripts/release.py verify-pypi
+          "${{ steps.release.outputs.version }}"
+          --attempts 12
+          --delay 10
+
+      - name: Install official MCP publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/mcp-publisher.tar.gz"
+          checksums="${RUNNER_TEMP}/registry-checksums.txt"
+          curl --fail --location --show-error \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            --output "${archive}"
+          curl --fail --location --show-error \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/registry_${MCP_PUBLISHER_VERSION}_checksums.txt" \
+            --output "${checksums}"
+          (
+            cd "${RUNNER_TEMP}"
+            grep ' mcp-publisher_linux_amd64.tar.gz$' "${checksums}" \
+              | sha256sum --check -
+          )
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}" mcp-publisher
+          chmod +x "${RUNNER_TEMP}/mcp-publisher"
+
+      - name: Validate MCP registry manifest
+        run: "${RUNNER_TEMP}/mcp-publisher validate server.json"
+
+      - name: Smoke-test released action and package
+        id: action-smoke
+        uses: ./.github/actions/chainweaver
+        with:
+          directory: examples
+          chainweaver-version: ${{ steps.release.outputs.version }}
+
+      - name: Assert action success
+        run: test "${{ steps.action-smoke.outputs.exit-code }}" = "0"
+
+      - name: Write release summary
+        shell: bash
+        run: |
+          python scripts/release.py status \
+            --expected-version "${{ steps.release.outputs.version }}" \
+            >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo
+            echo "- PyPI version resolved: ${{ steps.release.outputs.version }}"
+            echo "- MCP manifest validated with mcp-publisher ${MCP_PUBLISHER_VERSION}"
+            echo "- Released composite action smoke test passed"
+          } >> "${GITHUB_STEP_SUMMARY}"

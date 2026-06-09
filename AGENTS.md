@@ -121,9 +121,9 @@ mkdocs.yml                   MkDocs Material site config (#133)
 .readthedocs.yaml            Read the Docs build config (#133)
 pytest_chainweaver.py        Top-level pytest plugin module (#132); registered via [project.entry-points.pytest11]. Deliberately outside the chainweaver/ package so pytest's entry-point loader does not transitively import chainweaver before pytest-cov starts coverage measurement.
 pyproject.toml               Ruff, mypy, pytest config (source of truth for tooling)
-scripts/                     Maintenance scripts run from CI, not shipped in the package — refresh_prices.py keeps cost.py PROVIDER_PRICES fresh (#156)
+scripts/                     Maintenance scripts run from CI, not shipped in the package — release.py prepares/verifies releases (#304–#309); refresh_prices.py keeps cost.py PROVIDER_PRICES fresh (#156)
 benchmarks/                  Standalone benchmark scripts (not coverage-gated): bench_naive_vs_compiled.py (#29), bench_correctness.py (#103), report.py (#207); results/ holds generated latest.{json,md}
-.github/workflows/           CI (ci.yml), docs (docs.yml), bench (bench.yml), publish (publish.yml), and update-prices.yml (#156) workflows
+.github/workflows/           CI/docs/bench plus PR-first release, publish, post-publish distribution verification, and update-prices workflows
 ```
 
 ### Key entry points
@@ -338,10 +338,10 @@ installs the minimum declared dependency versions
 (`uv pip install --resolution lowest-direct`) and runs the full suite on
 Python 3.10, and a weekly scheduled `latest-deps` job runs the suite
 against the newest (incl. pre-release) dependencies on Python 3.14
-(issue #236). A separate `bench.yml` workflow runs
-the naive-vs-compiled benchmark on `ubuntu-22.04` and fails PRs whose
-median `total_duration_ms` regresses beyond 125 % of the `gh-pages`
-baseline (see [benchmarks/README.md](benchmarks/README.md)).
+(issue #236). A separate `bench.yml` workflow runs the naive-vs-compiled
+benchmark on `ubuntu-22.04`; executor-sensitive changes alert when a compiled
+metric exceeds 200 % of the `gh-pages` baseline, while release/docs changes
+cannot emit performance alerts (see [benchmarks/README.md](benchmarks/README.md)).
 
 For full CI, PR, branch, and commit conventions, see
 [workflows.md](docs/agent-context/workflows.md).

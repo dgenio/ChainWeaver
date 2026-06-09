@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PR-first release and distribution automation** (#304, #305, #306, #307,
+  #308, #309): make `chainweaver.__version__` authoritative, add one-command
+  release preparation and consistency checks, create and tag reviewed release
+  PRs, verify PyPI/MCP/Action surfaces after publication, decouple pre-publish
+  Action smoke tests from unreleased pins, and restrict 2x benchmark alerts to
+  execution-sensitive changes.
 - **Governed macro-flow lifecycle and safe MCP exposure** (#259, #268, #294):
   flows now carry serializable `FlowGovernance` metadata with explicit
   `observed → suggested → draft → reviewed → active` promotion states plus

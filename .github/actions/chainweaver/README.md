@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+      - uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
         with:
           directory: flows/
 ```
@@ -29,7 +29,7 @@ jobs:
 | `directory` | `.` | Directory scanned recursively for flow files. |
 | `annotations` | `true` | Emit GitHub `::error` annotations for each invalid flow file. Annotations are file-scoped — the flow serializer reports structural errors per file without line numbers. |
 | `python-version` | `3.10` | Python version used to install and run `chainweaver`. Must be one of ChainWeaver's supported versions (3.10–3.14). |
-| `chainweaver-version` | `0.12.0` | Exact version of `chainweaver` to install from PyPI (passed through to `pip install "chainweaver==<version>"`). Pinned by default; pass an empty string for the latest published version. |
+| `chainweaver-version` | `0.12.1` | Exact version of `chainweaver` to install from PyPI (passed through to `pip install "chainweaver==<version>"`). Pinned by default; pass an empty string for the latest published version. |
 | `extra-args` | `""` | Additional arguments appended verbatim to the invocation (e.g. `--quiet`). |
 
 ### Outputs
@@ -51,7 +51,7 @@ summary. Set `annotations: false` to disable.
 ### Validate every flow under `flows/`
 
 ```yaml
-- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
   with:
     directory: flows/
 ```
@@ -59,7 +59,7 @@ summary. Set `annotations: false` to disable.
 ### Forward the result to a downstream step
 
 ```yaml
-- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
   id: cw
   continue-on-error: true
   with:
@@ -72,15 +72,15 @@ summary. Set `annotations: false` to disable.
 ### Pin to a specific ChainWeaver release
 
 ```yaml
-- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
   with:
-    chainweaver-version: "0.12.0"
+    chainweaver-version: "0.12.1"
 ```
 
 ### Track the latest release instead
 
 ```yaml
-- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
   with:
     chainweaver-version: ""  # falls through to ``pip install chainweaver``
 ```
@@ -89,9 +89,15 @@ summary. Set `annotations: false` to disable.
 
 This action lives inside the `dgenio/ChainWeaver` repository, so it is
 versioned with the package. Pin to a ChainWeaver release tag
-(`@v0.12.0`) rather than `@main` to avoid implicit upgrades.
+(`@v0.12.1`) rather than `@main` to avoid implicit upgrades.
 
 The `chainweaver-version` input default matches the action's tag — both
 are bumped in lockstep when a new ChainWeaver release ships. If you
 override `chainweaver-version`, the action will install whatever you ask
 for; it will not refuse a mismatch.
+
+ChainWeaver's own pre-publish smoke workflow passes an empty version so a
+release PR tests the action code against the latest package already available
+on PyPI. After publication, `distribution-check.yml` reruns the action with the
+exact just-published version. This keeps downstream defaults pinned without
+making release-day CI depend on a package that does not exist yet.
