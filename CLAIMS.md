@@ -26,7 +26,7 @@ python benchmarks/bench_naive_vs_compiled.py --steps 6
 
 - `chainweaver/executor.py` — the executor is a graph runner; the three hard
   invariants (no LLM, no network, no randomness) are enforced by review and
-  documented in [invariants.md](agent-context/invariants.md).
+  documented in [invariants.md](docs/agent-context/invariants.md).
 - `benchmarks/bench_naive_vs_compiled.py`
 
 **Caveat** — the "naive" baseline simulates model latency with `time.sleep`;

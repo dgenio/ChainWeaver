@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Coding-agent macro-flow compilation pipeline** (#254, #256, #257, #260,
+- **Coding-agent macro-flow compilation loop** (#254, #256, #257, #260,
   #261, #262, #263, #266, #267, #312, #313, #314): a new `chainweaver.traces`
   module makes the *observe → mine → score → draft → backtest* loop
   first-class for coding agents. Adds a vendor-neutral coding-agent trace

@@ -30,7 +30,7 @@ import time
 from statistics import median
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep, Tool
 
@@ -41,11 +41,11 @@ _SCHEMA_TOKENS_PER_TOOL = 180
 
 
 class StepInput(BaseModel):
-    payload: dict[str, Any] = {}
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class StepOutput(BaseModel):
-    payload: dict[str, Any] = {}
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def _make_tool(name: str) -> Tool:

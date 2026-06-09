@@ -179,6 +179,7 @@
         "event": "chainweaver.traces.TraceEventKind",
         "input_tokens": "int | NoneType",
         "latency_ms": "float | NoneType",
+        "metadata": "dict[str, Any]",
         "output_keys": "tuple[str, Ellipsis]",
         "output_tokens": "int | NoneType",
         "result_status": "str | NoneType",

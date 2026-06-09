@@ -8,7 +8,7 @@ or any custom agent loop).  It complements the existing generic machinery:
   :class:`~chainweaver.observer.ChainObserver` (issue #78, #226) capture and
   mine repeated tool sequences from runtime tool calls.
 * :class:`~chainweaver.analyzer.ChainAnalyzer` (issue #77) discovers
-  statically compilable chains from tool schemas.
+  statically compilable flows from tool schemas.
 
 What was missing for the coding-agent token-reduction use case is a stable
 **import format** for tool-use logs that also carries model-call/token
@@ -56,6 +56,29 @@ _READ_ONLY_VERBS = frozenset(
 )
 _SIDE_EFFECT_VERBS = frozenset(
     {"write", "edit", "delete", "create", "comment", "run", "post", "apply", "update", "push"}
+)
+
+# Record keys consumed by the normalized schema; everything else is preserved
+# verbatim in ``AgentTraceEvent.metadata`` so vendor-specific fields survive.
+_KNOWN_EVENT_KEYS = frozenset(
+    {
+        "session_id",
+        "turn_id",
+        "event",
+        "tool",
+        "tool_name",
+        "args",
+        "inputs",
+        "result_status",
+        "status",
+        "output_keys",
+        "outputs",
+        "input_tokens",
+        "output_tokens",
+        "latency_ms",
+        "tool_source",
+        "timestamp",
+    }
 )
 
 
@@ -110,6 +133,9 @@ class AgentTraceEvent(BaseModel):
         tool_source: Origin of the tool (``"mcp"``, ``"builtin"``,
             ``"custom"``, ``"unknown"``), when recorded.
         timestamp: UTC timestamp of the event, when recorded.
+        metadata: Any record keys that are not part of the normalized schema,
+            preserved verbatim so vendor-specific fields survive a round-trip
+            and stay available for future compatibility (see #278).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -126,6 +152,7 @@ class AgentTraceEvent(BaseModel):
     latency_ms: float | None = None
     tool_source: str | None = None
     timestamp: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CandidateScore(BaseModel):
@@ -143,9 +170,9 @@ class CandidateScore(BaseModel):
             ``error`` result status (``1.0`` when statuses are unrecorded).
         model_calls_removed_per_run: Model-mediated decisions avoided per
             execution — one per tool step in the compiled flow.
-        estimated_input_tokens_saved: Mean prompt tokens of the model calls
+        estimated_input_tokens_saved: Median prompt tokens of the model calls
             interleaved within the matched windows, per run.
-        estimated_output_tokens_saved: Mean completion tokens, per run.
+        estimated_output_tokens_saved: Median completion tokens, per run.
         schema_stability: ``0-1`` consistency of per-step argument key-sets
             across occurrences (``1.0`` = every occurrence had identical
             argument shapes at each position).
@@ -270,6 +297,8 @@ def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTra
         tuple(str(key) for key in output_keys) if isinstance(output_keys, (list, tuple)) else ()
     )
 
+    metadata = {key: value for key, value in obj.items() if key not in _KNOWN_EVENT_KEYS}
+
     return AgentTraceEvent(
         session_id=session,
         turn_id=str(turn) if turn not in (None, "") else None,
@@ -283,6 +312,7 @@ def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTra
         latency_ms=_opt_float(obj.get("latency_ms")),
         tool_source=_opt_str(obj.get("tool_source")),
         timestamp=_opt_dt(obj.get("timestamp")),
+        metadata=metadata,
     )
 
 
@@ -579,12 +609,14 @@ def _token_savings(
     per_session: dict[str, list[AgentTraceEvent]],
     sequence: tuple[str, ...],
 ) -> tuple[int, int]:
-    """Mean prompt/completion tokens of model calls inside matched spans.
+    """Median prompt/completion tokens of model calls inside matched spans.
 
     A compiled flow removes the model-mediated decisions *between* the tool
-    calls of the sequence.  We estimate the per-run savings as the mean
-    tokens of model_call events that fall within the span of each matched
-    window in the original (interleaved) session timeline.
+    calls of the sequence.  We estimate the per-run savings as the median
+    tokens of the ``model_call`` events that fall within the span of each
+    matched window in the original (interleaved) session timeline.  Only
+    ``model_call`` events are counted, and recorded zero-token counts are
+    included (a model call that genuinely cost nothing is real signal).
     """
     in_samples: list[int] = []
     out_samples: list[int] = []
@@ -600,13 +632,16 @@ def _token_savings(
             if tuple(tool_names[start : start + width]) != sequence:
                 continue
             span = session_events[positions[start] : positions[start + width - 1] + 1]
-            in_tokens = sum(ev.input_tokens or 0 for ev in span if ev.input_tokens)
-            out_tokens = sum(ev.output_tokens or 0 for ev in span if ev.output_tokens)
-            in_samples.append(in_tokens)
-            out_samples.append(out_tokens)
-    in_mean = round(median(in_samples)) if in_samples else 0
-    out_mean = round(median(out_samples)) if out_samples else 0
-    return in_mean, out_mean
+            model_calls = [ev for ev in span if ev.event is TraceEventKind.MODEL_CALL]
+            in_samples.append(
+                sum(ev.input_tokens for ev in model_calls if ev.input_tokens is not None)
+            )
+            out_samples.append(
+                sum(ev.output_tokens for ev in model_calls if ev.output_tokens is not None)
+            )
+    in_median = round(median(in_samples)) if in_samples else 0
+    out_median = round(median(out_samples)) if out_samples else 0
+    return in_median, out_median
 
 
 def _candidate_warnings(
@@ -855,9 +890,10 @@ def backtest_flow(
             shape_ok = True
             status_ok = True
             for step_index, (step, event) in enumerate(zip(flow.steps, window, strict=False)):
-                required = {
-                    target for target in step.input_mapping.values() if isinstance(target, str)
-                }
+                # ``input_mapping`` keys are the tool's *input field names*; a
+                # trace reproduces the step when the observed call supplied
+                # every mapped field (renames in the mapping values are fine).
+                required = set(step.input_mapping)
                 missing = required - set(event.args)
                 if missing:
                     shape_ok = False

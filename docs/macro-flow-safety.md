@@ -34,10 +34,9 @@ respect before promoting a mined candidate.
   recommend `side_effecting` candidates (`recommendation = do_not_compile`).
 - **Conservative by default.** Anything not clearly read-only stays `unknown`,
   so a reviewer is never lulled into compiling a side-effecting path.
-- **Explicit safety contracts.** Attach a
-  [`ToolSafetyContract`](reference) to flows and tools to declare destructive
-  effects, idempotency, dry-run support, and approval requirements. `None`
-  means *unknown*, not *safe*.
+- **Explicit safety contracts.** Attach a `ToolSafetyContract` to flows and
+  tools to declare destructive effects, idempotency, dry-run support, and
+  approval requirements. `None` means *unknown*, not *safe*.
 - **Governed promotion.** Mined candidates start in `draft` lifecycle.
   Promotion to `reviewed` then `active` is an explicit, recorded action; only
   `active`, read-only, approval-free flows are exposed by `FlowServer` by

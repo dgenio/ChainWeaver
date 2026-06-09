@@ -315,3 +315,39 @@ class TestDoctorPreflight:
         payload = json.loads(capsys.readouterr().out)
         assert payload["flow_count"] == 1
         assert payload["issue_count"] == 0
+
+    def test_first_step_validated_against_input_schema(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], _tools_module: str
+    ) -> None:
+        # SearchIn declares field 'q'; mapping the first step's source from a
+        # field the input schema does not declare must be flagged.
+        flow_file = tmp_path / "schema.flow.yaml"
+        _write_flow(
+            flow_file,
+            Flow(
+                name="schema",
+                description="d",
+                input_schema_ref=f"{_tools_module}:SearchIn",
+                steps=[FlowStep(tool_name="fs.search", input_mapping={"q": "bogus"})],
+            ),
+        )
+        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "unresolved_mapping" in captured.out
+
+    def test_first_step_ok_when_source_in_input_schema(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], _tools_module: str
+    ) -> None:
+        flow_file = tmp_path / "schema_ok.flow.yaml"
+        _write_flow(
+            flow_file,
+            Flow(
+                name="schema_ok",
+                description="d",
+                input_schema_ref=f"{_tools_module}:SearchIn",
+                steps=[FlowStep(tool_name="fs.search", input_mapping={"q": "q"})],
+            ),
+        )
+        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        assert exit_code == 0

@@ -2204,11 +2204,13 @@ def _doctor_preflight(
     """Structural preflight for one flow (issue #314).
 
     Validates, without executing anything, that every step references a
-    registered tool (when ``--tools`` is supplied) and that each non-first
-    step's ``input_mapping`` reads a field produced by an upstream step or
-    declared on the flow's input schema.  Mapping checks are skipped once an
-    upstream tool's outputs are unknown (so unregistered tools never produce
-    spurious ``unresolved_mapping`` issues).
+    registered tool (when ``--tools`` is supplied) and that each step's
+    ``input_mapping`` reads a field produced by an upstream step or declared
+    on the flow's input schema.  The first step is validated only when the
+    flow declares an input schema (otherwise its sources come from arbitrary
+    initial input and cannot be checked); mapping checks are also skipped once
+    an upstream tool's outputs are unknown (so unregistered tools never
+    produce spurious ``unresolved_mapping`` issues).
     """
     issues: list[dict[str, str]] = []
     upstream_outputs: set[str] = set()
@@ -2228,7 +2230,7 @@ def _doctor_preflight(
                     "detail": f"step {index} references unregistered tool '{tool_name}'",
                 }
             )
-        if index > 0 and outputs_known:
+        if outputs_known and (index > 0 or input_schema is not None):
             for source_key in step.input_mapping.values():
                 if isinstance(source_key, str) and source_key not in upstream_outputs:
                     issues.append(
@@ -2503,7 +2505,7 @@ def _mine_scored_candidates(
     try:
         events = load_agent_trace(trace_file)
     except AgentTraceImportError as exc:
-        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     observer = ChainObserver.from_traces(agent_trace_to_traces(events))
     try:
@@ -2661,7 +2663,7 @@ def traces_backtest_command(
     try:
         events = load_agent_trace(trace)
     except AgentTraceImportError as exc:
-        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     report = backtest_flow(flow, events)

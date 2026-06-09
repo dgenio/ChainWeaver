@@ -1,4 +1,4 @@
-"""Tests for the coding-agent trace pipeline (#254, #256, #257, #266, #267)."""
+"""Tests for the coding-agent trace flow loop (#254, #256, #257, #266, #267)."""
 
 from __future__ import annotations
 
@@ -135,6 +135,16 @@ class TestImport:
     def test_load_missing_file_raises(self, tmp_path: Path) -> None:
         with pytest.raises(AgentTraceImportError):
             load_agent_trace(tmp_path / "nope.jsonl")
+
+    def test_unknown_keys_preserved_in_metadata(self) -> None:
+        (event,) = parse_agent_trace(
+            '{"session_id":"s1","tool":"a","vendor_id":"x9","cost_usd":0.01}'
+        )
+        assert event.metadata == {"vendor_id": "x9", "cost_usd": 0.01}
+
+    def test_known_keys_not_duplicated_in_metadata(self) -> None:
+        (event,) = parse_agent_trace('{"session_id":"s1","tool":"a","input_tokens":5}')
+        assert event.metadata == {}
 
 
 class TestToTraces:
@@ -397,3 +407,16 @@ class TestBacktest:
         report = backtest_flow(self._flow(), [_tool("s1", "other")])
         assert report.examples_tested == 0
         assert report.produced_expected_output == 0
+
+    def test_renamed_mapping_checks_tool_field_not_source_key(self) -> None:
+        # input_mapping renames: tool field 'path' <- context key 'source_path'.
+        # The observed call supplies 'path' (the tool field), so it reproduces.
+        flow = Flow(
+            name="renamed",
+            description="draft",
+            steps=[FlowStep(tool_name="fs.read", input_mapping={"path": "source_path"})],
+        )
+        report = backtest_flow(flow, [_tool("s1", "fs.read", args={"path": "p"})])
+        assert report.examples_tested == 1
+        assert report.passed_input_shape == 1
+        assert report.mismatches == ()
