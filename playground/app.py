@@ -110,7 +110,7 @@ def main() -> None:
         st.json(result.final_output)
 
         st.subheader("Step trace")
-        st.dataframe(core.trace_rows(result), use_container_width=True)
+        st.dataframe(core.trace_rows(result), width="stretch")
 
         st.subheader("Execution diagram")
         _render_mermaid(core.result_diagram(result), key=f"result-{name}")
