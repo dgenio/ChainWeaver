@@ -534,6 +534,42 @@ flows remain auditable but are not exposed by default.
 
 ---
 
+### `traces`
+
+Import coding-agent tool-use traces and run the **observe → mine → score →
+draft → backtest** loop for the coding-agent token-reduction use case
+(issues #254, #256, #257, #266, #267). The richer JSONL format carries both
+`tool_call` and `model_call` events plus token/latency/status metadata; all
+analysis is **offline (no LLM)**. See the [Daily Driver guide](daily-driver.md).
+
+```
+chainweaver traces mine <trace.jsonl> [--min-occurrences N] [--min-length N] [--max-length N] [--limit N] [--format table|json]
+chainweaver traces draft-flows <trace.jsonl> [--output-dir DIR] [--min-occurrences N] [--min-length N] [--max-length N] [--format table|json]
+chainweaver traces backtest <flow.yaml> --trace <trace.jsonl> [--format table|json]
+```
+
+- **`mine`** — mine repeated tool sequences and score each by support,
+  success rate, schema stability, determinism, and safety; prints a ranked,
+  human-friendly report (or JSON).
+- **`draft-flows`** — generate `draft`-lifecycle `.flow.yaml` files (with a
+  `.json` metadata/warnings sidecar) from the scored candidates. Without
+  `--output-dir` it is a dry run.
+- **`backtest`** — replay past traces against a draft flow (shape + sequence
+  only, no tool execution); exits non-zero if any window fails to reproduce.
+
+**Exit codes**: `0` = ran successfully (for `backtest`, all examples
+reproduced), `1` = malformed trace / mismatches found, `2` = file not found.
+
+**Example**:
+
+```bash
+chainweaver traces mine coding-agent.jsonl --limit 5
+chainweaver traces draft-flows coding-agent.jsonl --output-dir flows/drafts/
+chainweaver traces backtest flows/drafts/draft__fs_search__fs_read.flow.yaml --trace coding-agent.jsonl
+```
+
+---
+
 ### `dump-schema`
 
 Emit the JSON Schema for `.flow.json` / `.flow.yaml` files, derived from the Pydantic models in `chainweaver.flow`. Editors that consume JSON Schema (VS Code via `redhat.vscode-yaml`, JetBrains, …) get autocomplete, hover docs, and inline validation once they point `yaml.schemas` at the published schema.

@@ -88,12 +88,13 @@ chainweaver/
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
+├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py
 ├── lessons.py         trace_to_lesson_candidate() + LessonCandidate/LessonEvidenceStep/LessonReview: normalise an ExecutionResult into a reviewable, workflow-scoped lesson candidate for lessonweaver (#210); no hard dep on lessonweaver; banned from executor.py
 ├── service.py         ChainWeaverService: continuous analyze→observe→propose→govern loop tying analyzer + observer + a proposal gate (#101); banned from executor.py
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, flows promote/ignore, doctor, dump-schema, service
+├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, flows promote/ignore, traces mine/draft-flows/backtest, doctor (--check-drift / --preflight), dump-schema, service
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)

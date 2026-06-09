@@ -102,6 +102,10 @@ nav:
       - Data integrity guarantees: data-integrity.md
       - Runtime responsibilities for hosts: runtime-responsibilities.md
       - vs LangChain, Prefect, Dagster, Temporal, LangGraph: comparisons.md
+  - Coding agents:
+      - Daily Driver guide: daily-driver.md
+      - Macro-flow safety: macro-flow-safety.md
+      - Token reduction with contextweaver: coding-agent-token-reduction.md
   - Cookbook:
       - Overview: cookbook/index.md
       - 1. Naive LLM loop to compiled flow: cookbook/01-naive-to-compiled.md
