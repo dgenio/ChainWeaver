@@ -103,6 +103,10 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A rerun may follow a failure after PyPI accepted the files but
+          # before the GitHub Release or distribution checks completed.
+          skip-existing: true
 
   github-release:
     needs: [release, publish]

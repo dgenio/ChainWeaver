@@ -66,8 +66,10 @@ built-in `GITHUB_TOKEN`, so using it would bypass the checks this process is
 designed to enforce.
 
 Publication retries are manual: dispatch **Publish to PyPI** with the existing
-tag's version. Release preparation never pushes directly to `main`, and reruns
-never move an existing release tag.
+tag's version. The publisher skips files already present for that immutable
+version, allowing a run that failed after upload to complete its GitHub Release
+and distribution checks. Release preparation never pushes directly to `main`,
+and reruns never move an existing release tag.
 
 ---
 

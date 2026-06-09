@@ -58,6 +58,7 @@ def test_publish_workflow_accepts_tag_push_or_explicit_dispatch() -> None:
     ) in workflow
     assert "python scripts/release.py check --expected-version" in workflow
     assert "ref: v${{ needs.release.outputs.version }}" in workflow
+    assert "skip-existing: true" in workflow
     assert "tag_name: v${{ needs.release.outputs.version }}" in workflow
 
 
