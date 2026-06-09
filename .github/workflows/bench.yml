@@ -7,16 +7,12 @@ name: Bench
 # History is stored in the repo's ``gh-pages`` branch (a one-off manual
 # init step; see ``benchmarks/README.md``).
 #
-# Regression contract: a compiled metric that grows by more than 25%
-# vs. the recorded baseline fails the build. ``customSmallerIsBetter``
-# means smaller values are better; the action emits a PR comment when
-# the threshold trips.
+# Regression contract: a compiled metric that grows beyond 2x the recorded
+# baseline alerts only when execution-sensitive files changed.
 #
-# The gate is enforced (fails the build) only on pushes to ``main``,
-# where the baseline is captured on a consistent runner. On PRs it is
-# advisory (comment-only): the sub-millisecond ``compiled`` overhead
-# metrics swing 50-170us on shared CI runners, which trips the 25%
-# alert on runner noise rather than a real regression.
+# The benchmark still runs on release/docs PRs so the normal check remains
+# present, but those changes cannot emit a noisy performance alert. The gate is
+# enforced only on pushes to ``main`` that touched the executor path.
 
 on:
   push:
@@ -46,6 +42,27 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect execution-sensitive changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          files="$(git diff --name-only "${base}" "${{ github.sha }}")"
+          echo "${files}"
+          if echo "${files}" | grep -Eq \
+            '^(chainweaver/(cache|checkpoint|compiler|contracts|decisions|events|executor|flow|middleware|registry|tools)\.py|benchmarks/.*|pyproject\.toml|\.github/workflows/bench\.yml)$'; then
+            echo "execution=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "execution=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Ensure gh-pages branch exists
         shell: bash
@@ -103,15 +120,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # Only archive results from main; PR-triggered runs would pollute
           # gh-pages with PR-branch data points and skew the alert baseline.
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.execution == 'true' }}
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench
-          # Fail the PR if any compiled metric regresses > 25% vs. the
-          # historical baseline on the same branch / gh-pages page.
-          alert-threshold: "125%"
-          # Enforce the gate only on main; PR runs stay advisory so
-          # sub-millisecond microbenchmark variance on shared runners does
-          # not fail PRs. ``comment-on-alert`` still surfaces a heads-up.
-          fail-on-alert: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          comment-on-alert: true
+          # Sub-millisecond measurements vary substantially on shared runners.
+          # A 2x threshold catches major regressions without treating 50-170us
+          # jitter as a release failure.
+          alert-threshold: "200%"
+          # Only execution-sensitive changes can alert or fail. PR runs remain
+          # advisory; the matching main push enforces the gate.
+          fail-on-alert: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.execution == 'true' }}
+          comment-on-alert: ${{ github.event_name == 'pull_request' && steps.changes.outputs.execution == 'true' }}
           alert-comment-cc-users: "@dgenio"

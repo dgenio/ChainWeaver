@@ -1,9 +1,9 @@
 """Package metadata anti-drift (#203, #209).
 
-These tests fail when the three version sources fall out of sync:
+These tests fail when release metadata falls out of sync:
 
-- ``pyproject.toml`` ``[project]`` ``version``
-- ``chainweaver.__version__`` at runtime
+- ``chainweaver.__version__`` (the authoritative package version)
+- ``pyproject.toml`` dynamic setuptools configuration
 - the latest released heading in ``CHANGELOG.md`` (``## [x.y.z] - YYYY-MM-DD``)
 
 Historical drift example: ``pyproject.toml`` was bumped to 0.10.0 in the
@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -46,10 +46,20 @@ def _pyproject_table() -> dict[str, Any]:
             return tomllib.load(handle)
     # Fallback: read just the keys we need.
     text = _PYPROJECT.read_text(encoding="utf-8")
-    table: dict[str, Any] = {"project": {}, "urls": {}}
-    version_match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-    if version_match:
-        table["project"]["version"] = version_match.group(1)
+    table: dict[str, Any] = {
+        "project": {},
+        "urls": {},
+        "tool": {"setuptools": {"dynamic": {}}},
+    }
+    if 'dynamic = ["version"]' in text:
+        table["project"]["dynamic"] = ["version"]
+    attr_match = re.search(
+        r'^version\s*=\s*\{\s*attr\s*=\s*"([^"]+)"\s*\}',
+        text,
+        re.MULTILINE,
+    )
+    if attr_match:
+        table["tool"]["setuptools"]["dynamic"]["version"] = {"attr": attr_match.group(1)}
     urls_block = re.search(
         r"^\[project\.urls\]\n(.*?)(?=^\[|\Z)",
         text,
@@ -62,10 +72,6 @@ def _pyproject_table() -> dict[str, Any]:
                 table["urls"][entry.group(1)] = entry.group(2)
     table["project"]["urls"] = table["urls"]
     return table
-
-
-def _pyproject_version() -> str:
-    return cast(str, _pyproject_table()["project"]["version"])
 
 
 def _latest_changelog_version() -> str:
@@ -81,12 +87,14 @@ def _latest_changelog_version() -> str:
     pytest.fail(f"No released version heading found in {_CHANGELOG}")
 
 
-def test_pyproject_version_matches_runtime_version() -> None:
-    """``pyproject.toml`` and ``chainweaver.__version__`` must agree."""
-    assert _pyproject_version() == chainweaver.__version__, (
-        f"version drift: pyproject.toml={_pyproject_version()!r} "
-        f"but chainweaver.__version__={chainweaver.__version__!r}"
-    )
+def test_pyproject_reads_authoritative_runtime_version() -> None:
+    """Build metadata must read the single literal runtime version."""
+    metadata = _pyproject_table()
+    assert metadata["project"]["dynamic"] == ["version"]
+    assert "version" not in metadata["project"]
+    assert metadata["tool"]["setuptools"]["dynamic"]["version"] == {
+        "attr": "chainweaver.__version__"
+    }
 
 
 def test_changelog_top_release_matches_runtime_version() -> None:

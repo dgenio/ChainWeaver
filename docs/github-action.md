@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+      - uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
         with:
           directory: flows/
 ```
@@ -51,7 +51,7 @@ structural errors per file, not per line.
 | `directory` | `.` | Directory scanned recursively for flow files. |
 | `annotations` | `true` | Emit `::error` annotations for invalid files. Set `false` to disable. |
 | `python-version` | `3.10` | Python used to install and run `chainweaver` (3.10–3.14). |
-| `chainweaver-version` | `0.12.0` | Exact PyPI version to install. Pass `""` for the latest published release. |
+| `chainweaver-version` | `0.12.1` | Exact PyPI version to install. Pass `""` for the latest published release. |
 | `extra-args` | `""` | Extra args appended verbatim (e.g. `--quiet`). |
 
 ## Outputs
@@ -64,7 +64,7 @@ To branch on the result without failing the job, set `continue-on-error: true`
 on the action step and inspect `exit-code`:
 
 ```yaml
-- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.0
+- uses: dgenio/ChainWeaver/.github/actions/chainweaver@v0.12.1
   id: cw
   continue-on-error: true
   with:
@@ -76,9 +76,14 @@ on the action step and inspect `exit-code`:
 
 ## Versioning
 
-Pin to a ChainWeaver release tag (`@v0.12.0`) rather than `@main` to avoid
+Pin to a ChainWeaver release tag (`@v0.12.1`) rather than `@main` to avoid
 implicit upgrades. The `chainweaver-version` input default tracks the action's
 tag; both move in lockstep on each release.
+
+The repository's pre-publish smoke test overrides the input with `""`, testing
+the action implementation against the latest package already on PyPI. The
+post-publish distribution workflow then tests the exact newly published
+version. Downstream users continue to receive the pinned default.
 
 See also the [action's README](https://github.com/dgenio/ChainWeaver/tree/main/.github/actions/chainweaver)
 and the [distribution checklist](distribution.md).

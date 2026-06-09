@@ -36,8 +36,40 @@ python -m pytest tests/ -v
 |----------|---------|-------|
 | `ci.yml` | Push/PR to `main` (+ weekly `schedule`) | Ruff lint + format `chainweaver/ tests/ examples/` + mypy `chainweaver/ tests/` (Python 3.10 on `ubuntu-latest` only); pytest across the OS × Python matrix `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11, 3.12, 3.13, 3.14}`; `nbmake` runs `notebooks/` on the `ubuntu-latest` / 3.12 lane (issue #229); `floor-deps` runs the full suite against minimum declared dependency versions on 3.10 (`uv pip install --resolution lowest-direct`), and a weekly `latest-deps` job runs it against newest/pre-release deps on 3.14 (issue #236) |
 | `docs.yml` | Push/PR to `main` | `mkdocs build --strict` |
-| `publish.yml` | `v*` tags | Test → build → PyPI publish → GitHub Release |
-| `bench.yml` | Push/PR to `main` | Naive-vs-compiled benchmark on `ubuntu-22.04`; fails PRs whose median `total_duration_ms` regresses beyond 125 % of `gh-pages` baseline |
+| `release.yml` | Manual version input; successful `main` CI run | Prepare release metadata and open a PR; after merge CI passes, tag the exact verified merge commit and explicitly dispatch publication |
+| `publish.yml` | `v*` tags or explicit release dispatch | Validate tag metadata → test → build → PyPI publish → GitHub Release |
+| `distribution-check.yml` | Successful `publish.yml` run or manual dispatch | Verify PyPI propagation, tag/SHA, manifest, action pin, and released Action smoke |
+| `action-smoke.yml` | Action/workflow changes | Exercise action code against the latest already-published package before release |
+| `bench.yml` | Push/PR to `main` | Run the benchmark for every change; alert at 200% only when executor-path or benchmark files changed |
+
+---
+
+## Release process
+
+1. Dispatch **Prepare release** with an `X.Y.Z` version.
+2. `scripts/release.py prepare` updates the authoritative
+   `chainweaver.__version__`, `server.json`, Action pin and docs, and promotes
+   the current Unreleased changelog body.
+3. Review and merge the generated `release/vX.Y.Z` PR after its normal required
+   checks pass.
+4. The merge commit runs `CI` on `main`. After that run succeeds, `release.yml`
+   associates the SHA with the merged release PR, verifies its metadata,
+   creates `vX.Y.Z` on that exact commit, and explicitly dispatches
+   `publish.yml`.
+5. After trusted PyPI publication and GitHub Release creation,
+   `distribution-check.yml` verifies every automatable public surface.
+
+Set an Actions secret named `RELEASE_PR_TOKEN` to a fine-grained PAT or GitHub
+App token with contents and pull-request write access. The secret is required:
+GitHub suppresses `pull_request` workflow events when a PR is created with the
+built-in `GITHUB_TOKEN`, so using it would bypass the checks this process is
+designed to enforce.
+
+Publication retries are manual: dispatch **Publish to PyPI** with the existing
+tag's version. The publisher skips files already present for that immutable
+version, allowing a run that failed after upload to complete its GitHub Release
+and distribution checks. Release preparation never pushes directly to `main`,
+and reruns never move an existing release tag.
 
 ---
 

@@ -4,12 +4,53 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing tagged version to publish (X.Y.Z)."
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  release:
+    name: validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate tag and metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          python scripts/release.py check --expected-version "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   test:
+    needs: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -23,10 +64,12 @@ jobs:
         run: python -m pytest tests/ -v
 
   build:
-    needs: test
+    needs: [release, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -60,16 +103,23 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A rerun may follow a failure after PyPI accepted the files but
+          # before the GitHub Release or distribution checks completed.
+          skip-existing: true
 
   github-release:
-    needs: publish
+    needs: [release, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          tag_name: v${{ needs.release.outputs.version }}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chainweaver"
-version = "0.12.1"
+dynamic = ["version"]
 description = "Deterministic orchestration layer for MCP-based agents."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -216,3 +216,6 @@ include = ["chainweaver*"]
 # the module docstring of ``pytest_chainweaver.py`` for details.
 [tool.setuptools]
 py-modules = ["pytest_chainweaver"]
+
+[tool.setuptools.dynamic]
+version = { attr = "chainweaver.__version__" }

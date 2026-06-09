@@ -109,9 +109,11 @@ for debugging or for generating a local diff against `baseline.json`.
 
 ## CI bench guard (`.github/workflows/bench.yml`)
 
-The bench workflow runs the default sweep on every PR and push to
-`main`, uploads the result via `benchmark-action/github-action-benchmark`,
-and stores the history on the repo's `gh-pages` branch.
+The bench workflow runs the default sweep on every PR and push to `main`,
+uploads the result via `benchmark-action/github-action-benchmark`, and stores
+the history on the repo's `gh-pages` branch. Every PR still gets the benchmark
+check, including release PRs, but alerts are enabled only when the diff touches
+execution-sensitive modules or benchmark configuration.
 
 | Setting | Value |
 |---|---|
@@ -119,8 +121,15 @@ and stores the history on the repo's `gh-pages` branch.
 | Python | 3.10 |
 | Repeats | 5 (median reporting) |
 | Tool | `customSmallerIsBetter` |
-| Alert threshold | `125 %` — fail the PR if any compiled metric regresses > 25 % |
-| Comment | Posted on PR when the threshold trips |
+| Alert threshold | `200 %` — flag a compiled metric only when it exceeds 2x its baseline |
+| Alert scope | Executor-path and benchmark changes only |
+| Enforcement | Advisory comment on matching PRs; failure on the matching `main` push |
+
+The broader threshold is intentional. Compiled overhead is normally below one
+millisecond, where a 50-170 microsecond shared-runner swing can exceed a 25%
+ratio without a meaningful code regression. A 2x gate still catches major
+executor regressions while version-only and documentation releases cannot emit
+alerts.
 
 ### `gh-pages` branch
 

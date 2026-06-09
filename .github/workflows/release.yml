@@ -1,0 +1,142 @@
+name: Prepare release
+
+# Release PRs are generated from the authoritative package version and merged
+# through the normal branch-protection path. A successful main-branch CI run
+# creates a tag on the exact verified merge commit, then explicitly dispatches
+# publish.yml because tag pushes made with GITHUB_TOKEN do not trigger another
+# workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version in X.Y.Z format."
+        required: true
+        type: string
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    name: open release PR
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Prepare release metadata
+        run: python scripts/release.py prepare "${{ inputs.version }}"
+
+      - name: Verify release metadata
+        run: python scripts/release.py check --expected-version "${{ inputs.version }}"
+
+      - name: Generate release status
+        run: python scripts/release.py status > "${RUNNER_TEMP}/release-status.md"
+
+      - name: Open release PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # Required because GitHub suppresses pull_request workflow events
+          # created with GITHUB_TOKEN. Use a fine-grained PAT or App token.
+          token: ${{ secrets.RELEASE_PR_TOKEN }}
+          branch: release/v${{ inputs.version }}
+          base: main
+          commit-message: "release: prepare v${{ inputs.version }}"
+          title: "Release v${{ inputs.version }}"
+          body-path: ${{ runner.temp }}/release-status.md
+          labels: release
+          delete-branch: true
+          add-paths: |
+            chainweaver/__init__.py
+            server.json
+            .github/actions/chainweaver/action.yml
+            .github/actions/chainweaver/README.md
+            docs/github-action.md
+            CHANGELOG.md
+
+  tag:
+    name: tag verified merge commit
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MERGE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Find merged release PR
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_ref="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${MERGE_SHA}/pulls" \
+              --jq '[.[] | select(.merged_at != null and (.head.ref | startswith("release/v")))] | if length == 1 then .[0].head.ref else "" end'
+          )"
+          if [ -z "${head_ref}" ]; then
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "release=true" >> "${GITHUB_OUTPUT}"
+          echo "version=${head_ref#release/v}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v6
+        if: steps.release.outputs.release == 'true'
+        with:
+          ref: ${{ env.MERGE_SHA }}
+          fetch-depth: 0
+
+      - name: Set up Python 3.10
+        if: steps.release.outputs.release == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Verify merged release metadata
+        if: steps.release.outputs.release == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/release.py check --expected-version "${VERSION}"
+
+      - name: Create release tag
+        id: tag
+        if: steps.release.outputs.release == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          remote_sha="$(git ls-remote origin "refs/tags/${tag}" | cut -f1)"
+          if [ -n "${remote_sha}" ]; then
+            test "${remote_sha}" = "${MERGE_SHA}"
+            echo "created=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git tag "${tag}" "${MERGE_SHA}"
+          git push origin "${tag}"
+          echo "created=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch publication
+        if: steps.tag.outputs.created == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: gh workflow run publish.yml --ref "v${VERSION}" -f version="${VERSION}"
