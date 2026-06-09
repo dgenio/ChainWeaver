@@ -484,6 +484,33 @@ class OfflineLLMError(ChainWeaverError):
         super().__init__(detail)
 
 
+class AgentTraceImportError(ChainWeaverError):
+    """Raised when a coding-agent tool-use trace cannot be imported (issue #254).
+
+    :func:`~chainweaver.traces.load_agent_trace` reads vendor-neutral JSONL
+    logs of agent tool/model calls.  Malformed JSON, a non-object line, a
+    record with an unknown ``event`` kind, or a ``tool_call`` missing its
+    ``tool`` name raises this exception with a precise ``detail`` (including
+    the offending line number when available) rather than leaking a raw
+    ``json.JSONDecodeError`` / ``KeyError`` to the caller.
+
+    Attributes:
+        detail: Human-readable explanation of what failed.
+        source: Optional identifier for the input source (e.g. file path).
+        line: 1-based line number of the offending record, when applicable.
+    """
+
+    def __init__(self, detail: str, *, source: str | None = None, line: int | None = None) -> None:
+        self.detail = detail
+        self.source = source
+        self.line = line
+        location = source if source is not None else "trace"
+        if line is not None:
+            super().__init__(f"Cannot import agent trace '{location}' (line {line}): {detail}.")
+        else:
+            super().__init__(f"Cannot import agent trace '{location}': {detail}.")
+
+
 class PredicateSyntaxError(ChainWeaverError):
     """Raised when a conditional-branch predicate cannot be parsed or evaluated.
 

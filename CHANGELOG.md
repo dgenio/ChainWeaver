@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Coding-agent macro-flow compilation loop** (#254, #256, #257, #260,
+  #261, #262, #263, #266, #267, #312, #313, #314): a new `chainweaver.traces`
+  module makes the *observe → mine → score → draft → backtest* loop
+  first-class for coding agents. Adds a vendor-neutral coding-agent trace
+  format (`AgentTraceEvent` / `load_agent_trace`), a deterministic candidate
+  scorer (`CandidateScore` / `score_candidate`) covering support, success
+  rate, schema stability, determinism, token savings, and a conservative
+  safety classifier, draft-flow generation with mapping warnings
+  (`draft_flow_from_candidate`), a human-friendly suggestion report
+  (`render_candidate_report`), and an offline backtester (`backtest_flow`).
+  A new `chainweaver traces mine / draft-flows / backtest` CLI group and a
+  `chainweaver doctor --preflight` structural validator wire these into the
+  CLI. Ships runnable `examples/coding_agent_macro_flows.py`, a
+  `benchmarks/bench_coding_agent_macroflow.py` raw-loop-vs-macro-flow
+  benchmark, a Daily Driver guide, macro-flow safety guidance, a
+  ChainWeaver + contextweaver token-reduction architecture page, and
+  `CLAIMS.md`. All analysis is offline and banned from `executor.py`.
 - **PR-first release and distribution automation** (#304, #305, #306, #307,
   #308, #309): make `chainweaver.__version__` authoritative, add one-command
   release preparation and consistency checks, create and tag reviewed release

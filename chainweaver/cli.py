@@ -96,6 +96,7 @@ from deepdiff import DeepDiff
 
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility
 from chainweaver.exceptions import (
+    AgentTraceImportError,
     ChainWeaverError,
     FlowNotFoundError,
     FlowSerializationError,
@@ -107,6 +108,15 @@ from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml, flow_to_yaml
 from chainweaver.service import ChainWeaverService, ServiceConfig
 from chainweaver.tools import Tool
+from chainweaver.traces import (
+    CandidateScore,
+    agent_trace_to_traces,
+    backtest_flow,
+    draft_flow_from_candidate,
+    load_agent_trace,
+    render_candidate_report,
+    score_candidate,
+)
 from chainweaver.viz import _render_step_bar_chart, flow_to_ascii, flow_to_dot
 
 if TYPE_CHECKING:
@@ -125,6 +135,12 @@ flows_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(flows_app, name="flows")
+traces_app = typer.Typer(
+    name="traces",
+    help="Import coding-agent traces and mine/score/draft/backtest macro-flows.",
+    no_args_is_help=True,
+)
+app.add_typer(traces_app, name="traces")
 
 
 @app.callback()
@@ -2178,6 +2194,114 @@ def _format_doctor_table(results: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _doctor_preflight(
+    flow: Flow | DAGFlow,
+    flow_path: Path,
+    registered: dict[str, Tool],
+    *,
+    have_tools: bool,
+) -> dict[str, Any]:
+    """Structural preflight for one flow (issue #314).
+
+    Validates, without executing anything, that every step references a
+    registered tool (when ``--tools`` is supplied) and that each step's
+    ``input_mapping`` reads a field produced by an upstream step or declared
+    on the flow's input schema.  The first step is validated only when the
+    flow declares an input schema (otherwise its sources come from arbitrary
+    initial input and cannot be checked); mapping checks are also skipped once
+    an upstream tool's outputs are unknown (so unregistered tools never
+    produce spurious ``unresolved_mapping`` issues).
+    """
+    issues: list[dict[str, str]] = []
+    upstream_outputs: set[str] = set()
+    input_schema = flow.input_schema
+    if input_schema is not None:
+        upstream_outputs |= set(input_schema.model_fields)
+    outputs_known = True
+    for index, step in enumerate(flow.steps):
+        tool_name = step.tool_name
+        if tool_name is None:  # sub-flow step (#75) — out of preflight scope
+            outputs_known = False
+            continue
+        if have_tools and tool_name not in registered:
+            issues.append(
+                {
+                    "type": "missing_tool",
+                    "detail": f"step {index} references unregistered tool '{tool_name}'",
+                }
+            )
+        if outputs_known and (index > 0 or input_schema is not None):
+            for source_key in step.input_mapping.values():
+                if isinstance(source_key, str) and source_key not in upstream_outputs:
+                    issues.append(
+                        {
+                            "type": "unresolved_mapping",
+                            "detail": (
+                                f"step {index} ('{tool_name}') maps from '{source_key}' "
+                                "which no upstream step or input schema produces"
+                            ),
+                        }
+                    )
+        tool_obj = registered.get(tool_name)
+        if tool_obj is not None:
+            upstream_outputs |= set(tool_obj.output_schema.model_fields)
+        else:
+            outputs_known = False
+    return {
+        "path": str(flow_path),
+        "flow_name": flow.name,
+        "ok": not issues,
+        "issues": issues,
+    }
+
+
+def _run_doctor_preflight(
+    path: Path,
+    flow_files: list[Path],
+    registered: dict[str, Tool],
+    *,
+    have_tools: bool,
+    fmt: OutputFormat,
+) -> None:
+    """Run preflight over *flow_files*, emit a report, and exit 1 on issues."""
+    results: list[dict[str, Any]] = []
+    load_errors: list[dict[str, str]] = []
+    for flow_path in flow_files:
+        try:
+            flow = _load_flow_file(flow_path)
+        except FlowSerializationError as exc:
+            load_errors.append({"path": str(flow_path), "error": exc.detail})
+            continue
+        results.append(_doctor_preflight(flow, flow_path, registered, have_tools=have_tools))
+
+    issue_count = sum(1 for result in results if not result["ok"])
+    if fmt is OutputFormat.JSON:
+        _emit_json(
+            {
+                "path": str(path),
+                "flow_count": len(results),
+                "issue_count": issue_count,
+                "load_errors": load_errors,
+                "results": results,
+            }
+        )
+    else:
+        for err in load_errors:
+            typer.echo(f"chainweaver: failed to load {err['path']}: {err['error']}", err=True)
+        for result in results:
+            status = "ok" if result["ok"] else "issues"
+            typer.echo(f"{result['flow_name']} ({result['path']}): {status}")
+            for issue in result["issues"]:
+                typer.echo(f"  • {issue['type']}: {issue['detail']}")
+        if issue_count:
+            typer.echo(f"\n{issue_count} flow(s) with issues, {len(results) - issue_count} ok")
+        else:
+            typer.echo(f"\nall {len(results)} flow(s) ok")
+
+    if load_errors or issue_count:
+        raise typer.Exit(code=1)
+
+
 _DOCTOR_PATH_ARG = typer.Argument(
     ...,
     help="Path to a .flow.* file or a directory of flow files.",
@@ -2196,6 +2320,11 @@ _DOCTOR_CHECK_DRIFT_OPTION = typer.Option(
     "--check-drift",
     help="Compare each step's tool reference and schema fingerprint to the current registry.",
 )
+_DOCTOR_PREFLIGHT_OPTION = typer.Option(
+    False,
+    "--preflight",
+    help="Validate flow structure: tool existence and resolvable input mappings.",
+)
 _DOCTOR_FORMAT_OPTION = typer.Option(
     OutputFormat.TABLE,
     "--format",
@@ -2209,6 +2338,7 @@ _DOCTOR_FORMAT_OPTION = typer.Option(
 def doctor_command(
     path: Path = _DOCTOR_PATH_ARG,
     check_drift: bool = _DOCTOR_CHECK_DRIFT_OPTION,
+    preflight: bool = _DOCTOR_PREFLIGHT_OPTION,
     tools: list[str] = _DOCTOR_TOOLS_OPTION,
     output_format: OutputFormat = _DOCTOR_FORMAT_OPTION,
 ) -> None:
@@ -2226,23 +2356,32 @@ def doctor_command(
       fingerprints are reported as ``fingerprints_present=False`` and
       only checked for missing tools.
 
+    With ``--preflight`` (issue #314), runs structural validation instead:
+    every step must reference a registered tool (when ``--tools`` is given)
+    and each non-first step's ``input_mapping`` must read a field produced by
+    an upstream step or the flow's input schema.
+
     Exit codes:
 
-    - ``0`` — no drift detected for any flow.
-    - ``1`` — drift detected for at least one flow, an unreadable /
+    - ``0`` — no drift / no preflight issues detected for any flow.
+    - ``1`` — drift or preflight issues for at least one flow, an unreadable /
       malformed / unrecognised-extension flow file (surfaced under
-      ``load_errors`` in the JSON payload), or no ``--check-drift``
-      mode was selected.
+      ``load_errors`` in the JSON payload), or no mode was selected.
     - ``2`` — *path* itself does not exist, is neither a file nor a
       directory, or a ``--tools`` module is not importable.
     """
-    if not check_drift:
+    if not check_drift and not preflight:
         typer.echo(
-            "chainweaver: 'doctor' currently requires --check-drift "
-            "(no other modes are implemented).",
+            "chainweaver: 'doctor' requires --check-drift or --preflight.",
             err=True,
         )
         raise typer.Exit(code=1)
+    if check_drift and preflight:
+        typer.echo(
+            "chainweaver: pass only one of --check-drift / --preflight.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
 
     if not path.exists():
         typer.echo(f"chainweaver: path not found: {path}", err=True)
@@ -2268,6 +2407,12 @@ def doctor_command(
             executor.register_tool(tool_obj)
             seen_tool_names.add(tool_obj.name)
     registered: dict[str, Tool] = executor.registered_tools
+
+    if preflight:
+        _run_doctor_preflight(
+            path, flow_files, registered, have_tools=bool(tools), fmt=output_format
+        )
+        return
 
     results: list[dict[str, Any]] = []
     load_errors: list[dict[str, str]] = []
@@ -2304,6 +2449,243 @@ def doctor_command(
             typer.echo(f"\nall {len(results)} flow(s) ok")
 
     if load_errors or drift_count:
+        raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# traces command group (issues #254, #256, #257, #266, #267)
+# ---------------------------------------------------------------------------
+
+
+_TRACES_FILE_ARG = typer.Argument(
+    ...,
+    help="Path to a coding-agent JSONL trace (tool_call / model_call events).",
+)
+_TRACES_MIN_OCC_OPTION = typer.Option(
+    3, "--min-occurrences", help="Minimum contiguous appearances for a candidate."
+)
+_TRACES_MIN_LEN_OPTION = typer.Option(
+    2, "--min-length", help="Minimum candidate sequence length (number of tools)."
+)
+_TRACES_MAX_LEN_OPTION = typer.Option(
+    None, "--max-length", help="Maximum candidate sequence length. Omit for no bound."
+)
+_TRACES_LIMIT_OPTION = typer.Option(
+    None, "--limit", help="Show only the top N highest-scoring candidates."
+)
+_TRACES_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+_TRACES_OUTPUT_OPTION = typer.Option(
+    None,
+    "--output-dir",
+    "-o",
+    help="Directory to write draft .flow.yaml files (and .json sidecars) into.",
+)
+_TRACES_BACKTEST_TRACE_OPTION = typer.Option(
+    ...,
+    "--trace",
+    help="Path to the coding-agent JSONL trace to backtest against.",
+)
+
+
+def _mine_scored_candidates(
+    trace_file: Path,
+    *,
+    min_occurrences: int,
+    min_length: int,
+    max_length: int | None,
+) -> tuple[list[Any], list[CandidateScore]]:
+    """Load a trace, mine repeated tool sequences, and score each candidate."""
+    _require_existing_file(trace_file)
+    try:
+        events = load_agent_trace(trace_file)
+    except AgentTraceImportError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    observer = ChainObserver.from_traces(agent_trace_to_traces(events))
+    try:
+        suggestions = observer.suggest_flows(
+            min_occurrences=min_occurrences,
+            min_length=min_length,
+            max_length=max_length,
+        )
+    except ValueError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    scores = [score_candidate(events, suggestion.tools) for suggestion in suggestions]
+    scores.sort(key=lambda s: (-s.score, -s.support, s.sequence))
+    return events, scores
+
+
+@traces_app.command("mine")
+def traces_mine_command(
+    trace_file: Path = _TRACES_FILE_ARG,
+    min_occurrences: int = _TRACES_MIN_OCC_OPTION,
+    min_length: int = _TRACES_MIN_LEN_OPTION,
+    max_length: int | None = _TRACES_MAX_LEN_OPTION,
+    limit: int | None = _TRACES_LIMIT_OPTION,
+    output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+) -> None:
+    """Mine and score candidate macro-flows from a coding-agent trace (#256, #266).
+
+    Reads a JSONL trace, mines repeated tool sequences offline, scores each
+    by token savings, success rate, schema stability, determinism, and
+    safety, and prints a ranked human-friendly report (or JSON).
+
+    Exit codes: 0 = ran successfully, 1 = malformed trace, 2 = file not found.
+    """
+    _, scores = _mine_scored_candidates(
+        trace_file,
+        min_occurrences=min_occurrences,
+        min_length=min_length,
+        max_length=max_length,
+    )
+    shown = scores[:limit] if limit is not None else scores
+    if output_format is OutputFormat.JSON:
+        _emit_json(
+            {
+                "trace_file": str(trace_file),
+                "candidate_count": len(shown),
+                "candidates": [score.model_dump(mode="json") for score in shown],
+            }
+        )
+        return
+    typer.echo(render_candidate_report(scores, limit=limit))
+
+
+@traces_app.command("draft-flows")
+def traces_draft_flows_command(
+    trace_file: Path = _TRACES_FILE_ARG,
+    output_dir: Path | None = _TRACES_OUTPUT_OPTION,
+    min_occurrences: int = _TRACES_MIN_OCC_OPTION,
+    min_length: int = _TRACES_MIN_LEN_OPTION,
+    max_length: int | None = _TRACES_MAX_LEN_OPTION,
+    output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+) -> None:
+    """Generate reviewable draft .flow.yaml files from mined candidates (#257).
+
+    Each draft is written in ``draft`` lifecycle with a ``.json`` sidecar of
+    candidate metadata and warnings. Without ``--output-dir`` the command is
+    a dry run that only reports what would be written.
+
+    Exit codes: 0 = ran successfully, 1 = malformed trace, 2 = file not found.
+    """
+    events, scores = _mine_scored_candidates(
+        trace_file,
+        min_occurrences=min_occurrences,
+        min_length=min_length,
+        max_length=max_length,
+    )
+    drafts = [draft_flow_from_candidate(events, score) for score in scores]
+
+    written: dict[str, str] = {}
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for draft in drafts:
+            dest = output_dir / f"{draft.flow.name}.flow.yaml"
+            sidecar = output_dir / f"{draft.flow.name}.json"
+            try:
+                _write_candidate(dest, draft.flow)
+                sidecar.write_text(
+                    json.dumps(
+                        {"sidecar": draft.sidecar, "warnings": list(draft.warnings)}, indent=2
+                    ),
+                    encoding="utf-8",
+                )
+            except (ValueError, OSError) as exc:
+                typer.echo(f"chainweaver: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            written[draft.flow.name] = str(dest)
+
+    if output_format is OutputFormat.JSON:
+        _emit_json(
+            {
+                "trace_file": str(trace_file),
+                "output_dir": str(output_dir) if output_dir is not None else None,
+                "draft_count": len(drafts),
+                "drafts": [
+                    {
+                        "flow_name": draft.flow.name,
+                        "tools": list(draft.score.sequence),
+                        "recommendation": draft.score.recommendation.value,
+                        "warnings": list(draft.warnings),
+                        "output_path": written.get(draft.flow.name),
+                        "sidecar": draft.sidecar,
+                    }
+                    for draft in drafts
+                ],
+            }
+        )
+        return
+
+    if not drafts:
+        typer.echo(f"No draft flows from '{trace_file}' (min_occurrences={min_occurrences}).")
+        return
+    lines = [f"Draft flows from '{trace_file}':", "─" * 60]
+    for rank, draft in enumerate(drafts, start=1):
+        lines.append(f"  {rank}. {draft.flow.name}  → {draft.score.recommendation.value}")
+        lines.append(f"     tools:   {' → '.join(draft.score.sequence)}")
+        if draft.flow.name in written:
+            lines.append(f"     written: {written[draft.flow.name]}")
+        for warning in draft.warnings:
+            lines.append(f"     ⚠ {warning}")
+    typer.echo("\n".join(lines))
+
+
+@traces_app.command("backtest")
+def traces_backtest_command(
+    flow_file: Path = _FLOW_FILE_ARG,
+    trace: Path = _TRACES_BACKTEST_TRACE_OPTION,
+    output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+) -> None:
+    """Replay past traces against a draft flow before promotion (#267).
+
+    A deterministic, offline shape/sequence check — no tool is executed.
+
+    Exit codes: 0 = all examples reproduced, 1 = mismatches found or malformed
+    input, 2 = file not found.
+    """
+    _require_existing_file(flow_file)
+    _require_existing_file(trace)
+    try:
+        flow = _load_flow_file(flow_file)
+    except FlowSerializationError as exc:
+        typer.echo(f"chainweaver: {exc.detail}", err=True)
+        raise typer.Exit(code=1) from exc
+    if isinstance(flow, DAGFlow):
+        typer.echo("chainweaver: backtest supports linear flows only.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        events = load_agent_trace(trace)
+    except AgentTraceImportError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    report = backtest_flow(flow, events)
+    if output_format is OutputFormat.JSON:
+        _emit_json(report.model_dump(mode="json"))
+    else:
+        lines = [
+            f"Backtest report for flow '{report.flow_name}':",
+            "─" * 60,
+            f"examples tested:          {report.examples_tested}",
+            f"passed input shape:       {report.passed_input_shape}",
+            f"produced expected output: {report.produced_expected_output}",
+        ]
+        if report.mismatches:
+            lines.append(f"mismatches ({len(report.mismatches)}):")
+            for mismatch in report.mismatches:
+                lines.append(
+                    f"  • session {mismatch.session_id} step {mismatch.step_index} "
+                    f"({mismatch.tool_name}): {mismatch.reason}"
+                )
+        typer.echo("\n".join(lines))
+    if report.examples_tested == 0 or report.produced_expected_output < report.examples_tested:
         raise typer.Exit(code=1)
 
 

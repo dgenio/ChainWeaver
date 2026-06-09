@@ -1,11 +1,16 @@
 {
   "__all__": [
+    "AgentTraceEvent",
+    "AgentTraceImportError",
     "AttestationInputError",
     "AttestationReport",
     "BUILTIN_PROPERTIES",
+    "BacktestMismatch",
+    "BacktestReport",
     "BaseDecisionCallback",
     "BaseMiddleware",
     "CancellationToken",
+    "CandidateScore",
     "ChainAnalyzer",
     "ChainObserver",
     "ChainWeaverError",
@@ -31,6 +36,7 @@
     "DecisionCallbackError",
     "DecisionContext",
     "DeterminismLevel",
+    "DraftFlow",
     "DriftInfo",
     "ExecutionPlan",
     "ExecutionResult",
@@ -89,11 +95,13 @@
     "PredicateSyntaxError",
     "PriceSnap",
     "ProposalStatus",
+    "Recommendation",
     "RedactionPolicy",
     "RegistryStore",
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "SafetyLevel",
     "SchemaValidationError",
     "ServiceConfig",
     "ServiceEvent",
@@ -117,14 +125,19 @@
     "ToolOutputSizeError",
     "ToolSafetyContract",
     "ToolTimeoutError",
+    "TraceEventKind",
     "TraceRecorder",
+    "agent_trace_to_traces",
     "attest_flow",
+    "backtest_flow",
     "check_flow_compatibility",
+    "classify_safety",
     "cli",
     "coerce_decision_callback",
     "compile_flow",
     "discover_flows",
     "discover_tools",
+    "draft_flow_from_candidate",
     "evaluate_predicate",
     "flow_from_dict",
     "flow_from_json",
@@ -137,13 +150,17 @@
     "flow_to_mermaid",
     "flow_to_yaml",
     "llm_propose_flows",
+    "load_agent_trace",
     "lookup_price",
     "merge_safety",
     "minimize_failure",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
+    "parse_agent_trace",
+    "render_candidate_report",
     "result_to_mermaid",
     "schema_fingerprint",
+    "score_candidate",
     "suggest_optimizations",
     "tool",
     "trace_to_lesson_candidate",
@@ -152,9 +169,35 @@
   ],
   "python_version": [
     3,
-    14
+    11
   ],
   "symbols": {
+    "AgentTraceEvent": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "args": "dict[str, Any]",
+        "event": "chainweaver.traces.TraceEventKind",
+        "input_tokens": "int | NoneType",
+        "latency_ms": "float | NoneType",
+        "metadata": "dict[str, Any]",
+        "output_keys": "tuple[str, Ellipsis]",
+        "output_tokens": "int | NoneType",
+        "result_status": "str | NoneType",
+        "session_id": "str",
+        "timestamp": "datetime.datetime | NoneType",
+        "tool": "str | NoneType",
+        "tool_source": "str | NoneType",
+        "turn_id": "str | NoneType"
+      },
+      "module": "chainweaver.traces",
+      "qualname": "AgentTraceEvent"
+    },
+    "AgentTraceImportError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "AgentTraceImportError",
+      "signature": "(detail: str, *, source: str | None = None, line: int | None = None) -> None"
+    },
     "AttestationInputError": {
       "kind": "class",
       "module": "chainweaver.attest",
@@ -188,6 +231,29 @@
       "module": null,
       "qualname": null
     },
+    "BacktestMismatch": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "reason": "str",
+        "session_id": "str",
+        "step_index": "int",
+        "tool_name": "str"
+      },
+      "module": "chainweaver.traces",
+      "qualname": "BacktestMismatch"
+    },
+    "BacktestReport": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "examples_tested": "int",
+        "flow_name": "str",
+        "mismatches": "tuple[chainweaver.traces.BacktestMismatch, Ellipsis]",
+        "passed_input_shape": "int",
+        "produced_expected_output": "int"
+      },
+      "module": "chainweaver.traces",
+      "qualname": "BacktestReport"
+    },
     "BaseDecisionCallback": {
       "kind": "class",
       "module": "chainweaver.decisions",
@@ -205,6 +271,26 @@
       "module": "chainweaver.cancellation",
       "qualname": "CancellationToken",
       "signature": "() -> None"
+    },
+    "CandidateScore": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "determinism": "float",
+        "estimated_input_tokens_saved": "int",
+        "estimated_output_tokens_saved": "int",
+        "model_calls_removed_per_run": "int",
+        "recommendation": "chainweaver.traces.Recommendation",
+        "safety_level": "chainweaver.traces.SafetyLevel",
+        "schema_stability": "float",
+        "score": "float",
+        "sequence": "tuple[str, Ellipsis]",
+        "sessions": "int",
+        "success_rate": "float",
+        "support": "int",
+        "warnings": "tuple[str, Ellipsis]"
+      },
+      "module": "chainweaver.traces",
+      "qualname": "CandidateScore"
     },
     "ChainAnalyzer": {
       "kind": "class",
@@ -408,6 +494,17 @@
       "kind": "enum",
       "module": "chainweaver.contracts",
       "qualname": "DeterminismLevel"
+    },
+    "DraftFlow": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "flow": "chainweaver.flow.Flow",
+        "score": "chainweaver.traces.CandidateScore",
+        "sidecar": "dict[str, Any]",
+        "warnings": "tuple[str, Ellipsis]"
+      },
+      "module": "chainweaver.traces",
+      "qualname": "DraftFlow"
     },
     "DriftInfo": {
       "kind": "class",
@@ -893,6 +990,11 @@
       "module": "chainweaver.service",
       "qualname": "ProposalStatus"
     },
+    "Recommendation": {
+      "kind": "enum",
+      "module": "chainweaver.traces",
+      "qualname": "Recommendation"
+    },
     "RedactionPolicy": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -938,6 +1040,11 @@
       },
       "module": "chainweaver.flow",
       "qualname": "RetryPolicy"
+    },
+    "SafetyLevel": {
+      "kind": "enum",
+      "module": "chainweaver.traces",
+      "qualname": "SafetyLevel"
     },
     "SchemaValidationError": {
       "kind": "class",
@@ -1163,11 +1270,22 @@
       "qualname": "ToolTimeoutError",
       "signature": "(tool_name: str, timeout_seconds: float) -> None"
     },
+    "TraceEventKind": {
+      "kind": "enum",
+      "module": "chainweaver.traces",
+      "qualname": "TraceEventKind"
+    },
     "TraceRecorder": {
       "kind": "class",
       "module": "chainweaver.observation",
       "qualname": "TraceRecorder",
       "signature": "() -> None"
+    },
+    "agent_trace_to_traces": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "agent_trace_to_traces",
+      "signature": "(events: Iterable[AgentTraceEvent]) -> list[ObservedTrace]"
     },
     "attest_flow": {
       "kind": "function",
@@ -1175,11 +1293,23 @@
       "qualname": "attest_flow",
       "signature": "(*, flow: Flow | DAGFlow, executor: FlowExecutor, n: int, repeats: int, seed: int, seed_inputs: list[dict[str, Any]] | None = None) -> AttestationReport"
     },
+    "backtest_flow": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "backtest_flow",
+      "signature": "(flow: Flow, events: Sequence[AgentTraceEvent]) -> BacktestReport"
+    },
     "check_flow_compatibility": {
       "kind": "function",
       "module": "chainweaver.compat",
       "qualname": "check_flow_compatibility",
       "signature": "(flow: Flow | DAGFlow, tools: dict[str, Tool]) -> list[CompatibilityIssue]"
+    },
+    "classify_safety": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "classify_safety",
+      "signature": "(sequence: Sequence[str]) -> SafetyLevel"
     },
     "cli": {
       "kind": "module",
@@ -1209,6 +1339,12 @@
       "module": "chainweaver.plugins",
       "qualname": "discover_tools",
       "signature": "(*, group: str = 'chainweaver.tools', strict: bool = False) -> list[Tool]"
+    },
+    "draft_flow_from_candidate": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "draft_flow_from_candidate",
+      "signature": "(events: Sequence[AgentTraceEvent], score: CandidateScore, *, name: str | None = None) -> DraftFlow"
     },
     "evaluate_predicate": {
       "kind": "function",
@@ -1282,6 +1418,12 @@
       "qualname": "llm_propose_flows",
       "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, max_proposals: int = 5, static_candidates: Iterable[Flow] | None = None) -> list[LLMProposal]"
     },
+    "load_agent_trace": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "load_agent_trace",
+      "signature": "(source: str | Path) -> list[AgentTraceEvent]"
+    },
     "lookup_price": {
       "kind": "function",
       "module": "chainweaver.cost",
@@ -1312,6 +1454,18 @@
       "qualname": "optimize_tool_descriptions",
       "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE) -> list[ToolDescriptionProposal]"
     },
+    "parse_agent_trace": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "parse_agent_trace",
+      "signature": "(text: str, *, source: str | None = None) -> list[AgentTraceEvent]"
+    },
+    "render_candidate_report": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "render_candidate_report",
+      "signature": "(candidates: Sequence[CandidateScore], *, limit: int | None = None) -> str"
+    },
     "result_to_mermaid": {
       "kind": "function",
       "module": "chainweaver.viz",
@@ -1323,6 +1477,12 @@
       "module": "chainweaver.compat",
       "qualname": "schema_fingerprint",
       "signature": "(model: type[BaseModel]) -> str"
+    },
+    "score_candidate": {
+      "kind": "function",
+      "module": "chainweaver.traces",
+      "qualname": "score_candidate",
+      "signature": "(events: Sequence[AgentTraceEvent], sequence: Sequence[str]) -> CandidateScore"
     },
     "suggest_optimizations": {
       "kind": "function",
