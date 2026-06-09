@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: publish-${{ inputs.version || github.ref_name }}
+  group: publish-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
   cancel-in-progress: false
 
 jobs:

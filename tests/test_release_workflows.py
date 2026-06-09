@@ -52,6 +52,10 @@ def test_publish_workflow_accepts_tag_push_or_explicit_dispatch() -> None:
 
     assert 'tags:\n      - "v*"' in workflow
     assert "workflow_dispatch:" in workflow
+    assert (
+        "group: publish-${{ github.event_name == 'workflow_dispatch' "
+        "&& format('v{0}', inputs.version) || github.ref_name }}"
+    ) in workflow
     assert "python scripts/release.py check --expected-version" in workflow
     assert "ref: v${{ needs.release.outputs.version }}" in workflow
     assert "tag_name: v${{ needs.release.outputs.version }}" in workflow
