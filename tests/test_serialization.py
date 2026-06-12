@@ -391,9 +391,21 @@ class TestErrorPaths:
         with pytest.raises(FlowSerializationError, match="Invalid JSON"):
             flow_from_json("{not valid json")
 
+    def test_invalid_json_records_source_context(self) -> None:
+        with pytest.raises(FlowSerializationError, match=r"bad\.flow\.json") as exc_info:
+            flow_from_json("{not valid json", source="flows/bad.flow.json")
+        assert exc_info.value.source == "flows/bad.flow.json"
+        assert "Invalid JSON" in exc_info.value.detail
+
     def test_invalid_yaml_raises_serialization_error(self) -> None:
         with pytest.raises(FlowSerializationError, match="Invalid YAML"):
             flow_from_yaml("key: [unbalanced")
+
+    def test_invalid_yaml_records_source_context(self) -> None:
+        with pytest.raises(FlowSerializationError, match=r"bad\.flow\.yaml") as exc_info:
+            flow_from_yaml("key: [unbalanced", source="flows/bad.flow.yaml")
+        assert exc_info.value.source == "flows/bad.flow.yaml"
+        assert "Invalid YAML" in exc_info.value.detail
 
     def test_empty_yaml_raises_serialization_error(self) -> None:
         with pytest.raises(FlowSerializationError, match="empty"):
@@ -427,6 +439,12 @@ class TestErrorPaths:
         flow = _make_linear()
         with pytest.raises(FlowSerializationError, match="DAGFlow"):
             DAGFlow.from_json(flow.to_json())
+
+    def test_from_json_classmethod_preserves_source_on_type_mismatch(self) -> None:
+        flow = _make_linear()
+        with pytest.raises(FlowSerializationError, match=r"flow\.json") as exc_info:
+            DAGFlow.from_json(flow.to_json(), source="flows/flow.json")
+        assert exc_info.value.source == "flows/flow.json"
 
     def test_from_json_dag_payload_to_flow_class_fails(self) -> None:
         flow = _make_dag()

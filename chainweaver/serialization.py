@@ -66,7 +66,7 @@ def flow_to_dict(flow: AnyFlow) -> dict[str, Any]:
     return payload
 
 
-def flow_from_dict(data: dict[str, Any]) -> AnyFlow:
+def flow_from_dict(data: dict[str, Any], *, source: str | None = None) -> AnyFlow:
     """Reconstruct a :class:`Flow` or :class:`DAGFlow` from a dict payload.
 
     The dict must contain a ``type`` key whose value is either ``"Flow"`` or
@@ -79,13 +79,15 @@ def flow_from_dict(data: dict[str, Any]) -> AnyFlow:
     """
     if not isinstance(data, dict):
         raise FlowSerializationError(
-            f"Expected a mapping at the top level, got {type(data).__name__}"
+            f"Expected a mapping at the top level, got {type(data).__name__}",
+            source=source,
         )
     flow_type = data.get(_TYPE_KEY)
     if flow_type not in (_FLOW_DISCRIMINATOR, _DAG_DISCRIMINATOR):
         raise FlowSerializationError(
             f"Missing or invalid 'type' discriminator (got {flow_type!r}); "
-            f"expected 'Flow' or 'DAGFlow'"
+            f"expected 'Flow' or 'DAGFlow'",
+            source=source,
         )
     payload = {k: v for k, v in data.items() if k != _TYPE_KEY}
     model: type[AnyFlow] = DAGFlow if flow_type == _DAG_DISCRIMINATOR else Flow
@@ -93,7 +95,8 @@ def flow_from_dict(data: dict[str, Any]) -> AnyFlow:
         return model.model_validate(payload)
     except Exception as exc:
         raise FlowSerializationError(
-            f"Validation failed while reconstructing {flow_type}: {exc}"
+            f"Validation failed while reconstructing {flow_type}: {exc}",
+            source=source,
         ) from exc
 
 
@@ -116,7 +119,7 @@ def flow_to_json(flow: AnyFlow, *, indent: int | None = 2) -> str:
     return json.dumps(flow_to_dict(flow), indent=indent, sort_keys=True)
 
 
-def flow_from_json(data: str) -> AnyFlow:
+def flow_from_json(data: str, *, source: str | None = None) -> AnyFlow:
     """Deserialize a JSON string produced by :func:`flow_to_json`.
 
     Raises:
@@ -127,8 +130,8 @@ def flow_from_json(data: str) -> AnyFlow:
     try:
         parsed = json.loads(data)
     except json.JSONDecodeError as exc:
-        raise FlowSerializationError(f"Invalid JSON: {exc}") from exc
-    return flow_from_dict(parsed)
+        raise FlowSerializationError(f"Invalid JSON: {exc}", source=source) from exc
+    return flow_from_dict(parsed, source=source)
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +172,7 @@ def flow_to_yaml(flow: AnyFlow) -> str:
     )
 
 
-def flow_from_yaml(data: str) -> AnyFlow:
+def flow_from_yaml(data: str, *, source: str | None = None) -> AnyFlow:
     """Deserialize a YAML string produced by :func:`flow_to_yaml`.
 
     Raises:
@@ -180,7 +183,7 @@ def flow_from_yaml(data: str) -> AnyFlow:
     try:
         parsed = yaml.safe_load(data)
     except yaml.YAMLError as exc:
-        raise FlowSerializationError(f"Invalid YAML: {exc}") from exc
+        raise FlowSerializationError(f"Invalid YAML: {exc}", source=source) from exc
     if parsed is None:
-        raise FlowSerializationError("YAML payload is empty")
-    return flow_from_dict(parsed)
+        raise FlowSerializationError("YAML payload is empty", source=source)
+    return flow_from_dict(parsed, source=source)

@@ -315,9 +315,9 @@ def _load_flow_file(path: Path) -> Flow | DAGFlow:
     name_lower = path.name.lower()
     text = path.read_text(encoding="utf-8")
     if name_lower.endswith(".flow.json"):
-        return flow_from_json(text)
+        return flow_from_json(text, source=str(path))
     if name_lower.endswith((".flow.yaml", ".flow.yml")):
-        return flow_from_yaml(text)
+        return flow_from_yaml(text, source=str(path))
     raise FlowSerializationError(
         f"Unrecognised extension; expected one of {_FLOW_FILE_SUFFIXES}",
         source=str(path),
@@ -1899,7 +1899,7 @@ _FLOW_PROMOTE_TARGET_OPTION = typer.Option(
 def _load_persisted_candidate(path: Path) -> Flow | DAGFlow:
     """Load a candidate flow file and surface a concise CLI error."""
     try:
-        return flow_from_yaml(path.read_text(encoding="utf-8"))
+        return flow_from_yaml(path.read_text(encoding="utf-8"), source=str(path))
     except (OSError, FlowSerializationError) as exc:
         detail = exc.detail if isinstance(exc, FlowSerializationError) else str(exc)
         raise ValueError(f"cannot read candidate '{path}': {detail}") from exc

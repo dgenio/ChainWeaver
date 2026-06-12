@@ -97,16 +97,24 @@ def _load_one(
     """
     ep_id = _entry_point_id(ep)
 
-    def _fail(detail: str) -> list[Any]:
+    def _fail(detail: str, exc: Exception | None = None) -> list[Any]:
         if strict:
-            raise PluginDiscoveryError(ep_id, detail)
-        _logger.warning("Skipping plugin entry-point '%s': %s", ep_id, detail)
+            error = PluginDiscoveryError(ep_id, detail)
+            if exc is not None:
+                raise error from exc
+            raise error
+        _logger.warning(
+            "Skipping plugin entry-point '%s': %s",
+            ep_id,
+            detail,
+            exc_info=(type(exc), exc, exc.__traceback__) if exc is not None else None,
+        )
         return []
 
     try:
         loader = ep.load()
     except Exception as exc:
-        return _fail(f"could not import loader ({type(exc).__name__}: {exc})")
+        return _fail(f"could not import loader ({type(exc).__name__}: {exc})", exc)
 
     if not callable(loader):
         return _fail(f"entry point resolved to {type(loader).__name__}, expected a callable")
@@ -114,7 +122,7 @@ def _load_one(
     try:
         result = loader()
     except Exception as exc:
-        return _fail(f"loader raised {type(exc).__name__}: {exc}")
+        return _fail(f"loader raised {type(exc).__name__}: {exc}", exc)
 
     if not isinstance(result, list):
         return _fail(f"loader returned {type(result).__name__}, expected list[{expected_label}]")

@@ -201,7 +201,7 @@ class FileStore:
         if not path.exists():
             raise FlowNotFoundError(name, version=version)
         try:
-            return flow_from_json(path.read_text(encoding="utf-8"))
+            return flow_from_json(path.read_text(encoding="utf-8"), source=str(path))
         except FlowSerializationError as exc:
             # Re-raise with the file path for better diagnostics.
             raise FlowSerializationError(exc.detail, source=str(path)) from exc

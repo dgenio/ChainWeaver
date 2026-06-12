@@ -242,6 +242,7 @@ class TestValidateCommand:
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "INVALID" in captured.err
+        assert str(bad) in captured.err
 
     def test_missing_file_returns_two(
         self,
