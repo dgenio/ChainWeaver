@@ -280,7 +280,7 @@ integration.
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `step_index` | `int` | Zero-based position (`-1` = flow-input validation, `len(steps)` = flow-output validation). |
+| `step_index` | `int` | Zero-based position (`FLOW_INPUT_STEP_INDEX` = flow-input validation, `flow_output_step_index(flow)` = flow-output/context validation). |
 | `tool_name` | `str` | Tool invoked (or flow name for validation records). |
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |

@@ -48,6 +48,7 @@ from chainweaver.exceptions import (
     ToolTimeoutError,
 )
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 
 if TYPE_CHECKING:
     from chainweaver.executor import FlowExecutor
@@ -507,7 +508,7 @@ class Tool:
                 failed = next((r for r in result.execution_log if not r.success), None)
                 if failed is None:
                     detail = "Flow execution failed without recording a failing step."
-                    step_index = -1
+                    step_index = FLOW_INPUT_STEP_INDEX
                 else:
                     detail = failed.error_message or failed.error_type or "Unknown error."
                     step_index = failed.step_index
@@ -516,13 +517,11 @@ class Tool:
                 # Defensive: a successful run should always have a final_output,
                 # but the executor's contract allows None on failure paths and
                 # this is the only place the closure can guarantee non-None.
-                # Use ``len(flow.steps)`` (the flow-output validation sentinel
-                # per AGENTS.md §5 StepRecord) — this anomaly is a flow-output
-                # contract violation, not a flow-input validation failure
-                # (which is what ``step_index=-1`` would denote).
+                # Use the flow-output validation sentinel per AGENTS.md
+                # StepRecord: this anomaly is a flow-output contract violation.
                 raise FlowExecutionError(
                     tool_name=tool_name,
-                    step_index=len(flow.steps),
+                    step_index=flow_output_step_index(flow),
                     detail="Flow reported success but produced no final output.",
                 )
             return result.final_output
