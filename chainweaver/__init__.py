@@ -85,10 +85,12 @@ from chainweaver.decorators import tool
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     AgentTraceImportError,
+    AsyncLaneUnsupportedError,
     ChainWeaverError,
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    ContextKeyCollisionError,
     ContribError,
     CostProfileError,
     DAGDefinitionError,
@@ -236,6 +238,7 @@ __all__ = [
     "PROVIDER_PRICES",
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
     "BacktestMismatch",
@@ -257,6 +260,7 @@ __all__ = [
     "CompilationResult",
     "CompilationWarning",
     "ConditionalEdge",
+    "ContextKeyCollisionError",
     "ContribError",
     "CostProfile",
     "CostProfileError",

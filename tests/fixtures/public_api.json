@@ -2,6 +2,7 @@
   "__all__": [
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
     "BUILTIN_PROPERTIES",
@@ -24,6 +25,7 @@
     "CompilationResult",
     "CompilationWarning",
     "ConditionalEdge",
+    "ContextKeyCollisionError",
     "ContribError",
     "CostProfile",
     "CostProfileError",
@@ -197,6 +199,12 @@
       "module": "chainweaver.exceptions",
       "qualname": "AgentTraceImportError",
       "signature": "(detail: str, *, source: str | None = None, line: int | None = None) -> None"
+    },
+    "AsyncLaneUnsupportedError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "AsyncLaneUnsupportedError",
+      "signature": "(flow_name: str, unsupported: list[str]) -> None"
     },
     "AttestationInputError": {
       "kind": "class",
@@ -373,6 +381,12 @@
       "module": "chainweaver.flow",
       "qualname": "ConditionalEdge"
     },
+    "ContextKeyCollisionError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "ContextKeyCollisionError",
+      "signature": "(flow_name: str, step_index: int, step_name: str, keys: list[str]) -> None"
+    },
     "ContribError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -427,6 +441,7 @@
         "governance": "chainweaver.flow.FlowGovernance",
         "input_schema_ref": "str | NoneType",
         "name": "str",
+        "on_context_collision": "Literal['overwrite', 'warn', 'error']",
         "output_schema_ref": "str | NoneType",
         "safety": "chainweaver.contracts.ToolSafetyContract | NoneType",
         "status": "chainweaver.flow.FlowStatus",
@@ -599,6 +614,7 @@
         "governance": "chainweaver.flow.FlowGovernance",
         "input_schema_ref": "str | NoneType",
         "name": "str",
+        "on_context_collision": "Literal['overwrite', 'warn', 'error']",
         "output_schema_ref": "str | NoneType",
         "safety": "chainweaver.contracts.ToolSafetyContract | NoneType",
         "status": "chainweaver.flow.FlowStatus",
@@ -679,7 +695,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False, max_composition_depth: int = 10) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -1356,19 +1372,19 @@
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_dict",
-      "signature": "(data: dict[str, Any]) -> AnyFlow"
+      "signature": "(data: dict[str, Any], *, source: str | None = None) -> AnyFlow"
     },
     "flow_from_json": {
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_json",
-      "signature": "(data: str) -> AnyFlow"
+      "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
     },
     "flow_from_yaml": {
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_yaml",
-      "signature": "(data: str) -> AnyFlow"
+      "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
     },
     "flow_schema_json": {
       "kind": "function",

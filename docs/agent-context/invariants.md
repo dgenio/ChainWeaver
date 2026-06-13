@@ -52,6 +52,38 @@ They are non-negotiable.
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 
+### Automated enforcement (since #354)
+
+The three hard invariants are mechanically enforced by
+`tests/test_executor_import_contract.py`, which runs as part of the normal
+`pytest` suite (no separate CI job). It performs a static, AST-based check:
+
+- **Direct imports** — `executor.py` and every module under
+  `chainweaver/_execution/` must not import any banned module. The banned set
+  is the network/LLM/randomness sources (`random`, `secrets`, `socket`,
+  `http`, `urllib`, `requests`, `httpx`, `aiohttp`, `openai`, `anthropic`) plus
+  the in-repo modules already marked "banned from executor.py" in the repo map
+  (`compiler_llm`, `optimizer`, `observer`, `traces`, `lessons`, `service`,
+  `_offline_llm`).
+- **Transitive in-repo reach** — following `chainweaver.*` imports out of the
+  execution modules, none of the deterministic-execution closure may reach a
+  banned in-repo module, so a helper cannot smuggle an LLM proposer onto the
+  execution path indirectly.
+
+A PR that adds `import random` (or any banned import) to the execution modules
+fails this test with a message pointing back at this document.
+
+**Carve-outs:** `uuid` is the single reviewed exception, for the trace-id
+carve-out above. It is kept deliberately *off* the banned list (rather than
+banned-then-re-permitted); the contract test asserts reviewed carve-outs stay
+unbanned, so banning one later trips the test and forces a conscious review. A
+blanket "`random` absent from `sys.modules`" check is deliberately not used
+because `flow.py` legitimately imports `random` for the opt-in jitter carve-out;
+the contract is therefore scoped to the *execution-module boundary*
+(`executor.py` + `_execution/`), which is exactly where the invariants apply.
+Expanding the banned list is cheap; keep carve-outs conservative and document
+every addition here.
+
 ---
 
 ## Package-wide invariants

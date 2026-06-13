@@ -41,12 +41,34 @@ schema. See [Guarantee 5](#guarantee-5-schema-validated-execution-context) and
 > steps.
 
 **Mechanism:** after `validate(output)` succeeds, the validated dict is merged into the
-context via `context.update(output_dict)`. The merge is unconditional. Keys present
-before the step remain in the context (unless explicitly overwritten by a same-named
-output field).
+context by the single shared merge helper `chainweaver._execution.merge_step_outputs`,
+used by both the linear and DAG lanes (sync and async). Keys present before the step
+remain in the context unless overwritten by a same-named output field, in which case the
+flow's collision policy applies (see below).
 
 **Where it can break:** a downstream step's `input_mapping` chooses not to forward a
 field. That's by design — selectivity is the caller's prerogative, not a loss event.
+
+### Context key collisions (#337)
+
+When a step output key already exists in the accumulated context (including an
+`initial_input` key), the flow-level `on_context_collision` setting governs what happens.
+The same policy applies uniformly to linear and DAG flows and to both execution lanes;
+the rule is enforced in one place (`merge_step_outputs`).
+
+| `on_context_collision` | Behaviour | Use when |
+|------------------------|-----------|----------|
+| `"overwrite"` | Silent last-write-wins, logged at `DEBUG`. | Intentional refine-in-place pipelines that re-emit a key on purpose. |
+| `"warn"` (**default**) | Log at `WARNING`, then overwrite. | You want visibility into accidental shadowing without failing runs. |
+| `"error"` | Abort the run with `ContextKeyCollisionError` naming the step and colliding keys. | Strict pipelines where silently dropping earlier data is a bug. |
+
+DAG **sibling** collisions — two steps in the *same* level producing the same key —
+remain an unconditional `FlowExecutionError` regardless of the policy, because there is
+no defined ordering between siblings to resolve the conflict.
+
+`compile_flow` surfaces statically detectable collisions ahead of execution as a
+`context_collision` compilation warning (suppressed when the policy is `"overwrite"`),
+so authors can catch shadowing at compile time.
 
 ---
 

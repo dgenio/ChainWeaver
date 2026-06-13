@@ -27,6 +27,11 @@ from chainweaver.storage import InMemoryStore, RegistryStore
 
 AnyFlow = Flow | DAGFlow
 
+# Sentinel distinguishing "argument not supplied" from an explicit ``None``
+# value for :meth:`FlowRegistry.update_flow_state` (``None`` is a meaningful
+# value for ``tool_schema_hashes`` — it means "no drift snapshot").
+_UNSET: object = object()
+
 
 def _parse_version(flow_name: str, version: str) -> Version:
     """Parse *version* as PEP 440, wrapping `InvalidVersion` in `InvalidFlowVersionError`."""
@@ -191,14 +196,66 @@ class FlowRegistry:
         """Shortcut: list only ACTIVE flows."""
         return self.list_flows(status=FlowStatus.ACTIVE)
 
+    def update_flow_state(
+        self,
+        flow_name: str,
+        *,
+        version: str | None = None,
+        status: FlowStatus | None = None,
+        tool_schema_hashes: dict[str, str] | None | object = _UNSET,
+    ) -> AnyFlow:
+        """Transition a flow's mutable state without mutating the stored object (issue #335).
+
+        Flow state transitions (status changes, drift re-snapshots) go through
+        the registry, which owns persistence. Rather than writing fields on the
+        ``Flow`` instance — which is a *shared reference* for in-memory stores,
+        so a write would silently alter the state seen by every other holder
+        (e.g. a long-running :class:`chainweaver.mcp.FlowServer`) — this method
+        produces a fresh object via ``model_copy(update=...)``, persists it, and
+        returns it. Callers that need the new state must use the return value or
+        re-fetch via :meth:`get_flow`.
+
+        Args:
+            flow_name: Name of the flow to update.
+            version: If provided, targets a specific version. Otherwise targets
+                the latest version.
+            status: New status. When ``None`` the status is left unchanged.
+            tool_schema_hashes: New drift snapshot. When omitted the hashes are
+                left unchanged; pass ``None`` to clear the snapshot explicitly.
+
+        Returns:
+            The updated flow object (the freshly copied instance now in the
+            store), or the unchanged stored object when no fields were supplied.
+
+        Raises:
+            FlowNotFoundError: When no flow with *flow_name* is registered.
+        """
+        flow = self.get_flow(flow_name, version=version)
+        updates: dict[str, object] = {}
+        if status is not None:
+            updates["status"] = status
+        if tool_schema_hashes is not _UNSET:
+            updates["tool_schema_hashes"] = tool_schema_hashes
+        if not updates:
+            return flow
+        new_flow = flow.model_copy(update=updates)
+        # Persist the new object. For ``InMemoryStore`` this swaps the stored
+        # reference for the copy (the original instance held by other callers is
+        # left untouched); for ``FileStore`` it re-writes the JSON file.
+        self._store.save_flow(new_flow, overwrite=True)
+        self._touch_latest(new_flow.name, new_flow.version)
+        return new_flow
+
     def set_flow_status(
         self, flow_name: str, status: FlowStatus, *, version: str | None = None
     ) -> None:
-        """Update a flow's status.
+        """Update a flow's status without mutating the registry-held object.
 
-        For in-memory stores the mutation is in-place; for stores that
-        snapshot on read (e.g. :class:`~chainweaver.storage.FileStore`) the
-        updated flow is re-saved.
+        Delegates to :meth:`update_flow_state`, which performs a
+        copy-on-write transition (issue #335): the stored object is replaced
+        with an updated copy and persisted, so a shared ``Flow`` reference held
+        elsewhere is never silently altered. Callers needing the new state must
+        re-fetch via :meth:`get_flow`.
 
         Args:
             flow_name: Name of the flow to update.
@@ -209,12 +266,7 @@ class FlowRegistry:
         Raises:
             FlowNotFoundError: When no flow with *flow_name* is registered.
         """
-        flow = self.get_flow(flow_name, version=version)
-        flow.status = status
-        # Persist the mutation back to the store.  For ``InMemoryStore`` the
-        # save is a no-op identity write (objects are mutated in place); for
-        # ``FileStore`` it re-writes the JSON file with the new status.
-        self._store.save_flow(flow, overwrite=True)
+        self.update_flow_state(flow_name, version=version, status=status)
 
     def list_flow_versions(self, name: str) -> list[str]:
         """Return all registered versions of a flow, sorted ascending.

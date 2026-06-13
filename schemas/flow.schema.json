@@ -74,6 +74,16 @@
           "title": "Name",
           "type": "string"
         },
+        "on_context_collision": {
+          "default": "warn",
+          "enum": [
+            "overwrite",
+            "warn",
+            "error"
+          ],
+          "title": "On Context Collision",
+          "type": "string"
+        },
         "output_schema_ref": {
           "anyOf": [
             {
@@ -364,6 +374,16 @@
         },
         "name": {
           "title": "Name",
+          "type": "string"
+        },
+        "on_context_collision": {
+          "default": "warn",
+          "enum": [
+            "overwrite",
+            "warn",
+            "error"
+          ],
+          "title": "On Context Collision",
           "type": "string"
         },
         "output_schema_ref": {

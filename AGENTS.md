@@ -43,13 +43,16 @@ chainweaver/
 ├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
-├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8)
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
+├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8) + ContextCollisionPolicy / on_context_collision (#337)
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) (main entry point)
+├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
+│   ├── __init__.py    Re-exports merge_step_outputs
+│   └── context.py     merge_step_outputs: single context-merge honouring on_context_collision (#337)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
 ├── cache.py           StepCache Protocol + InMemoryStepCache + FileStepCache + StepCacheKey (#127)
@@ -207,6 +210,48 @@ see the `DAGFlowStep` subsection below).
 | `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
 | `governance` | `FlowGovernance` | active defaults | Review lifecycle, owner, replacement-tool list, savings estimates, and review notes (#259, #268). Separate from `FlowStatus`. |
 | `safety` | `ToolSafetyContract \| None` | `None` | Explicit flow-level side-effect, retry, dry-run, idempotency, and approval metadata (#293). `None` means unknown, not safe. |
+| `on_context_collision` | `Literal["overwrite", "warn", "error"]` | `"warn"` | Policy when a step output overwrites an existing context key (#337). `"overwrite"` = silent last-write-wins; `"warn"` = log at WARNING then overwrite; `"error"` = abort with `ContextKeyCollisionError`. Applied by the single shared merge helper (`chainweaver._execution.merge_step_outputs`) on both linear and DAG, sync and async. DAG *sibling* collisions within one level remain an unconditional error regardless. |
+
+### Context-collision semantics (#337)
+
+The accumulated context is the data plane of every flow. A step output that
+overwrites an existing key (including an `initial_input` key) is governed by
+`Flow.on_context_collision` and enforced in exactly one place —
+`chainweaver._execution.merge_step_outputs` — for both flow kinds and both
+lanes. `compile_flow` additionally emits a `context_collision` warning for
+statically detectable overwrites (suppressed under `"overwrite"`). See
+[docs/data-integrity.md](docs/data-integrity.md#context-key-collisions-337).
+
+### Concurrency contract (#336)
+
+A single `FlowExecutor` instance supports **concurrent** `execute_flow` /
+`execute_flow_async` / `stream_flow` calls: run-scoped state (e.g. the stream
+event collector) lives per-thread on a `threading.local` slot, and the bundled
+`InMemoryStepCache` / `InMemoryCheckpointer` are internally locked. The one
+rule: **mutating operations (`register_tool`, `add_middleware`,
+`accept_drift`) must not run concurrently with executions** — do them at setup.
+
+### Async lane support matrix (#332)
+
+`execute_flow_async` raises `AsyncLaneUnsupportedError` (before any step runs)
+for features it does not yet honour, rather than diverging silently:
+
+| Feature | `execute_flow` (sync) | `execute_flow_async` |
+|---------|:---------------------:|:--------------------:|
+| Linear flows | ✅ | ✅ |
+| DAG flows (no branching) | ✅ | ✅ |
+| Opt-in DAG-level concurrency (#344) | sequential | ✅ (`max_step_concurrency`) |
+| Conditional branches / `default_next` (#9) | ✅ | ❌ rejected |
+| `decision_candidates` (#102) | ✅ | ❌ rejected |
+| Composed sub-flow (`flow_name`, #75) | ✅ | ❌ rejected |
+| Step cache / checkpoint resume | ✅ | bypassed |
+
+### State transitions (#335)
+
+`accept_drift` and `set_flow_status` never mutate a registry-held `Flow` in
+place — they go through `FlowRegistry.update_flow_state`, which performs a
+`model_copy(update=...)`, persists the new object, and returns it. Callers
+needing the new state must re-fetch via `get_flow`.
 
 **Read-only properties (not fields):** `input_schema`, `output_schema`, and
 `context_schema` resolve their `*_schema_ref` counterparts to a

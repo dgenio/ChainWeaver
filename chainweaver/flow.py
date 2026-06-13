@@ -57,6 +57,17 @@ class FlowLifecycle(str, Enum):
     ARCHIVED = "archived"
 
 
+# Context key-collision policy (issue #337).  Governs what happens when a step
+# produces an output key that already exists in the accumulated execution
+# context (including the initial input).  ``"overwrite"`` keeps the historical
+# silent last-write-wins behaviour; ``"warn"`` (the default) logs at WARNING
+# before overwriting; ``"error"`` aborts the run with a typed
+# ``ContextKeyCollisionError`` naming the step and colliding keys.  DAG
+# *sibling* collisions within one level remain an unconditional error
+# regardless of this policy — they are genuinely ambiguous.
+ContextCollisionPolicy = Literal["overwrite", "warn", "error"]
+
+
 _LIFECYCLE_TRANSITIONS: dict[FlowLifecycle, frozenset[FlowLifecycle]] = {
     FlowLifecycle.OBSERVED: frozenset({FlowLifecycle.SUGGESTED, FlowLifecycle.IGNORED}),
     FlowLifecycle.SUGGESTED: frozenset({FlowLifecycle.DRAFT, FlowLifecycle.IGNORED}),
@@ -572,6 +583,7 @@ class Flow(BaseModel):
     capability_id: str | None = None
     governance: FlowGovernance = Field(default_factory=FlowGovernance)
     safety: ToolSafetyContract | None = None
+    on_context_collision: ContextCollisionPolicy = "warn"
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -935,6 +947,7 @@ class DAGFlow(BaseModel):
     capability_id: str | None = None
     governance: FlowGovernance = Field(default_factory=FlowGovernance)
     safety: ToolSafetyContract | None = None
+    on_context_collision: ContextCollisionPolicy = "warn"
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
