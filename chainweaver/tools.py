@@ -144,6 +144,7 @@ class Tool:
         cacheable: bool | None = None,
         safety: ToolSafetyContract | None = None,
         metadata: dict[str, Any] | None = None,
+        dry_run_fn: Callable[[Any], dict[str, Any]] | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -191,6 +192,17 @@ class Tool:
         # reviewers and the drift workflow read it.  Defaults to an empty dict so
         # callers can always ``tool.metadata.get(...)`` without a None guard.
         self.metadata: dict[str, Any] = dict(metadata) if metadata else {}
+        # Effect-free preview callable (issue #357).  Same signature as ``fn``
+        # (``(validated_input) -> dict``) but guaranteed to perform no side
+        # effects.  ``FlowExecutor.execute_flow(dry_run=True)`` calls this
+        # instead of ``fn`` for side-effecting tools that declare it.  A tool
+        # whose contract sets ``supports_dry_run=True`` MUST supply one.
+        self.dry_run_fn = dry_run_fn
+        if self.safety.supports_dry_run and dry_run_fn is None:
+            raise ToolDefinitionError(
+                name,
+                "safety.supports_dry_run=True requires a dry_run_fn to be supplied.",
+            )
         # Whether ``fn`` is a coroutine function — pre-computed once
         # because ``inspect.iscoroutinefunction`` doesn't recognise
         # callables whose ``__call__`` is async, so we also inspect the
@@ -266,6 +278,37 @@ class Tool:
         """
         validated_input = self.input_schema.model_validate(raw_inputs)
         raw_output = await self._call_fn_async(validated_input)
+        return self._validate_output(raw_output)
+
+    @property
+    def supports_dry_run(self) -> bool:
+        """Whether this tool can be previewed effect-free (issue #357).
+
+        Mirrors :attr:`ToolSafetyContract.supports_dry_run`; a ``dry_run_fn`` is
+        required whenever this is ``True`` (enforced at construction).
+        """
+        return self.safety.supports_dry_run
+
+    def run_dry(self, raw_inputs: dict[str, Any]) -> dict[str, Any]:
+        """Validate *raw_inputs*, run the effect-free ``dry_run_fn``, validate output.
+
+        The dry-run counterpart to :meth:`run` (issue #357): applies the same
+        input/output schema validation and size cap, but dispatches to
+        ``dry_run_fn`` so no side effects occur.  Used by
+        :meth:`FlowExecutor.execute_flow` under ``dry_run=True``.
+
+        Raises:
+            ToolDefinitionError: When the tool has no ``dry_run_fn``.
+            pydantic.ValidationError: When inputs or the preview output do not
+                match the declared schemas.
+            ToolOutputSizeError: When ``max_output_size`` is exceeded.
+        """
+        if self.dry_run_fn is None:
+            raise ToolDefinitionError(
+                self.name, "run_dry() called but the tool has no dry_run_fn."
+            )
+        validated_input = self.input_schema.model_validate(raw_inputs)
+        raw_output = self.dry_run_fn(validated_input)
         return self._validate_output(raw_output)
 
     def _validate_output(self, raw_output: dict[str, Any]) -> dict[str, Any]:

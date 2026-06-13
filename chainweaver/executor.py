@@ -29,10 +29,22 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver._execution import merge_step_outputs
+from chainweaver.approvals import (
+    ApprovalCallable,
+    ApprovalCallback,
+    ApprovalContext,
+    ApprovalDecision,
+    ApprovalRecord,
+    coerce_approval_callback,
+)
 from chainweaver.cache import StepCache, StepCacheKey, compute_input_value_hash
 from chainweaver.cancellation import CancellationToken
 from chainweaver.checkpoint import Checkpointer, ExecutionSnapshot
-from chainweaver.contracts import evaluate_predicate
+from chainweaver.contracts import (
+    SideEffectLevel,
+    evaluate_predicate,
+    side_effect_exceeds,
+)
 from chainweaver.cost import CostProfile, CostReport, compute_cost_report
 from chainweaver.decisions import (
     DecisionCallable,
@@ -42,6 +54,7 @@ from chainweaver.decisions import (
 )
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
+    ApprovalDeniedError,
     AsyncLaneUnsupportedError,
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
@@ -54,6 +67,7 @@ from chainweaver.exceptions import (
     FlowStatusError,
     InputMappingError,
     PredicateSyntaxError,
+    SafetyCeilingError,
     SchemaValidationError,
     ToolNotFoundError,
     ToolOutputSizeError,
@@ -138,6 +152,13 @@ class _RunScopedState(threading.local):
         self.active_flow_version: str = ""
         self.in_replay: bool = False
         self.resume_snapshot: ExecutionSnapshot | None = None
+        # Dry-run mode (issue #357): set for the duration of an
+        # ``execute_flow(dry_run=True)`` call.  ``dry_run_unsupported`` is the
+        # policy applied to side-effecting steps that declare no ``dry_run_fn``
+        # ("skip" stubs them, "abort" fails the step).  Both are save/restored
+        # around sub-flow recursion alongside ``active_flow_version``.
+        self.dry_run: bool = False
+        self.dry_run_unsupported: str = "skip"
 
 
 class _StreamCollectorMiddleware(BaseMiddleware):
@@ -407,6 +428,10 @@ class StepRecord(BaseModel):
         sub_result: For a composed sub-flow step (issue #75), the nested
             :class:`ExecutionResult` of the sub-flow run, so the parent trace
             retains the full sub-flow execution log.  ``None`` for tool steps.
+        approval: For a step gated by an execution-time approval callback
+            (issue #356), the :class:`~chainweaver.approvals.ApprovalRecord`
+            describing the decision.  ``None`` for steps whose effective
+            contract did not require approval (the common case).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -428,6 +453,7 @@ class StepRecord(BaseModel):
     fallback_used: bool = False
     flow_name: str | None = None
     sub_result: ExecutionResult | None = None
+    approval: ApprovalRecord | None = None
 
 
 class ExecutionResult(BaseModel):
@@ -479,6 +505,12 @@ class ExecutionResult(BaseModel):
         initial_input: The initial context dictionary that was passed to
             ``execute_flow``.  Stored on the result so the trace can be
             replayed deterministically by :meth:`FlowExecutor.replay_flow`.
+        dry_run: ``True`` when the result was produced by
+            ``execute_flow(dry_run=True)`` (issue #357).  Dry-run traces run
+            ``dry_run_fn`` for tools that declare it, run read-only steps
+            normally, and skip/abort other side-effecting steps — so a dry-run
+            trace must never be mistaken for a real run.  ``False`` for normal
+            executions (the default).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -494,6 +526,7 @@ class ExecutionResult(BaseModel):
     total_duration_ms: float
     cost_report: CostReport | None = None
     initial_input: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
 
     def to_mermaid(self, *, direction: str = "LR") -> str:
         """Return a Mermaid graph overlaying this result on the flow (#79)."""
@@ -604,6 +637,9 @@ class FlowExecutor:
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
         decision_callback: DecisionCallback | DecisionCallable | None = None,
+        approval_callback: ApprovalCallback | ApprovalCallable | None = None,
+        strict_safety: bool = False,
+        max_side_effect_level: SideEffectLevel | None = None,
         discover_plugins: bool = False,
         max_composition_depth: int = 10,
         max_step_concurrency: int = 1,
@@ -640,6 +676,19 @@ class FlowExecutor:
         self._decision_callback: DecisionCallback | None = coerce_decision_callback(
             decision_callback
         )
+        # Execution-time safety enforcement (issue #356).  All opt-in:
+        # ``approval_callback`` is the seam invoked before a step whose effective
+        # ``ToolSafetyContract`` has ``requires_approval=True``; ``strict_safety``
+        # refuses such steps when no callback is registered (instead of the
+        # advisory default of running them); ``max_side_effect_level`` is a
+        # ceiling above which any step is refused.  Like ``decision_callback``,
+        # the callback is a user-supplied seam — the executor never performs I/O
+        # itself, so the no-LLM/no-network/no-randomness invariants hold.
+        self._approval_callback: ApprovalCallback | None = coerce_approval_callback(
+            approval_callback
+        )
+        self._strict_safety = strict_safety
+        self._max_side_effect_level = max_side_effect_level
         # Step-result cache (issue #127).  ``None`` (the default)
         # disables caching entirely — every tool runs every call.
         # When set, eligible step outputs are read from / written to
@@ -1221,6 +1270,66 @@ class FlowExecutor:
         return sources
 
     def execute_flow(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        version: str | None = None,
+        force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+        dry_run: bool = False,
+        dry_run_unsupported: str = "skip",
+    ) -> ExecutionResult:
+        """Execute a registered flow from *initial_input*.
+
+        See :meth:`_execute_flow_impl` for the full parameter reference; the two
+        extra keyword arguments here add the opt-in dry-run mode (issue #357):
+
+        Args:
+            dry_run: When ``True``, run the flow as a side-effect-free rehearsal.
+                Read-only steps (``side_effects`` in ``NONE``/``READ``) run
+                normally; tools that declare a ``dry_run_fn`` run it; other
+                side-effecting steps are handled per *dry_run_unsupported*.  The
+                step cache and checkpointer are bypassed and
+                :attr:`ExecutionResult.dry_run` is set, so a rehearsal trace can
+                never be confused with a real run.  Composed sub-flows (#75)
+                inherit the dry-run mode.
+            dry_run_unsupported: Policy for side-effecting steps with no
+                ``dry_run_fn`` under ``dry_run=True``: ``"skip"`` (the default)
+                records a ``skipped`` stub and continues; ``"abort"`` fails the
+                step for a high-fidelity rehearsal.
+
+        Returns:
+            An :class:`ExecutionResult`; ``dry_run`` reflects the mode it ran in.
+        """
+        if dry_run_unsupported not in ("skip", "abort"):
+            raise ValueError(
+                f"dry_run_unsupported must be 'skip' or 'abort', got {dry_run_unsupported!r}."
+            )
+        # Save/restore the per-thread dry-run markers so a composed sub-flow
+        # (#75) inherits the parent's mode and a later normal call on the same
+        # thread is unaffected.  ``dry_run or previous`` lets a nested call with
+        # the default ``dry_run=False`` stay in the parent's dry run.
+        previous_dry_run = self._local.dry_run
+        previous_unsupported = self._local.dry_run_unsupported
+        self._local.dry_run = dry_run or previous_dry_run
+        if dry_run:
+            self._local.dry_run_unsupported = dry_run_unsupported
+        try:
+            return self._execute_flow_impl(
+                flow_name,
+                initial_input,
+                version=version,
+                force=force,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
+        finally:
+            self._local.dry_run = previous_dry_run
+            self._local.dry_run_unsupported = previous_unsupported
+
+    def _execute_flow_impl(
         self,
         flow_name: str,
         initial_input: dict[str, Any],
@@ -2012,6 +2121,8 @@ class FlowExecutor:
         started_at = _now_utc()
         t0 = time.perf_counter()
         tool_attempts = [0]
+        # Approval audit record (issue #356); set by the safety gate below.
+        approval_record: ApprovalRecord | None = None
 
         def _record(
             *,
@@ -2041,6 +2152,7 @@ class FlowExecutor:
                 skipped=skipped,
                 cached=False,
                 fallback_used=fallback_used,
+                approval=approval_record,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -2100,6 +2212,29 @@ class FlowExecutor:
             inputs,
             redaction=self._redaction_policy,
         )
+
+        # Execution-time safety enforcement (issue #356) — mirrors the sync lane.
+        gate_error, approval_record = self._evaluate_safety_gate(
+            step=step,
+            tool=tool,
+            step_index=step_index,
+            inputs=inputs,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=None,
+        )
+        if gate_error is not None:
+            log_step_error(_logger, step_index, step.display_name, gate_error)
+            return _finish(
+                _record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=gate_error,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
 
         retry_errors: list[str] = []
         try:
@@ -2591,6 +2726,7 @@ class FlowExecutor:
             total_duration_ms=total_ms,
             cost_report=cost_report,
             initial_input=dict(initial_input),
+            dry_run=self._local.dry_run,
         )
         if self._trace_recorder is not None:
             self._record_observed_trace(result)
@@ -2625,7 +2761,9 @@ class FlowExecutor:
         relevant tool's current ``schema_hash`` so resume can detect
         drift since the snapshot was written.
         """
-        if self._checkpointer is None:
+        # Dry runs (#357) never persist snapshots — a rehearsal must not leave
+        # resumable state behind.
+        if self._checkpointer is None or self._local.dry_run:
             return
         tool_hashes: dict[str, str] = {}
         for step in flow.steps:
@@ -2662,7 +2800,7 @@ class FlowExecutor:
         run sequentially, but on resume the level is replayed from
         scratch.  No-op when no checkpointer is configured.
         """
-        if self._checkpointer is None:
+        if self._checkpointer is None or self._local.dry_run:
             return
         tool_hashes: dict[str, str] = {}
         for step in flow.steps:
@@ -3340,6 +3478,10 @@ class FlowExecutor:
         # accurate when ``on_error="skip"`` or ``on_error="fallback:…"``
         # appends extra entries to ``retry_errors`` for context.
         tool_attempts = [0]
+        # Approval audit record (issue #356); ``None`` until the safety gate
+        # below evaluates an approval decision.  ``_record`` reads it at call
+        # time, so every record produced after the gate carries the decision.
+        approval_record: ApprovalRecord | None = None
 
         def _record(
             *,
@@ -3374,6 +3516,7 @@ class FlowExecutor:
                 skipped=skipped,
                 cached=cached,
                 fallback_used=fallback_used,
+                approval=approval_record,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -3462,15 +3605,60 @@ class FlowExecutor:
             redaction=self._redaction_policy,
         )
 
+        # Execution-time safety enforcement (issue #356): side-effect ceiling +
+        # approval gate.  Runs after inputs are resolved (so the approval
+        # callback sees real inputs) and before any tool work.
+        gate_error, approval_record = self._evaluate_safety_gate(
+            step=step,
+            tool=tool,
+            step_index=step_index,
+            inputs=inputs,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=step_id,
+        )
+        if gate_error is not None:
+            log_step_error(_logger, step_index, step.display_name, gate_error)
+            return _finish(
+                _record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=gate_error,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
+
+        # Dry-run dispatch (issue #357): side-effecting steps run ``dry_run_fn``
+        # or are skipped/aborted; read-only steps fall through and run normally
+        # (with the cache bypassed below).
+        if self._local.dry_run:
+            dry_record = self._dry_run_step(
+                step=step,
+                tool=tool,
+                step_index=step_index,
+                inputs=inputs,
+                record_fn=_record,
+            )
+            if dry_record is not None:
+                return _finish(dry_record)
+
         # Cache lookup (issue #127).  Skip caching during replay_flow
-        # (replay always re-executes) and for tools that opt out via
+        # (replay always re-executes), during dry runs (#357, rehearsals must
+        # not read or write real cache state), and for tools that opt out via
         # ``cacheable=False``.  Input validation runs inside the cache
         # path so we can hash the *validated* form — equivalent inputs
         # that differ only in field ordering or coercion collapse onto
         # the same key.  If validation fails, fall through to the
         # normal execution path, which surfaces the same error.
         cache_key: StepCacheKey | None = None
-        if self._step_cache is not None and tool.cacheable and not self._local.in_replay:
+        if (
+            self._step_cache is not None
+            and tool.cacheable
+            and not self._local.in_replay
+            and not self._local.dry_run
+        ):
             try:
                 validated = tool.input_schema.model_validate(inputs)
             except ValidationError:
@@ -3605,6 +3793,169 @@ class FlowExecutor:
                 skipped=False,
                 retry_errors=retry_errors,
             )
+        )
+
+    def _evaluate_safety_gate(
+        self,
+        *,
+        step: FlowStep,
+        tool: Tool,
+        step_index: int,
+        inputs: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None,
+    ) -> tuple[Exception | None, ApprovalRecord | None]:
+        """Enforce the execution-time safety contract for a step (issue #356).
+
+        Returns ``(error, approval)``: ``error`` is non-``None`` when the step
+        must be aborted (ceiling exceeded, approval denied, callback misbehaved,
+        or ``strict_safety`` with no callback); ``approval`` is the audit record
+        to attach to the step when an approval decision was made.  Both are
+        ``None`` for the common case of a step that needs no gating.  This helper
+        performs no I/O itself — the only outward call is the user-supplied
+        approval callback, mirroring the ``decision_callback`` seam — so the
+        executor's determinism invariants are preserved.
+        """
+        contract = tool.safety
+        ceiling = self._max_side_effect_level
+        if ceiling is not None and side_effect_exceeds(contract.side_effects, ceiling):
+            return (
+                SafetyCeilingError(
+                    tool.name, step_index, contract.side_effects.value, ceiling.value
+                ),
+                None,
+            )
+
+        if not contract.requires_approval:
+            return None, None
+
+        if self._approval_callback is None:
+            if self._strict_safety:
+                return (
+                    ApprovalDeniedError(
+                        tool.name,
+                        step_index,
+                        "step requires approval but no approval_callback is registered "
+                        "(strict_safety=True)",
+                    ),
+                    None,
+                )
+            # Advisory default (pre-#356 behaviour): run the step.
+            return None, None
+
+        redacted = (
+            self._redaction_policy.redact(inputs)
+            if self._redaction_policy is not None
+            else dict(inputs)
+        )
+        ctx = ApprovalContext(
+            trace_id=trace_id,
+            flow_name=flow_name,
+            step_index=step_index,
+            step_id=step_id,
+            tool_name=tool.name,
+            inputs=redacted,
+            safety=contract,
+        )
+        try:
+            decision = self._approval_callback.approve(ctx)
+        except Exception as exc:
+            err = ApprovalDeniedError(
+                tool.name,
+                step_index,
+                f"approval callback raised {type(exc).__name__}: {exc}",
+            )
+            err.__cause__ = exc
+            return err, None
+        if not isinstance(decision, ApprovalDecision):
+            return (
+                ApprovalDeniedError(
+                    tool.name,
+                    step_index,
+                    f"approval callback returned {decision!r}, not an ApprovalDecision",
+                ),
+                None,
+            )
+        if decision is ApprovalDecision.DENY:
+            return (
+                ApprovalDeniedError(tool.name, step_index, "approval callback returned DENY"),
+                ApprovalRecord(decision=ApprovalDecision.DENY),
+            )
+        return None, ApprovalRecord(decision=ApprovalDecision.APPROVE)
+
+    def _dry_run_step(
+        self,
+        *,
+        step: FlowStep,
+        tool: Tool,
+        step_index: int,
+        inputs: dict[str, Any],
+        record_fn: Callable[..., StepRecord],
+    ) -> StepRecord | None:
+        """Dispatch one step under ``dry_run=True`` (issue #357).
+
+        Returns ``None`` when the step is read-only and should run normally
+        (the caller falls through to the real execution path, with the cache
+        bypassed).  Otherwise returns a finished :class:`StepRecord`: a
+        ``dry_run_fn`` preview, a stubbed ``skipped`` record, or a failed record
+        under the ``"abort"`` policy.
+        """
+        contract = tool.safety
+        if contract.side_effects in (SideEffectLevel.NONE, SideEffectLevel.READ):
+            return None  # safe to actually run a read-only step
+
+        if tool.supports_dry_run and tool.dry_run_fn is not None:
+            try:
+                outputs = tool.run_dry(inputs)
+            except Exception as exc:
+                wrapped = self._wrap_tool_exception(step, step_index, exc)
+                log_step_error(_logger, step_index, step.display_name, wrapped)
+                return record_fn(
+                    inputs=inputs,
+                    outputs=None,
+                    error=wrapped,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            log_step_end(
+                _logger, step_index, step.display_name, outputs, redaction=self._redaction_policy
+            )
+            return record_fn(
+                inputs=inputs,
+                outputs=outputs,
+                error=None,
+                success=True,
+                skipped=False,
+                retry_errors=[],
+            )
+
+        if self._local.dry_run_unsupported == "abort":
+            err = FlowExecutionError(
+                step.display_name,
+                step_index,
+                "dry-run abort: side-effecting tool declares no dry_run_fn",
+            )
+            log_step_error(_logger, step_index, step.display_name, err)
+            return record_fn(
+                inputs=inputs,
+                outputs=None,
+                error=err,
+                success=False,
+                skipped=False,
+                retry_errors=[],
+            )
+
+        # "skip": stub the side-effecting step so the rehearsal continues
+        # without merging any output into the context.
+        return record_fn(
+            inputs=inputs,
+            outputs={},
+            error=None,
+            success=True,
+            skipped=True,
+            retry_errors=[],
         )
 
     def _invoke_tool(

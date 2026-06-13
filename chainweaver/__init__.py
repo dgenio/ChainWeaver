@@ -41,6 +41,13 @@ import logging
 
 from chainweaver import cli
 from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
+from chainweaver.approvals import (
+    ApprovalCallback,
+    ApprovalContext,
+    ApprovalDecision,
+    ApprovalRecord,
+    BaseApprovalCallback,
+)
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
@@ -66,6 +73,7 @@ from chainweaver.contracts import (
     ToolSafetyContract,
     evaluate_predicate,
     merge_safety,
+    side_effect_exceeds,
 )
 from chainweaver.cost import (
     PROVIDER_PRICES,
@@ -242,12 +250,17 @@ __all__ = [
     "PROVIDER_PRICES",
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalCallback",
+    "ApprovalContext",
+    "ApprovalDecision",
     "ApprovalDeniedError",
+    "ApprovalRecord",
     "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
     "BacktestMismatch",
     "BacktestReport",
+    "BaseApprovalCallback",
     "BaseDecisionCallback",
     "BaseMiddleware",
     "CancellationToken",
@@ -405,6 +418,7 @@ __all__ = [
     "result_to_mermaid",
     "schema_fingerprint",
     "score_candidate",
+    "side_effect_exceeds",
     "suggest_optimizations",
     "tool",
     "trace_to_lesson_candidate",

@@ -222,6 +222,18 @@ class ToolSafetyContract(BaseModel):
         return self.requires_approval
 
 
+def side_effect_exceeds(level: SideEffectLevel, ceiling: SideEffectLevel) -> bool:
+    """Return ``True`` when *level* is strictly more restrictive than *ceiling*.
+
+    Used by :class:`~chainweaver.executor.FlowExecutor`'s execution-time
+    side-effect ceiling (issue #356): a step whose contract declares a
+    :class:`SideEffectLevel` above the configured ``max_side_effect_level`` is
+    refused.  Ordering follows :class:`SideEffectLevel`'s documented
+    most-permissive → most-restrictive scale.
+    """
+    return _SIDE_EFFECT_ORDER[level] > _SIDE_EFFECT_ORDER[ceiling]
+
+
 def merge_safety(
     contracts: Iterable[ToolSafetyContract],
     *,
@@ -479,4 +491,5 @@ __all__ = [
     "ToolSafetyContract",
     "evaluate_predicate",
     "merge_safety",
+    "side_effect_exceeds",
 ]
