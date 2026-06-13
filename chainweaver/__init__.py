@@ -42,11 +42,13 @@ import logging
 from chainweaver import cli
 from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
 from chainweaver.approvals import (
+    ApprovalCallable,
     ApprovalCallback,
     ApprovalContext,
     ApprovalDecision,
     ApprovalRecord,
     BaseApprovalCallback,
+    coerce_approval_callback,
 )
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
@@ -250,6 +252,7 @@ __all__ = [
     "PROVIDER_PRICES",
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalCallable",
     "ApprovalCallback",
     "ApprovalContext",
     "ApprovalDecision",
@@ -390,6 +393,7 @@ __all__ = [
     "check_flow_compatibility",
     "classify_safety",
     "cli",
+    "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
     "discover_flows",

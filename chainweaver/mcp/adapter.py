@@ -160,13 +160,31 @@ class MetadataPolicy(BaseModel):
         )
 
     def apply_name(self, name: str) -> str:
-        """Validate (or sanitise) a (prefixed) tool *name* against the policy."""
+        """Validate (or sanitise) a (prefixed) tool *name* against the policy.
+
+        Sanitisation maps any character outside the default safe set
+        (``[A-Za-z0-9._-]``) to ``_``; the result always satisfies the default
+        :attr:`name_pattern`.  When a *custom* ``name_pattern`` is configured the
+        sanitised name is re-validated against it and rejected with
+        :class:`~chainweaver.exceptions.MCPMetadataError` if it still does not
+        match, rather than returning a name that silently violates the policy.
+        """
         if re.fullmatch(self.name_pattern, name):
             return name
         if self.on_invalid_name == "sanitize":
             sanitised = re.sub(r"[^A-Za-z0-9._-]", "_", name)
             # Guard the degenerate all-invalid case so we never return an empty name.
-            return sanitised or "mcp_tool"
+            sanitised = sanitised or "mcp_tool"
+            # The sanitisation charset matches the *default* pattern; a custom,
+            # stricter pattern may still reject it, so re-validate and fail loudly
+            # instead of adopting a name that violates the configured policy.
+            if not re.fullmatch(self.name_pattern, sanitised):
+                raise MCPMetadataError(
+                    name,
+                    f"sanitised name {sanitised!r} still does not match the configured "
+                    f"name_pattern {self.name_pattern!r}",
+                )
+            return sanitised
         raise MCPMetadataError(
             name,
             f"name does not match required pattern {self.name_pattern!r}; "

@@ -2,6 +2,7 @@
   "__all__": [
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalCallable",
     "ApprovalCallback",
     "ApprovalContext",
     "ApprovalDecision",
@@ -144,6 +145,7 @@
     "check_flow_compatibility",
     "classify_safety",
     "cli",
+    "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
     "discover_flows",
@@ -209,6 +211,11 @@
       "module": "chainweaver.exceptions",
       "qualname": "AgentTraceImportError",
       "signature": "(detail: str, *, source: str | None = None, line: int | None = None) -> None"
+    },
+    "ApprovalCallable": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
     },
     "ApprovalCallback": {
       "kind": "class",
@@ -1407,6 +1414,12 @@
       "kind": "module",
       "module": null,
       "qualname": "chainweaver.cli"
+    },
+    "coerce_approval_callback": {
+      "kind": "function",
+      "module": "chainweaver.approvals",
+      "qualname": "coerce_approval_callback",
+      "signature": "(cb: ApprovalCallback | ApprovalCallable | None) -> ApprovalCallback | None"
     },
     "coerce_decision_callback": {
       "kind": "function",
