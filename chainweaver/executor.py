@@ -113,6 +113,18 @@ class _StreamSentinel:
 _STREAM_SENTINEL: _StreamSentinel = _StreamSentinel()
 
 
+class _RunScopedState(threading.local):
+    """Per-thread run-scoped executor state (issue #336).
+
+    Subclassing :class:`threading.local` so ``middleware`` defaults to an empty
+    list on every thread keeps the hot ``_fire_hook`` path a plain attribute
+    read — no ``getattr`` default and no per-call ``AttributeError`` round-trip.
+    """
+
+    def __init__(self) -> None:
+        self.middleware: list[FlowExecutorMiddleware] = []
+
+
 class _StreamCollectorMiddleware(BaseMiddleware):
     """Per-call middleware that pushes lifecycle events onto a queue.
 
@@ -603,7 +615,7 @@ class FlowExecutor:
         # executor never dispatch each other's events.  Keyed by thread because
         # each run executes within a single thread (the calling thread, or the
         # stream worker thread).
-        self._local = threading.local()
+        self._local = _RunScopedState()
         # Guided decision-point callback (issue #102).  Wraps a bare
         # callable in an adapter so the executor can call
         # ``self._decision_callback.decide(ctx)`` uniformly regardless
@@ -722,7 +734,7 @@ class FlowExecutor:
         Hooks that raise are logged at ``WARNING`` and the iteration
         continues — middleware bugs never abort a flow.
         """
-        run_scoped = getattr(self._local, "middleware", None)
+        run_scoped = self._local.middleware
         chain = self._middleware if not run_scoped else [*self._middleware, *run_scoped]
         for idx, mw in enumerate(chain):
             handler = getattr(mw, hook, None)
@@ -747,7 +759,7 @@ class FlowExecutor:
         than the shared ``self._middleware`` list, so concurrent runs on one
         executor (issue #336) never see each other's run-scoped observers.
         """
-        existing: list[FlowExecutorMiddleware] = getattr(self._local, "middleware", [])
+        existing = self._local.middleware
         self._local.middleware = [*existing, middleware]
         try:
             yield
