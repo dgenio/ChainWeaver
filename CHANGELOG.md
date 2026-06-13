@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ToolSafetyContract.requires_review` is retained as a deprecated alias for
   `requires_approval`; legacy serialized contracts are migrated on load.
 
+### Fixed
+
+- **Source-attributed loading errors** (#343): JSON/YAML flow loaders now carry
+  optional source context through `FlowSerializationError`, CLI/file-store
+  callers pass flow paths into deserialization, and skipped plugin entry-point
+  warnings include tracebacks for the underlying loader failure.
+
 ## [0.12.1] - 2026-06-08
 
 ### Fixed

@@ -690,7 +690,7 @@ class Flow(BaseModel):
         return flow_to_yaml(self)
 
     @classmethod
-    def from_json(cls, data: str) -> Flow:
+    def from_json(cls, data: str, *, source: str | None = None) -> Flow:
         """Deserialize a :class:`Flow` from a JSON string (issue #14).
 
         Raises:
@@ -700,15 +700,16 @@ class Flow(BaseModel):
         """
         from chainweaver.serialization import flow_from_json
 
-        result = flow_from_json(data)
+        result = flow_from_json(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a Flow payload but got {type(result).__name__}"
+                f"Expected a Flow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
     @classmethod
-    def from_yaml(cls, data: str) -> Flow:
+    def from_yaml(cls, data: str, *, source: str | None = None) -> Flow:
         """Deserialize a :class:`Flow` from a YAML string (issue #14).
 
         Requires ``pyyaml`` to be installed (``pip install chainweaver[yaml]``).
@@ -720,10 +721,11 @@ class Flow(BaseModel):
         """
         from chainweaver.serialization import flow_from_yaml
 
-        result = flow_from_yaml(data)
+        result = flow_from_yaml(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a Flow payload but got {type(result).__name__}"
+                f"Expected a Flow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
@@ -1019,7 +1021,7 @@ class DAGFlow(BaseModel):
         return flow_to_yaml(self)
 
     @classmethod
-    def from_json(cls, data: str) -> DAGFlow:
+    def from_json(cls, data: str, *, source: str | None = None) -> DAGFlow:
         """Deserialize a :class:`DAGFlow` from a JSON string (issue #14).
 
         Raises:
@@ -1029,15 +1031,16 @@ class DAGFlow(BaseModel):
         """
         from chainweaver.serialization import flow_from_json
 
-        result = flow_from_json(data)
+        result = flow_from_json(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a DAGFlow payload but got {type(result).__name__}"
+                f"Expected a DAGFlow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
     @classmethod
-    def from_yaml(cls, data: str) -> DAGFlow:
+    def from_yaml(cls, data: str, *, source: str | None = None) -> DAGFlow:
         """Deserialize a :class:`DAGFlow` from a YAML string (issue #14).
 
         Raises:
@@ -1046,10 +1049,11 @@ class DAGFlow(BaseModel):
         """
         from chainweaver.serialization import flow_from_yaml
 
-        result = flow_from_yaml(data)
+        result = flow_from_yaml(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a DAGFlow payload but got {type(result).__name__}"
+                f"Expected a DAGFlow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
