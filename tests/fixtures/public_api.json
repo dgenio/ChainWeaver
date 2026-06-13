@@ -2,12 +2,19 @@
   "__all__": [
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalCallable",
+    "ApprovalCallback",
+    "ApprovalContext",
+    "ApprovalDecision",
+    "ApprovalDeniedError",
+    "ApprovalRecord",
     "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
     "BUILTIN_PROPERTIES",
     "BacktestMismatch",
     "BacktestReport",
+    "BaseApprovalCallback",
     "BaseDecisionCallback",
     "BaseMiddleware",
     "CancellationToken",
@@ -86,7 +93,9 @@
     "LessonEvidenceStep",
     "LessonReview",
     "MCPError",
+    "MCPMetadataError",
     "MCPSchemaConversionError",
+    "MCPSchemaDriftError",
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
@@ -103,6 +112,7 @@
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "SafetyCeilingError",
     "SafetyLevel",
     "SchemaValidationError",
     "ServiceConfig",
@@ -135,6 +145,7 @@
     "check_flow_compatibility",
     "classify_safety",
     "cli",
+    "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
     "discover_flows",
@@ -163,6 +174,7 @@
     "result_to_mermaid",
     "schema_fingerprint",
     "score_candidate",
+    "side_effect_exceeds",
     "suggest_optimizations",
     "tool",
     "trace_to_lesson_candidate",
@@ -199,6 +211,51 @@
       "module": "chainweaver.exceptions",
       "qualname": "AgentTraceImportError",
       "signature": "(detail: str, *, source: str | None = None, line: int | None = None) -> None"
+    },
+    "ApprovalCallable": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
+    },
+    "ApprovalCallback": {
+      "kind": "class",
+      "module": "chainweaver.approvals",
+      "qualname": "ApprovalCallback",
+      "signature": "(*args, **kwargs)"
+    },
+    "ApprovalContext": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "flow_name": "str",
+        "inputs": "dict[str, Any]",
+        "safety": "chainweaver.contracts.ToolSafetyContract",
+        "step_id": "str | NoneType",
+        "step_index": "int",
+        "tool_name": "str",
+        "trace_id": "str"
+      },
+      "module": "chainweaver.approvals",
+      "qualname": "ApprovalContext"
+    },
+    "ApprovalDecision": {
+      "kind": "enum",
+      "module": "chainweaver.approvals",
+      "qualname": "ApprovalDecision"
+    },
+    "ApprovalDeniedError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "ApprovalDeniedError",
+      "signature": "(tool_name: str, step_index: int, detail: str) -> None"
+    },
+    "ApprovalRecord": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "decision": "chainweaver.approvals.ApprovalDecision",
+        "reason": "str | NoneType"
+      },
+      "module": "chainweaver.approvals",
+      "qualname": "ApprovalRecord"
     },
     "AsyncLaneUnsupportedError": {
       "kind": "class",
@@ -261,6 +318,12 @@
       },
       "module": "chainweaver.traces",
       "qualname": "BacktestReport"
+    },
+    "BaseApprovalCallback": {
+      "kind": "class",
+      "module": "chainweaver.approvals",
+      "qualname": "BaseApprovalCallback",
+      "signature": "()"
     },
     "BaseDecisionCallback": {
       "kind": "class",
@@ -543,6 +606,7 @@
       "kind": "pydantic-model",
       "model_fields": {
         "cost_report": "chainweaver.cost.CostReport | NoneType",
+        "dry_run": "bool",
         "ended_at": "datetime.datetime",
         "execution_log": "list[chainweaver.executor.StepRecord]",
         "final_output": "dict[str, Any] | NoneType",
@@ -695,7 +759,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -927,11 +991,23 @@
       "qualname": "MCPError",
       "signature": null
     },
+    "MCPMetadataError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPMetadataError",
+      "signature": "(tool_name: str, detail: str) -> None"
+    },
     "MCPSchemaConversionError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
       "qualname": "MCPSchemaConversionError",
       "signature": "(tool_name: str, detail: str) -> None"
+    },
+    "MCPSchemaDriftError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPSchemaDriftError",
+      "signature": "(tool_name: str, expected: str, actual: str) -> None"
     },
     "MCPToolInvocationError": {
       "kind": "class",
@@ -1056,6 +1132,12 @@
       },
       "module": "chainweaver.flow",
       "qualname": "RetryPolicy"
+    },
+    "SafetyCeilingError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "SafetyCeilingError",
+      "signature": "(tool_name: str, step_index: int, level: str, ceiling: str) -> None"
     },
     "SafetyLevel": {
       "kind": "enum",
@@ -1182,6 +1264,7 @@
     "StepRecord": {
       "kind": "pydantic-model",
       "model_fields": {
+        "approval": "chainweaver.approvals.ApprovalRecord | NoneType",
         "cached": "bool",
         "duration_ms": "float",
         "ended_at": "datetime.datetime",
@@ -1232,7 +1315,7 @@
       "kind": "class",
       "module": "chainweaver.tools",
       "qualname": "Tool",
-      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> None"
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None, metadata: dict[str, Any] | None = None, dry_run_fn: Callable[[Any], dict[str, Any]] | None = None) -> None"
     },
     "ToolChain": {
       "kind": "GenericAlias",
@@ -1331,6 +1414,12 @@
       "kind": "module",
       "module": null,
       "qualname": "chainweaver.cli"
+    },
+    "coerce_approval_callback": {
+      "kind": "function",
+      "module": "chainweaver.approvals",
+      "qualname": "coerce_approval_callback",
+      "signature": "(cb: ApprovalCallback | ApprovalCallable | None) -> ApprovalCallback | None"
     },
     "coerce_decision_callback": {
       "kind": "function",
@@ -1499,6 +1588,12 @@
       "module": "chainweaver.traces",
       "qualname": "score_candidate",
       "signature": "(events: Sequence[AgentTraceEvent], sequence: Sequence[str]) -> CandidateScore"
+    },
+    "side_effect_exceeds": {
+      "kind": "function",
+      "module": "chainweaver.contracts",
+      "qualname": "side_effect_exceeds",
+      "signature": "(level: SideEffectLevel, ceiling: SideEffectLevel) -> bool"
     },
     "suggest_optimizations": {
       "kind": "function",

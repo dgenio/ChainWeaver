@@ -41,6 +41,15 @@ import logging
 
 from chainweaver import cli
 from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
+from chainweaver.approvals import (
+    ApprovalCallable,
+    ApprovalCallback,
+    ApprovalContext,
+    ApprovalDecision,
+    ApprovalRecord,
+    BaseApprovalCallback,
+    coerce_approval_callback,
+)
 from chainweaver.attest import AttestationInputError, AttestationReport, attest_flow
 from chainweaver.builder import FlowBuilder, FlowBuilderError
 from chainweaver.cache import FileStepCache, InMemoryStepCache, StepCache, StepCacheKey
@@ -66,6 +75,7 @@ from chainweaver.contracts import (
     ToolSafetyContract,
     evaluate_predicate,
     merge_safety,
+    side_effect_exceeds,
 )
 from chainweaver.cost import (
     PROVIDER_PRICES,
@@ -85,6 +95,7 @@ from chainweaver.decorators import tool
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     AgentTraceImportError,
+    ApprovalDeniedError,
     AsyncLaneUnsupportedError,
     ChainWeaverError,
     CheckpointDriftError,
@@ -106,11 +117,14 @@ from chainweaver.exceptions import (
     InvalidFlowVersionError,
     KernelInvocationError,
     MCPError,
+    MCPMetadataError,
     MCPSchemaConversionError,
+    MCPSchemaDriftError,
     MCPToolInvocationError,
     OfflineLLMError,
     PluginDiscoveryError,
     PredicateSyntaxError,
+    SafetyCeilingError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -238,11 +252,18 @@ __all__ = [
     "PROVIDER_PRICES",
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalCallable",
+    "ApprovalCallback",
+    "ApprovalContext",
+    "ApprovalDecision",
+    "ApprovalDeniedError",
+    "ApprovalRecord",
     "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
     "BacktestMismatch",
     "BacktestReport",
+    "BaseApprovalCallback",
     "BaseDecisionCallback",
     "BaseMiddleware",
     "CancellationToken",
@@ -321,7 +342,9 @@ __all__ = [
     "LessonEvidenceStep",
     "LessonReview",
     "MCPError",
+    "MCPMetadataError",
     "MCPSchemaConversionError",
+    "MCPSchemaDriftError",
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
@@ -337,6 +360,7 @@ __all__ = [
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "SafetyCeilingError",
     "SafetyLevel",
     "SchemaValidationError",
     "ServiceConfig",
@@ -369,6 +393,7 @@ __all__ = [
     "check_flow_compatibility",
     "classify_safety",
     "cli",
+    "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
     "discover_flows",
@@ -397,6 +422,7 @@ __all__ = [
     "result_to_mermaid",
     "schema_fingerprint",
     "score_candidate",
+    "side_effect_exceeds",
     "suggest_optimizations",
     "tool",
     "trace_to_lesson_candidate",

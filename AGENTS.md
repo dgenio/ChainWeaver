@@ -40,16 +40,17 @@ chainweaver/
 ├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal + llm_propose_flows() + write_proposals() (#28); banned from executor.py
 ├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() (#100); banned from executor.py
 ├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml() + render_tool_catalogue() (#28, #100)
-├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
+├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + side_effect_exceeds() (#356) + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
+├── approvals.py       ApprovalCallback Protocol + ApprovalContext/ApprovalDecision/ApprovalRecord + coerce_approval_callback — execution-time ToolSafetyContract enforcement seam (#356); mirrors decisions.py
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19) + metadata provenance (#358/#359/#371) + dry_run_fn/run_dry (#357); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8) + ContextCollisionPolicy / on_context_collision (#337)
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) (main entry point)
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) (main entry point)
 ├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
 │   ├── __init__.py    Re-exports merge_step_outputs
 │   └── context.py     merge_step_outputs: single context-merge honouring on_context_collision (#337)
@@ -68,7 +69,7 @@ chainweaver/
 ├── mcp/               MCP integration (issues #70, #72, #150); requires chainweaver[mcp]
 │   ├── __init__.py    Public surface: MCPToolAdapter, FlowServer, jsonschema_to_pydantic
 │   ├── _schema.py     JSON Schema ↔ Pydantic bridge
-│   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150)
+│   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150) + untrusted-metadata trust controls — annotation_trust→ToolSafetyContract (#371), MetadataPolicy name/description sanitisation (#359), schema-hash pinning + on_drift (#358), build_pin_file/load_pins
 │   └── server.py      FlowServer: safely expose governed flows as MCP tools via FastMCP (#72, #259, #294)
 ├── contrib/           Curated deterministic stdlib tools (#145); pip install 'chainweaver[contrib]'
 │   ├── __init__.py    Re-exports the public tool set
@@ -320,6 +321,7 @@ integration.
 | `started_at` | `datetime` | UTC timestamp when execution began. |
 | `ended_at` | `datetime` | UTC timestamp when execution finished. |
 | `total_duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
+| `dry_run` | `bool` | `True` when produced by `execute_flow(dry_run=True)` (#357); a rehearsal trace, never a real run. |
 
 ### `StepRecord` (Pydantic `BaseModel`)
 
@@ -335,6 +337,7 @@ integration.
 | `started_at` | `datetime` | UTC timestamp when the step began. |
 | `ended_at` | `datetime` | UTC timestamp when the step finished. |
 | `duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
+| `approval` | `ApprovalRecord \| None` | The decision for a step gated by an execution-time approval callback (#356); `None` when no approval was required. |
 
 > **Serialization:** `ExecutionResult` and `StepRecord` are Pydantic models;
 > `result.model_dump_json()` and `ExecutionResult.model_validate_json(...)`

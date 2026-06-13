@@ -75,6 +75,104 @@ applied recursively to nested dicts and lists.
 
 ---
 
+## Execution-time safety enforcement (#356)
+
+By default a `ToolSafetyContract` is **advisory** — the executor records it but
+does not act on it.  Three opt-in `FlowExecutor` controls make it actionable for
+hosts that expose flows to LLM clients, all behaviour-preserving when unset:
+
+```python
+from chainweaver import FlowExecutor, ApprovalContext, ApprovalDecision, SideEffectLevel
+
+def approver(ctx: ApprovalContext) -> ApprovalDecision:
+    # ctx carries trace_id, flow_name, step_index, tool_name, redacted inputs,
+    # and the effective ToolSafetyContract.
+    return ApprovalDecision.APPROVE if ctx.tool_name in TRUSTED else ApprovalDecision.DENY
+
+executor = FlowExecutor(
+    registry,
+    approval_callback=approver,                       # gate requires_approval=True steps
+    strict_safety=True,                               # refuse such steps if no callback
+    max_side_effect_level=SideEffectLevel.WRITE,      # refuse DESTRUCTIVE/EXTERNAL-over-ceiling
+)
+```
+
+* A step whose **effective contract** has `requires_approval=True` invokes the
+  callback *before* the tool runs.  `DENY`, a callback exception, or an invalid
+  return aborts the step with `ApprovalDeniedError` and a failed `StepRecord`;
+  the decision is recorded on `StepRecord.approval`.
+* With **no** callback registered, the default is unchanged (the step runs);
+  `strict_safety=True` instead refuses approval-requiring steps.
+* `max_side_effect_level` refuses any step whose `side_effects` exceeds the
+  ceiling with `SafetyCeilingError`.
+* The callback is a **user-supplied seam** — the executor never performs I/O
+  itself, so the no-LLM / no-network / no-randomness invariants are preserved
+  (the same model as `decision_callback`).  Enforcement applies on both the sync
+  and async lanes.
+
+## Dry-run rehearsals (#357)
+
+`execute_flow(dry_run=True)` runs a side-effect-free rehearsal that validates
+wiring and data shapes against real systems without committing side effects:
+
+```python
+deploy = Tool(name="deploy", fn=do_deploy, dry_run_fn=plan_deploy,
+              safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL,
+                                        supports_dry_run=True))
+result = executor.execute_flow("release", inputs, dry_run=True)
+assert result.dry_run is True
+```
+
+* Read-only steps (`side_effects` in `NONE`/`READ`) run normally; tools that
+  declare a `dry_run_fn` (and `supports_dry_run=True`) run it; other
+  side-effecting steps are **skipped** (stubbed) by default, or fail the step
+  under `dry_run_unsupported="abort"` for a high-fidelity rehearsal.
+* The step cache and checkpointer are **bypassed** so a rehearsal never reads or
+  writes real state, and `ExecutionResult.dry_run` is set so a dry-run trace can
+  never be confused with a real run.  Composed sub-flows inherit the mode.
+
+## Trusting MCP-imported tool metadata (#358, #359, #371)
+
+Tools wrapped from a remote MCP server arrive as **untrusted input**: their
+names, descriptions, schemas, and annotations are server-declared and travel on
+into `Tool` objects, re-exports, and proposer prompts.  `MCPToolAdapter` applies
+conservative defaults:
+
+```python
+from chainweaver.mcp import MCPToolAdapter, MetadataPolicy
+
+adapter = MCPToolAdapter(
+    session,
+    annotation_trust="cap",          # derive a conservative ToolSafetyContract (#371)
+    metadata_policy=MetadataPolicy(),# sanitise names/descriptions (#359)
+    on_drift="error",                # reject changed pinned schemas (#358)
+    server_name="search-tools",
+)
+tools = await adapter.discover_tools(pins_path=".chainweaver/mcp-pins.json")
+```
+
+* **Annotations → contract (#371):** `readOnlyHint → READ` (never `NONE` — a
+  remote call still observes the world), `destructiveHint → DESTRUCTIVE`,
+  unannotated → `EXTERNAL`; remote `determinism_level` is always `NONE`.
+  `annotation_trust` is `"cap"` (conservative, default), `"trust"` (declared
+  only), or `"ignore"`.  The contract source is recorded on `tool.metadata`.
+* **Metadata policy (#359):** control characters stripped, whitespace
+  normalised, descriptions length-capped, names validated against
+  `^[A-Za-z0-9._-]+$`; `description_mode="placeholder"` drops remote text
+  entirely.  The raw server description is preserved on
+  `tool.metadata["mcp_raw_description"]` for audit.  `MetadataPolicy.permissive()`
+  restores the pre-hardening verbatim behaviour for a fully trusted server.
+* **Schema pinning (#358):** each tool's raw JSON Schema is fingerprinted at
+  discovery (`tool.metadata["mcp_schema_hash"]`); supply `pins` / `pins_path`
+  (write one with `build_pin_file`) and a changed schema is handled per
+  `on_drift` (`"error"` / `"warn"` / `"accept"`).
+
+> These controls verify **declared** metadata and schemas, not remote
+> *behaviour*.  Keep human review in your promotion workflow; a server can
+> still change what a tool *does* without changing its schema.
+
+---
+
 ## Recommendations for production
 
 1. **Always configure a `RedactionPolicy`** for flows whose tools handle

@@ -456,6 +456,109 @@ class MCPToolInvocationError(MCPError):
         super().__init__(f"MCP tool '{tool_name}' invocation failed: {detail}.")
 
 
+class ApprovalDeniedError(ChainWeaverError):
+    """Raised when an :class:`~chainweaver.approvals.ApprovalCallback` denies a step (issue #356).
+
+    Execution-time enforcement of :class:`~chainweaver.contracts.ToolSafetyContract`
+    is opt-in: when a step's effective contract has ``requires_approval=True`` and
+    a callback is registered on the executor, the callback is asked to approve the
+    step *before* the tool function runs.  A ``DENY`` decision (or a callback that
+    raises, or a missing callback under ``strict_safety=True``) aborts the step
+    with this typed error rather than running the side-effecting tool unattended.
+
+    Attributes:
+        tool_name: Name of the tool whose invocation was denied.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of why approval was denied.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, detail: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.detail = detail
+        # Normalise so the message ends with exactly one period (repo convention,
+        # AGENTS.md §6) regardless of whether *detail* already carried one.
+        normalised = detail.rstrip(".")
+        super().__init__(
+            f"Approval denied for tool '{tool_name}' at step {step_index}: {normalised}."
+        )
+
+
+class SafetyCeilingError(ChainWeaverError):
+    """Raised when a step's side-effect level exceeds the executor ceiling (issue #356).
+
+    When :class:`~chainweaver.executor.FlowExecutor` is configured with
+    ``max_side_effect_level=...``, a step whose effective
+    :class:`~chainweaver.contracts.ToolSafetyContract` declares a
+    :class:`~chainweaver.contracts.SideEffectLevel` above that ceiling is refused
+    before it runs, rather than silently executing a higher-risk operation than
+    the host opted into.
+
+    Attributes:
+        tool_name: Name of the tool that exceeded the ceiling.
+        step_index: Zero-based position of the step inside the flow.
+        level: The step's declared side-effect level (value string).
+        ceiling: The configured maximum side-effect level (value string).
+    """
+
+    def __init__(self, tool_name: str, step_index: int, level: str, ceiling: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.level = level
+        self.ceiling = ceiling
+        super().__init__(
+            f"Tool '{tool_name}' at step {step_index} has side-effect level "
+            f"'{level}' which exceeds the configured ceiling '{ceiling}'."
+        )
+
+
+class MCPMetadataError(MCPError):
+    """Raised when server-provided MCP tool metadata violates the metadata policy (issue #359).
+
+    Tool names and descriptions wrapped from an MCP server are untrusted input:
+    they become ChainWeaver :attr:`Tool.description` / :attr:`Tool.name` values and
+    can be re-exported to LLM clients or rendered into proposer prompts.  When a
+    server advertises a tool name that fails the configured validation pattern (and
+    the policy is not in sanitising mode), :class:`MCPToolAdapter` refuses it with
+    this error instead of adopting a look-alike or control-character-laden name.
+
+    Attributes:
+        tool_name: The offending server-provided tool name (server-prefixed when a
+            prefix was supplied).
+        detail: Human-readable explanation of which rule was violated.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"MCP tool metadata for '{tool_name}' rejected: {detail}.")
+
+
+class MCPSchemaDriftError(MCPError):
+    """Raised when a discovered MCP tool schema no longer matches its pin (issue #358).
+
+    Tools wrapped from remote MCP servers get the same schema-drift discipline as
+    locally registered tools: :class:`MCPToolAdapter` fingerprints each tool's raw
+    JSON Schema at discovery and, when a pin is supplied, verifies it.  Under the
+    ``on_drift="error"`` policy a mismatch raises this exception naming the tool and
+    both fingerprints, rather than transparently rebuilding models around a silently
+    changed remote schema.
+
+    Attributes:
+        tool_name: Name of the MCP tool whose schema drifted (server-side name).
+        expected: The pinned fingerprint.
+        actual: The fingerprint computed from the freshly discovered schema.
+    """
+
+    def __init__(self, tool_name: str, expected: str, actual: str) -> None:
+        self.tool_name = tool_name
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"MCP tool '{tool_name}' schema drifted: pinned '{expected}', discovered '{actual}'."
+        )
+
+
 class DecisionCallbackError(ChainWeaverError):
     """Raised when a :class:`~chainweaver.decisions.DecisionCallback` fails (issue #102).
 
