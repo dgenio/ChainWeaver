@@ -2,6 +2,7 @@
   "__all__": [
     "AgentTraceEvent",
     "AgentTraceImportError",
+    "ApprovalDeniedError",
     "AsyncLaneUnsupportedError",
     "AttestationInputError",
     "AttestationReport",
@@ -86,7 +87,9 @@
     "LessonEvidenceStep",
     "LessonReview",
     "MCPError",
+    "MCPMetadataError",
     "MCPSchemaConversionError",
+    "MCPSchemaDriftError",
     "MCPToolInvocationError",
     "ObservedStep",
     "ObservedTrace",
@@ -103,6 +106,7 @@
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "SafetyCeilingError",
     "SafetyLevel",
     "SchemaValidationError",
     "ServiceConfig",
@@ -199,6 +203,12 @@
       "module": "chainweaver.exceptions",
       "qualname": "AgentTraceImportError",
       "signature": "(detail: str, *, source: str | None = None, line: int | None = None) -> None"
+    },
+    "ApprovalDeniedError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "ApprovalDeniedError",
+      "signature": "(tool_name: str, step_index: int, detail: str) -> None"
     },
     "AsyncLaneUnsupportedError": {
       "kind": "class",
@@ -927,11 +937,23 @@
       "qualname": "MCPError",
       "signature": null
     },
+    "MCPMetadataError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPMetadataError",
+      "signature": "(tool_name: str, detail: str) -> None"
+    },
     "MCPSchemaConversionError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
       "qualname": "MCPSchemaConversionError",
       "signature": "(tool_name: str, detail: str) -> None"
+    },
+    "MCPSchemaDriftError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "MCPSchemaDriftError",
+      "signature": "(tool_name: str, expected: str, actual: str) -> None"
     },
     "MCPToolInvocationError": {
       "kind": "class",
@@ -1056,6 +1078,12 @@
       },
       "module": "chainweaver.flow",
       "qualname": "RetryPolicy"
+    },
+    "SafetyCeilingError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "SafetyCeilingError",
+      "signature": "(tool_name: str, step_index: int, level: str, ceiling: str) -> None"
     },
     "SafetyLevel": {
       "kind": "enum",
@@ -1232,7 +1260,7 @@
       "kind": "class",
       "module": "chainweaver.tools",
       "qualname": "Tool",
-      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None) -> None"
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], fn: Callable[[Any], dict[str, Any] | Awaitable[dict[str, Any]]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None, metadata: dict[str, Any] | None = None) -> None"
     },
     "ToolChain": {
       "kind": "GenericAlias",

@@ -98,6 +98,12 @@ class Tool:
             as the UTF-8 byte length of its JSON serialization.  When set and
             exceeded, :class:`~chainweaver.exceptions.ToolOutputSizeError` is
             raised.  ``None`` (the default) disables the size check.
+        metadata: Optional free-form provenance/annotation metadata (issues
+            #358, #359, #371).  Audit information without a first-class field —
+            e.g. an MCP tool's raw server-provided description, the source of a
+            derived safety contract, or a pinned remote schema fingerprint.
+            Never consumed by the executor.  Stored as a (shallow-copied) dict;
+            defaults to ``{}``.
 
     Example::
 
@@ -137,6 +143,7 @@ class Tool:
         schema_version: str = "0.0.0",
         cacheable: bool | None = None,
         safety: ToolSafetyContract | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -176,6 +183,14 @@ class Tool:
                 )
             self.cacheable = safety.cacheable
             self.safety = safety
+        # Free-form provenance / annotation metadata (issues #358, #359, #371).
+        # Carries audit information that has no first-class field — e.g. the raw
+        # server-provided description an MCP tool was sanitised from, the source
+        # of a derived safety contract ("server" vs "author"), or the pinned
+        # remote schema fingerprint.  Never consumed by the executor; downstream
+        # reviewers and the drift workflow read it.  Defaults to an empty dict so
+        # callers can always ``tool.metadata.get(...)`` without a None guard.
+        self.metadata: dict[str, Any] = dict(metadata) if metadata else {}
         # Whether ``fn`` is a coroutine function — pre-computed once
         # because ``inspect.iscoroutinefunction`` doesn't recognise
         # callables whose ``__call__`` is async, so we also inspect the
