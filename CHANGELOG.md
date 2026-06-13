@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **FlowExecutor execution-core hardening** (#330, #331, #332, #335, #336,
+  #337, #344): a cluster of architecture/reliability improvements to the
+  executor core.
+  - A new internal `chainweaver._execution` package holds the transport-agnostic,
+    no-I/O building blocks shared by both lanes (#330, #331), starting with
+    `merge_step_outputs` — a single context-merge implementation used by linear
+    and DAG, sync and async.
+  - `Flow` / `DAGFlow` gain `on_context_collision` (`"overwrite"` / `"warn"`
+    (default) / `"error"`) governing what happens when a step output overwrites
+    an existing context key; `compile_flow` emits a `context_collision` warning
+    for statically detectable overwrites; new `ContextKeyCollisionError` (#337).
+  - Opt-in concurrent execution of independent DAG-level steps in the async lane
+    via `FlowExecutor(max_step_concurrency=N)` (default `1` = sequential,
+    bit-identical); results stay deterministic regardless of the setting (#344).
+  - `FlowExecutor` now documents and supports a real concurrency contract:
+    `stream_flow` registers its event collector as per-thread run-scoped
+    middleware (no more shared-list mutation), and `InMemoryStepCache` /
+    `InMemoryCheckpointer` are internally locked (#336).
+  - `execute_flow_async` rejects unsupported constructs (branching,
+    `decision_candidates`, composed sub-flows) up front with the new typed
+    `AsyncLaneUnsupportedError`, listing every offending construct (#332).
+  - `FlowRegistry.update_flow_state` performs copy-on-write state transitions;
+    `accept_drift` / `set_flow_status` no longer mutate registry-shared `Flow`
+    objects in place (#335).
+  - The executor determinism invariants (no LLM / no network / no randomness)
+    are now mechanically enforced by an AST import-contract test over
+    `executor.py` and `_execution/` (#354).
+
 - **Coding-agent macro-flow compilation loop** (#254, #256, #257, #260,
   #261, #262, #263, #266, #267, #312, #313, #314): a new `chainweaver.traces`
   module makes the *observe → mine → score → draft → backtest* loop

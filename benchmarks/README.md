@@ -21,6 +21,9 @@ python benchmarks/bench_naive_vs_compiled.py --output results/bench.json
 python benchmarks/bench_naive_vs_compiled.py \
     --output results/bench.json \
     --full-output results/bench-full.json
+
+# Sequential vs concurrent DAG-level execution (#344)
+python benchmarks/bench_dag_concurrency.py --leaves 6 --io-ms 50
 ```
 
 `time.sleep` is used to simulate the LLM round-trip — no real LLM is

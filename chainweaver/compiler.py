@@ -281,8 +281,36 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                 )
             )
 
-        # Update context with this tool's output fields.
+        # Statically detectable context-key collision (issue #337): this step's
+        # output fields overwrite keys already in the accumulated context.
+        # Suppressed when the flow opts into overwrite-on-collision, which is
+        # the documented escape hatch for intentional refine-in-place pipelines.
         tool_output_fields = _get_model_fields(tool.output_schema)
+        if flow.on_context_collision != "overwrite":
+            for name in tool_output_fields:
+                if name in context_fields:
+                    warnings.append(
+                        CompilationWarning(
+                            step_index=idx,
+                            tool_name=step.tool_name,
+                            field_name=name,
+                            issue_type="context_collision",
+                            detail=(
+                                f"Step {idx} ('{step.tool_name}'): output key '{name}' "
+                                f"overwrites an existing context key. With "
+                                f"on_context_collision='{flow.on_context_collision}' this "
+                                f"is "
+                                + (
+                                    "logged at runtime"
+                                    if flow.on_context_collision == "warn"
+                                    else "a runtime error"
+                                )
+                                + "."
+                            ),
+                        )
+                    )
+
+        # Update context with this tool's output fields.
         for name, finfo in tool_output_fields.items():
             context_fields[name] = _get_field_type(finfo)
 

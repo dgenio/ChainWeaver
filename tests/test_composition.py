@@ -21,9 +21,9 @@ from chainweaver import (
 )
 from chainweaver.cost import CostProfile
 from chainweaver.exceptions import (
+    AsyncLaneUnsupportedError,
     FlowCancelledError,
     FlowCompositionError,
-    FlowExecutionError,
 )
 
 # Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
@@ -378,7 +378,7 @@ class TestDagAndAsync:
                 steps=[FlowStep(flow_name="inc", input_mapping={"n": "n"})],
             )
         )
-        with pytest.raises(FlowExecutionError, match=r"flow_name.*steps"):
+        with pytest.raises(AsyncLaneUnsupportedError, match=r"sub-flow"):
             await executor.execute_flow_async("parent_async", {"n": 1})
 
 

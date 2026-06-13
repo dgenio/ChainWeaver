@@ -202,6 +202,69 @@ class FlowCancelledError(ChainWeaverError):
         super().__init__(f"Flow '{flow_name}' cancelled before step {step_index} ({reason}).")
 
 
+class ContextKeyCollisionError(ChainWeaverError):
+    """Raised when a step output collides with an existing context key under the
+    ``on_context_collision="error"`` policy (issue #337).
+
+    The accumulated execution context is a flow's data plane.  By default a step
+    that emits a key already present in the context (including the initial
+    input) overwrites it — silently before #337, at ``WARNING`` since.  A flow
+    that sets ``on_context_collision="error"`` opts into hard failure instead:
+    rather than letting a reordering or an added step drop earlier data
+    unnoticed, the run aborts with this typed error naming the offending step
+    and the colliding keys.
+
+    Attributes:
+        flow_name: Name of the flow whose context collided.
+        step_index: Zero-based index of the step that produced the collision.
+        step_name: Display name of the offending step.
+        keys: The output keys that collided with existing context keys.
+    """
+
+    def __init__(self, flow_name: str, step_index: int, step_name: str, keys: list[str]) -> None:
+        self.flow_name = flow_name
+        self.step_index = step_index
+        self.step_name = step_name
+        self.keys = list(keys)
+        joined = ", ".join(repr(key) for key in keys)
+        super().__init__(
+            f"Flow '{flow_name}' step {step_index} ('{step_name}') would overwrite "
+            f"existing context key(s) {joined}; on_context_collision='error' aborts "
+            f"rather than dropping earlier data."
+        )
+
+
+class AsyncLaneUnsupportedError(ChainWeaverError):
+    """Raised when :meth:`FlowExecutor.execute_flow_async` is given a flow that
+    uses execution features the async lane does not yet support (issue #332).
+
+    The async lane (issue #80) does not implement conditional branching
+    (``branches`` / ``default_next``, #9), guided decision callbacks
+    (``decision_candidates``, #102), or composed sub-flow steps (``flow_name``,
+    #75).  Rather than executing such a flow with those directives **silently
+    dropped** — which would yield a different result than the synchronous
+    :meth:`execute_flow` and undermine the determinism promise — the executor
+    fails fast, before the first step runs, listing every unsupported construct
+    it found.  Route the flow through :meth:`execute_flow` until async parity
+    lands.
+
+    Attributes:
+        flow_name: Name of the flow that could not run on the async lane.
+        unsupported: Human-readable descriptions of each unsupported construct
+            found, one per offending step/feature.
+    """
+
+    def __init__(self, flow_name: str, unsupported: list[str]) -> None:
+        self.flow_name = flow_name
+        self.unsupported = list(unsupported)
+        joined = "; ".join(unsupported)
+        super().__init__(
+            f"Flow '{flow_name}' uses features unsupported by execute_flow_async: "
+            f"{joined}. Run it via the synchronous execute_flow until the async "
+            f"lane reaches parity."
+        )
+
+
 class FlowCompositionError(ChainWeaverError):
     """Raised when a composed flow's sub-flow references are invalid (issue #75).
 
