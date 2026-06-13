@@ -182,6 +182,18 @@ async def test_error_policy_aborts_async_linear() -> None:
         await executor.execute_flow_async(flow.name, {"number": 5})
 
 
+async def test_error_policy_async_dag_reports_correct_level() -> None:
+    # The level-to-level merge must name the colliding *level* (level 1 here),
+    # not the post-incremented flat step counter.
+    flow = _dag_flow("error")
+    executor = _executor(flow)
+    with pytest.raises(ContextKeyCollisionError) as exc_info:
+        await executor.execute_flow_async(flow.name, {"number": 5})
+    assert exc_info.value.keys == ["value"]
+    assert exc_info.value.step_index == 1
+    assert "DAG level" in exc_info.value.step_name
+
+
 # ---------------------------------------------------------------------------
 # compile-time static warning
 # ---------------------------------------------------------------------------

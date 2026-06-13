@@ -11,7 +11,9 @@ The check has two layers:
 
 1. **Direct imports** — the execution modules (``executor.py`` plus everything
    under the ``chainweaver/_execution`` package) must not import any banned
-   module, except for an explicit, reviewed allowlist.
+   module. Entropy/IO-adjacent names the executor legitimately needs (``uuid``
+   for trace ids) are reviewed carve-outs kept deliberately *off* the banned
+   list rather than re-permitted after the fact.
 2. **Transitive in-repo reach** — following ``chainweaver.*`` imports from the
    execution modules, none of the deterministic-execution closure may reach a
    banned in-repo source of nondeterminism / LLM behavior (``compiler_llm``,
@@ -70,11 +72,13 @@ BANNED_INREPO = frozenset(
     }
 )
 
-# Reviewed, deliberate exceptions to ``BANNED_EXTERNAL`` for the execution
-# modules.  ``uuid`` mints opaque trace-correlation ids only (the trace-id
-# carve-out in invariants.md); it never influences which tools run or any value
-# passed between them.  Keep this list conservative — every entry needs a
-# documented rationale in invariants.md.
+# Reviewed external carve-outs: modules the execution path is deliberately
+# allowed to use and which must therefore stay OFF ``BANNED_EXTERNAL``.  ``uuid``
+# mints opaque trace-correlation ids only (the trace-id carve-out in
+# invariants.md); it never influences which tools run or any value passed
+# between them.  ``test_banned_lists_are_documented_and_consistent`` asserts
+# these names are not banned, so banning one later trips the test and forces a
+# conscious review rather than silently breaking a legitimate import.
 ALLOWED_EXTERNAL = frozenset({"uuid"})
 
 _PKG_ROOT = Path(chainweaver.__file__).parent
@@ -111,15 +115,32 @@ def _module_to_path(module: str) -> Path | None:
     return None
 
 
+def _package_parts(path: Path) -> list[str]:
+    """Return the dotted package the module at *path* lives in, as a parts list.
+
+    ``chainweaver/_execution/context.py`` -> ``["chainweaver", "_execution"]``;
+    ``chainweaver/_execution/__init__.py`` -> ``["chainweaver", "_execution"]``;
+    ``chainweaver/executor.py`` -> ``["chainweaver"]``.
+    """
+    parts = list(path.relative_to(_PKG_ROOT.parent).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        return parts[:-1]
+    return parts[:-1]
+
+
 def _collect_imports(path: Path) -> tuple[set[str], set[str]]:
     """Return ``(external_roots, inrepo_modules)`` imported by *path*.
 
     ``external_roots`` are the top-level names of every non-``chainweaver``
     import; ``inrepo_modules`` are the fully dotted ``chainweaver.*`` targets.
-    Relative imports (``from . import x``) are normalized against the file's
-    package so they count as in-repo.
+    Relative imports (``from . import x`` / ``from .bar import y``) are resolved
+    against the file's own package — dropping ``node.level - 1`` trailing
+    components for each extra leading dot — so they record the correct dotted
+    module (e.g. ``chainweaver/_execution/foo.py`` doing ``from .bar import x``
+    records ``chainweaver._execution.bar``, not ``chainweaver.bar``).
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    pkg_parts = _package_parts(path)
     external: set[str] = set()
     inrepo: set[str] = set()
     for node in ast.walk(tree):
@@ -132,9 +153,12 @@ def _collect_imports(path: Path) -> tuple[set[str], set[str]]:
                     external.add(root)
         elif isinstance(node, ast.ImportFrom):
             if node.level and node.level > 0:
-                # Relative import inside the chainweaver package -> in-repo.
-                if node.module:
-                    inrepo.add(f"chainweaver.{node.module}")
+                # Resolve relative to the file's package: each leading dot beyond
+                # the first strips one trailing package component.
+                base = pkg_parts[: len(pkg_parts) - (node.level - 1)]
+                target = [*base, *(node.module.split(".") if node.module else [])]
+                if target and target[0] == "chainweaver":
+                    inrepo.add(".".join(target))
                 continue
             if node.module is None:
                 continue
@@ -152,7 +176,7 @@ def test_execution_modules_have_no_banned_direct_imports() -> None:
     for path in _execution_module_paths():
         external, inrepo = _collect_imports(path)
         rel = path.relative_to(_PKG_ROOT.parent)
-        for name in sorted((external & BANNED_EXTERNAL) - ALLOWED_EXTERNAL):
+        for name in sorted(external & BANNED_EXTERNAL):
             violations.append(f"{rel}: banned external import '{name}'")
         for name in sorted(inrepo & BANNED_INREPO):
             violations.append(f"{rel}: banned in-repo import '{name}'")
@@ -197,11 +221,15 @@ def test_execution_closure_never_reaches_banned_inrepo_modules() -> None:
 
 
 def test_banned_lists_are_documented_and_consistent() -> None:
-    """Guard against an empty allowlist/banned-list regression."""
+    """Guard the banned/carve-out lists against regressions."""
     assert BANNED_EXTERNAL, "BANNED_EXTERNAL must not be empty"
     assert BANNED_INREPO, "BANNED_INREPO must not be empty"
-    # The allowlist must not silently re-permit a banned module.
-    assert not (ALLOWED_EXTERNAL & BANNED_EXTERNAL), (
-        "ALLOWED_EXTERNAL overlaps BANNED_EXTERNAL — an allowlisted module is "
-        "also banned, which would defeat the contract."
+    assert ALLOWED_EXTERNAL, "ALLOWED_EXTERNAL must document the reviewed carve-outs"
+    # Enforce the carve-out policy: a reviewed exception (e.g. ``uuid``) must stay
+    # OFF the banned list. If a future change bans one of these, this fails and
+    # forces a conscious review instead of silently breaking a legitimate import.
+    overlap = ALLOWED_EXTERNAL & BANNED_EXTERNAL
+    assert not overlap, (
+        f"Reviewed carve-out(s) {sorted(overlap)} are also in BANNED_EXTERNAL; "
+        f"a carve-out must not be banned (see {_INVARIANTS_DOC})."
     )

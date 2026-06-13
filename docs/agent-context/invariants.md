@@ -73,13 +73,16 @@ The three hard invariants are mechanically enforced by
 A PR that adds `import random` (or any banned import) to the execution modules
 fails this test with a message pointing back at this document.
 
-**Allowlist:** `uuid` is the single reviewed exception, for the trace-id
-carve-out above. A blanket "`random` absent from `sys.modules`" check is
-deliberately not used because `flow.py` legitimately imports `random` for the
-opt-in jitter carve-out; the contract is therefore scoped to the
-*execution-module boundary* (`executor.py` + `_execution/`), which is exactly
-where the invariants apply. Expanding the banned list is cheap; keep the
-allowlist conservative and document every addition here.
+**Carve-outs:** `uuid` is the single reviewed exception, for the trace-id
+carve-out above. It is kept deliberately *off* the banned list (rather than
+banned-then-re-permitted); the contract test asserts reviewed carve-outs stay
+unbanned, so banning one later trips the test and forces a conscious review. A
+blanket "`random` absent from `sys.modules`" check is deliberately not used
+because `flow.py` legitimately imports `random` for the opt-in jitter carve-out;
+the contract is therefore scoped to the *execution-module boundary*
+(`executor.py` + `_execution/`), which is exactly where the invariants apply.
+Expanding the banned list is cheap; keep carve-outs conservative and document
+every addition here.
 
 ---
 

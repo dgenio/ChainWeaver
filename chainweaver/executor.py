@@ -1783,7 +1783,7 @@ class FlowExecutor:
         flat_index = 0
         levels = self._compute_dag_levels(flow)
 
-        for level_steps in levels:
+        for level_idx, level_steps in enumerate(levels):
             # Cooperative cancellation between topological levels (issue #142).
             self._check_cancellation(
                 flow_name=flow.name,
@@ -1895,13 +1895,15 @@ class FlowExecutor:
                     level_outputs[key] = value
             # Level-to-level merge honours the flow's collision policy (#337);
             # within-level sibling collisions were already rejected above.
+            # Report the level index (not ``flat_index``, which has advanced past
+            # the level's steps) so collision diagnostics name the right level.
             merge_step_outputs(
                 context,
                 level_outputs,
                 policy=flow.on_context_collision,
                 flow_name=flow.name,
-                step_index=flat_index,
-                step_name="DAG level",
+                step_index=level_idx,
+                step_name=f"DAG level {level_idx}",
                 logger=_logger,
             )
 
