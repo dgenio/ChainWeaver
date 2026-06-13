@@ -60,8 +60,12 @@ def merge_step_outputs(
         ContextKeyCollisionError: When *policy* is ``"error"`` and one or more
             output keys already exist in *context*.
     """
-    collisions = [key for key in outputs if key in context]
-    if collisions:
+    # Fast path: a C-level key-view intersection skips the per-step Python scan
+    # (and its list allocation) when a step only adds new keys — the common case
+    # on the execution hot path.  Only when an actual collision exists do we walk
+    # ``outputs`` to recover deterministic order for the error / log messages.
+    if outputs.keys() & context.keys():
+        collisions = [key for key in outputs if key in context]
         if policy == "error":
             raise ContextKeyCollisionError(flow_name, step_index, step_name, collisions)
         log = logger.warning if policy == "warn" else logger.debug
