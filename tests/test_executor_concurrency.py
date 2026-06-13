@@ -144,6 +144,56 @@ def test_concurrent_execute_flow_returns_correct_per_run_results() -> None:
         assert result.flow_version == "1.2.3"
 
 
+def test_concurrent_runs_of_different_versions_stamp_correct_version() -> None:
+    # Exercises the per-run-marker race (#336): `active_flow_version` is
+    # thread-local, so concurrent runs of different versions never stamp each
+    # other's flow_version.
+    registry = FlowRegistry()
+    for version in ("1.0.0", "2.0.0"):
+        registry.register_flow(
+            Flow(
+                name="versioned",
+                version=version,
+                description="Doubles a number.",
+                steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+            )
+        )
+    executor = FlowExecutor(registry=registry)
+    executor.register_tool(
+        Tool(
+            name="double",
+            description="Doubles a number.",
+            input_schema=NumIn,
+            output_schema=NumOut,
+            fn=_double_fn,
+        )
+    )
+
+    num_runs = 16
+    barrier = threading.Barrier(num_runs)
+    mismatches: list[tuple[str, str]] = []
+    errors: list[BaseException] = []
+
+    def run(i: int) -> None:
+        version = "1.0.0" if i % 2 == 0 else "2.0.0"
+        try:
+            barrier.wait()
+            result = executor.execute_flow("versioned", {"number": i}, version=version)
+            if result.flow_version != version:
+                mismatches.append((version, result.flow_version))
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(num_runs)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors, errors
+    assert not mismatches, f"flow_version cross-talk: {mismatches}"
+
+
 # ---------------------------------------------------------------------------
 # In-memory backend concurrency
 # ---------------------------------------------------------------------------

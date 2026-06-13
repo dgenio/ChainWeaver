@@ -116,13 +116,28 @@ _STREAM_SENTINEL: _StreamSentinel = _StreamSentinel()
 class _RunScopedState(threading.local):
     """Per-thread run-scoped executor state (issue #336).
 
-    Subclassing :class:`threading.local` so ``middleware`` defaults to an empty
-    list on every thread keeps the hot ``_fire_hook`` path a plain attribute
-    read — no ``getattr`` default and no per-call ``AttributeError`` round-trip.
+    Subclassing :class:`threading.local` so the slots default per thread keeps
+    the hot ``_fire_hook`` path a plain attribute read — no ``getattr`` default
+    and no per-call ``AttributeError`` round-trip — and, crucially, isolates the
+    per-run markers so concurrent ``execute_flow`` / ``execute_flow_async`` calls
+    on one executor never race:
+
+    - ``middleware``: run-scoped lifecycle middleware (e.g. the ``stream_flow``
+      event collector), composed on top of the shared ``self._middleware``.
+    - ``active_flow_version``: version of the flow currently executing on this
+      thread (#201); ``_make_result`` stamps ``ExecutionResult.flow_version``
+      from it. Sub-flow recursion save/restores it on the same thread.
+    - ``in_replay``: ``True`` while inside ``replay_flow`` so the step cache is
+      bypassed (replay must always re-execute).
+    - ``resume_snapshot``: the snapshot a ``resume_flow`` call is resuming from,
+      consumed by the relevant ``_execute_*`` path.
     """
 
     def __init__(self) -> None:
         self.middleware: list[FlowExecutorMiddleware] = []
+        self.active_flow_version: str = ""
+        self.in_replay: bool = False
+        self.resume_snapshot: ExecutionSnapshot | None = None
 
 
 class _StreamCollectorMiddleware(BaseMiddleware):
@@ -630,29 +645,22 @@ class FlowExecutor:
         # When set, eligible step outputs are read from / written to
         # this cache before the tool callable runs.
         self._step_cache = step_cache
-        # ``True`` while inside replay_flow / _replay_linear_from so
-        # the cache is bypassed — replay must always re-execute (per
-        # the existing replay semantics).
-        self._in_replay = False
         # Crash-resume checkpointer (issue #128).  When set, an
         # ExecutionSnapshot is written after every successful linear
         # step or DAG level.  On terminal completion the snapshot is
         # deleted iff ``delete_on_success`` is ``True``.
         self._checkpointer = checkpointer
         self._delete_on_success = delete_on_success
-        # Resumption state — populated by ``resume_flow`` before
-        # invoking the relevant ``_execute_*`` path so the loops know
-        # where to start and which records to prepend.
-        self._resume_snapshot: ExecutionSnapshot | None = None
-        # Version of the flow currently executing (issue #201).  Set at the
-        # top of every result-producing path so ``_make_result`` can stamp
-        # ``ExecutionResult.flow_version`` without threading the value
-        # through ~30 call sites.  Sub-flow composition (issue #75) recurses
-        # through ``execute_flow``; ``_execute_step`` save/restores this
-        # around the recursive call so the parent's value is not clobbered.
-        # Like ``_in_replay`` / ``_resume_snapshot`` this assumes the
-        # documented "one executor per concurrent run" contract.
-        self._active_flow_version: str = ""
+        # Per-run markers — the in-replay flag (cache bypass), the resume
+        # snapshot, and the executing flow version (#201) — live on the
+        # per-thread ``_RunScopedState`` (issue #336) alongside the stream
+        # collector, not the shared instance, so concurrent runs of different
+        # flows/versions never stamp each other's ``flow_version`` or bypass
+        # the cache.  Sub-flow composition (#75) recurses through
+        # ``execute_flow`` on the *same* thread and save/restores
+        # ``_local.active_flow_version`` around the recursive call, so the
+        # parent's value is not clobbered; replay/resume set/restore their
+        # markers on the same thread too.
         # Flow composition (issue #75): the maximum nesting depth of
         # ``flow_name`` sub-flow references.  Checked statically before
         # execution so runaway / cyclic recursion fails loudly.
@@ -965,8 +973,8 @@ class FlowExecutor:
         # Bypass the step cache for the duration of replay — replay
         # must always re-execute tools (per the existing replay
         # semantics and issue #127's acceptance criteria).
-        previous_in_replay = self._in_replay
-        self._in_replay = True
+        previous_in_replay = self._local.in_replay
+        self._local.in_replay = True
         try:
             if resume_from_step <= 0:
                 new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
@@ -975,7 +983,7 @@ class FlowExecutor:
                     raise ValueError("resume_from_step is not supported for DAGFlow yet.")
                 new_result = self._replay_linear_from(flow, result, resume_from_step)
         finally:
-            self._in_replay = previous_in_replay
+            self._local.in_replay = previous_in_replay
 
         diffs: list[StepDiff] = []
         if mode is ReplayMode.VERIFY:
@@ -998,7 +1006,7 @@ class FlowExecutor:
         """Re-run *flow* starting at index *resume_from_step* with a
         context seeded from the original execution log.
         """
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
         if resume_from_step > len(flow.steps):
             raise ValueError(
                 f"resume_from_step={resume_from_step} exceeds step count {len(flow.steps)}."
@@ -1265,7 +1273,7 @@ class FlowExecutor:
                 is cancelled at a step boundary.
         """
         flow = self._registry.get_flow(flow_name, version=version)
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
 
         if not force and flow.status != FlowStatus.ACTIVE:
             raise FlowStatusError(flow_name, flow.status.value)
@@ -1607,7 +1615,7 @@ class FlowExecutor:
         cancel_token: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Async-native counterpart to the linear branch of :meth:`execute_flow`."""
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -1741,7 +1749,7 @@ class FlowExecutor:
         merged with sibling-key-conflict detection between levels.
         Cancellation (issue #142) is checked between levels.
         """
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
         trace_id = _new_trace_id()
         flow_started_at = _now_utc()
         flow_t0 = time.perf_counter()
@@ -2573,7 +2581,7 @@ class FlowExecutor:
             )
         result = ExecutionResult(
             flow_name=flow_name,
-            flow_version=self._active_flow_version,
+            flow_version=self._local.active_flow_version,
             success=success,
             final_output=final_output,
             execution_log=execution_log,
@@ -2746,7 +2754,7 @@ class FlowExecutor:
         snapshot: ExecutionSnapshot,
     ) -> ExecutionResult:
         """Continue a linear execution from *snapshot.completed_steps*."""
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
         trace_id = snapshot.trace_id
         flow_name = snapshot.flow_name
         flow_started_at = snapshot.started_at
@@ -2872,11 +2880,11 @@ class FlowExecutor:
         # via the try/finally in resume_flow's caller — but resume_flow
         # doesn't wrap in try/finally; we wrap here instead to keep
         # the contract local.
-        self._resume_snapshot = snapshot
+        self._local.resume_snapshot = snapshot
         try:
             return self._execute_dag_flow(flow, dict(snapshot.initial_input))
         finally:
-            self._resume_snapshot = None
+            self._local.resume_snapshot = None
 
     def _record_observed_trace(self, result: ExecutionResult) -> None:
         """Mirror an :class:`ExecutionResult` into the configured TraceRecorder."""
@@ -3153,7 +3161,7 @@ class FlowExecutor:
         # not just at the parent boundary (issue #142). The deadline is an
         # absolute wall-clock instant, so passing it through unchanged keeps
         # one shared budget across the whole composed run.
-        saved_version = self._active_flow_version
+        saved_version = self._local.active_flow_version
         try:
             sub_result = self.execute_flow(
                 sub_name,
@@ -3162,7 +3170,7 @@ class FlowExecutor:
                 cancel_token=cancel_token,
             )
         finally:
-            self._active_flow_version = saved_version
+            self._local.active_flow_version = saved_version
 
         ended_at = _now_utc()
         duration_ms = (time.perf_counter() - perf_start) * 1000.0
@@ -3462,7 +3470,7 @@ class FlowExecutor:
         # the same key.  If validation fails, fall through to the
         # normal execution path, which surfaces the same error.
         cache_key: StepCacheKey | None = None
-        if self._step_cache is not None and tool.cacheable and not self._in_replay:
+        if self._step_cache is not None and tool.cacheable and not self._local.in_replay:
             try:
                 validated = tool.input_schema.model_validate(inputs)
             except ValidationError:
@@ -3863,11 +3871,11 @@ class FlowExecutor:
         Returns:
             An :class:`ExecutionResult` with the full execution log.
         """
-        self._active_flow_version = flow.version
+        self._local.active_flow_version = flow.version
         # Resume support (issue #128): when _resume_snapshot is set,
         # reuse its trace_id / started_at / context / log and skip the
         # already-completed DAG levels.
-        resume = self._resume_snapshot
+        resume = self._local.resume_snapshot
         if resume is not None:
             trace_id = resume.trace_id
             flow_started_at = resume.started_at
