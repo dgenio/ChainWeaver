@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781023234159,
+  "lastUpdate": 1781350014124,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2664,6 +2664,78 @@ window.BENCHMARK_DATA = {
             "value": 0.32537900000306763,
             "unit": "ms",
             "extra": "min=0.31ms max=0.37ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9d07a03bacd6ea23641162b9412a741d978a8f4c",
+          "message": "Merge pull request #383 from leno23/fix/source-context-errors-343\n\nInclude source context in loader errors",
+          "timestamp": "2026-06-13T12:25:29+01:00",
+          "tree_id": "4dfb705e73a9be331c1a95c84ba6a1283091e335",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/9d07a03bacd6ea23641162b9412a741d978a8f4c"
+        },
+        "date": 1781350013618,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.22597499997800696,
+            "unit": "ms",
+            "extra": "min=0.18ms max=0.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.1511939998977141,
+            "unit": "ms",
+            "extra": "min=0.12ms max=0.18ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.27255400004833064,
+            "unit": "ms",
+            "extra": "min=0.26ms max=0.28ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.15802500007566778,
+            "unit": "ms",
+            "extra": "min=0.15ms max=0.17ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.18653399999766,
+            "unit": "ms",
+            "extra": "min=102.00ms max=103.37ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.44611200002009355,
+            "unit": "ms",
+            "extra": "min=0.41ms max=0.47ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.64270999999871,
+            "unit": "ms",
+            "extra": "min=251.60ms max=251.77ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.36453100000244376,
+            "unit": "ms",
+            "extra": "min=0.35ms max=0.38ms repeats=5"
           }
         ]
       }
