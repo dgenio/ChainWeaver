@@ -2214,6 +2214,7 @@ class FlowExecutor:
         )
 
         # Execution-time safety enforcement (issue #356) — mirrors the sync lane.
+        # ``DAGFlowStep`` carries a ``step_id``; a linear ``FlowStep`` does not.
         gate_error, approval_record = self._evaluate_safety_gate(
             step=step,
             tool=tool,
@@ -2221,7 +2222,7 @@ class FlowExecutor:
             inputs=inputs,
             flow_name=flow_name,
             trace_id=trace_id,
-            step_id=None,
+            step_id=getattr(step, "step_id", None),
         )
         if gate_error is not None:
             log_step_error(_logger, step_index, step.display_name, gate_error)
@@ -3832,14 +3833,14 @@ class FlowExecutor:
 
         if self._approval_callback is None:
             if self._strict_safety:
+                reason = "no approval_callback registered (strict_safety=True)"
                 return (
                     ApprovalDeniedError(
                         tool.name,
                         step_index,
-                        "step requires approval but no approval_callback is registered "
-                        "(strict_safety=True)",
+                        f"step requires approval but {reason}",
                     ),
-                    None,
+                    ApprovalRecord(decision=ApprovalDecision.DENY, reason=reason),
                 )
             # Advisory default (pre-#356 behaviour): run the step.
             return None, None
@@ -3861,26 +3862,21 @@ class FlowExecutor:
         try:
             decision = self._approval_callback.approve(ctx)
         except Exception as exc:
-            err = ApprovalDeniedError(
-                tool.name,
-                step_index,
-                f"approval callback raised {type(exc).__name__}: {exc}",
-            )
+            reason = f"approval callback raised {type(exc).__name__}: {exc}"
+            err = ApprovalDeniedError(tool.name, step_index, reason)
             err.__cause__ = exc
-            return err, None
+            return err, ApprovalRecord(decision=ApprovalDecision.DENY, reason=reason)
         if not isinstance(decision, ApprovalDecision):
+            reason = f"approval callback returned {decision!r}, not an ApprovalDecision"
             return (
-                ApprovalDeniedError(
-                    tool.name,
-                    step_index,
-                    f"approval callback returned {decision!r}, not an ApprovalDecision",
-                ),
-                None,
+                ApprovalDeniedError(tool.name, step_index, reason),
+                ApprovalRecord(decision=ApprovalDecision.DENY, reason=reason),
             )
         if decision is ApprovalDecision.DENY:
+            reason = "approval callback returned DENY"
             return (
-                ApprovalDeniedError(tool.name, step_index, "approval callback returned DENY"),
-                ApprovalRecord(decision=ApprovalDecision.DENY),
+                ApprovalDeniedError(tool.name, step_index, reason),
+                ApprovalRecord(decision=ApprovalDecision.DENY, reason=reason),
             )
         return None, ApprovalRecord(decision=ApprovalDecision.APPROVE)
 

@@ -104,6 +104,11 @@ class Tool:
             derived safety contract, or a pinned remote schema fingerprint.
             Never consumed by the executor.  Stored as a (shallow-copied) dict;
             defaults to ``{}``.
+        dry_run_fn: Optional **synchronous** effect-free preview callable (issue
+            #357) with the same ``(validated_input) -> dict`` shape as a sync
+            ``fn``.  Required when ``safety.supports_dry_run=True`` (validated at
+            construction).  Invoked by ``execute_flow(dry_run=True)`` in place of
+            ``fn`` for side-effecting tools.
 
     Example::
 
@@ -192,11 +197,13 @@ class Tool:
         # reviewers and the drift workflow read it.  Defaults to an empty dict so
         # callers can always ``tool.metadata.get(...)`` without a None guard.
         self.metadata: dict[str, Any] = dict(metadata) if metadata else {}
-        # Effect-free preview callable (issue #357).  Same signature as ``fn``
-        # (``(validated_input) -> dict``) but guaranteed to perform no side
-        # effects.  ``FlowExecutor.execute_flow(dry_run=True)`` calls this
-        # instead of ``fn`` for side-effecting tools that declare it.  A tool
-        # whose contract sets ``supports_dry_run=True`` MUST supply one.
+        # Effect-free preview callable (issue #357).  Takes the validated input
+        # model like ``fn`` and returns a ``dict``, but — unlike ``fn`` — must be
+        # a *synchronous* callable (dry-run is a synchronous ``execute_flow``
+        # feature) and must perform no side effects.
+        # ``FlowExecutor.execute_flow(dry_run=True)`` calls this instead of ``fn``
+        # for side-effecting tools that declare it.  A tool whose contract sets
+        # ``supports_dry_run=True`` MUST supply one.
         self.dry_run_fn = dry_run_fn
         if self.safety.supports_dry_run and dry_run_fn is None:
             raise ToolDefinitionError(

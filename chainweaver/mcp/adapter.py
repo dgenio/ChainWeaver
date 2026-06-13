@@ -317,7 +317,7 @@ class MCPToolAdapter:
         metadata_policy: Trust policy for server-provided tool names and
             descriptions (issue #359).  ``None`` (the default) applies the
             conservative :class:`MetadataPolicy` defaults; pass
-            :meth:`MetadataPolicy.permissive` to opt out.
+            ``MetadataPolicy.permissive()`` to opt out.
         on_drift: How to react when a discovered tool's raw schema no longer
             matches a supplied pin (issue #358): ``"error"`` (the default)
             raises :class:`~chainweaver.exceptions.MCPSchemaDriftError`,
@@ -352,6 +352,15 @@ class MCPToolAdapter:
         on_drift: DriftPolicy = "error",
         server_name: str | None = None,
     ) -> None:
+        # Validate the policy literals at construction so a typo (e.g.
+        # ``on_drift="erorr"``) fails loudly instead of silently falling through
+        # to "accept" and disabling drift protection on a security surface.
+        if annotation_trust not in ("trust", "ignore", "cap"):
+            raise ValueError(
+                f"annotation_trust must be 'trust', 'ignore', or 'cap', got {annotation_trust!r}."
+            )
+        if on_drift not in ("error", "warn", "accept"):
+            raise ValueError(f"on_drift must be 'error', 'warn', or 'accept', got {on_drift!r}.")
         self.session = session
         self.timeout_seconds = timeout_seconds
         self.annotation_trust: AnnotationTrust = annotation_trust

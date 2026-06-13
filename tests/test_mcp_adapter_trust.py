@@ -55,6 +55,17 @@ def _build_demo_server() -> FastMCP:
 # ---------------------------------------------------------------------------
 
 
+class TestAdapterValidation:
+    def test_invalid_annotation_trust_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            MCPToolAdapter(None, annotation_trust="bogus")  # type: ignore[arg-type]
+
+    def test_invalid_on_drift_rejected(self) -> None:
+        # A typo must fail loudly, not silently fall through to "accept".
+        with pytest.raises(ValueError):
+            MCPToolAdapter(None, on_drift="erorr")  # type: ignore[arg-type]
+
+
 class TestAnnotationMapping:
     def test_ignore_always_none(self) -> None:
         ann = ToolAnnotations(readOnlyHint=True)

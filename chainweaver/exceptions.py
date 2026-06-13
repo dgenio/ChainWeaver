@@ -476,7 +476,12 @@ class ApprovalDeniedError(ChainWeaverError):
         self.tool_name = tool_name
         self.step_index = step_index
         self.detail = detail
-        super().__init__(f"Approval denied for tool '{tool_name}' at step {step_index}: {detail}")
+        # Normalise so the message ends with exactly one period (repo convention,
+        # AGENTS.md §6) regardless of whether *detail* already carried one.
+        normalised = detail.rstrip(".")
+        super().__init__(
+            f"Approval denied for tool '{tool_name}' at step {step_index}: {normalised}."
+        )
 
 
 class SafetyCeilingError(ChainWeaverError):

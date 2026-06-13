@@ -128,14 +128,22 @@ class TestApprovalEnforcement:
         executor = _single_step_executor(tool, approval_callback=boom)
         result = executor.execute_flow("f", {"x": 1})
         assert result.success is False
-        assert result.execution_log[0].error_type == "ApprovalDeniedError"
+        record = result.execution_log[0]
+        assert record.error_type == "ApprovalDeniedError"
+        # A misbehaving callback is still an approval outcome: recorded as DENY.
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.DENY
+        assert record.approval.reason is not None
 
     def test_callback_returns_invalid_is_denied(self) -> None:
         tool = _make_tool("writer", SideEffectLevel.WRITE, requires_approval=True)
         executor = _single_step_executor(tool, approval_callback=lambda ctx: "yes")
         result = executor.execute_flow("f", {"x": 1})
         assert result.success is False
-        assert result.execution_log[0].error_type == "ApprovalDeniedError"
+        record = result.execution_log[0]
+        assert record.error_type == "ApprovalDeniedError"
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.DENY
 
     def test_no_callback_advisory_by_default(self) -> None:
         # requires_approval with no callback and no strict_safety: runs (advisory).
@@ -150,7 +158,11 @@ class TestApprovalEnforcement:
         executor = _single_step_executor(tool, strict_safety=True)
         result = executor.execute_flow("f", {"x": 1})
         assert result.success is False
-        assert result.execution_log[0].error_type == "ApprovalDeniedError"
+        record = result.execution_log[0]
+        assert record.error_type == "ApprovalDeniedError"
+        # Denial under strict_safety is recorded for audit completeness.
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.DENY
 
     def test_no_approval_required_ignores_callback(self) -> None:
         called: list[int] = []
