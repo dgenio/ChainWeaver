@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781350014124,
+  "lastUpdate": 1781368079752,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2736,6 +2736,78 @@ window.BENCHMARK_DATA = {
             "value": 0.36453100000244376,
             "unit": "ms",
             "extra": "min=0.35ms max=0.38ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aeffe8529c76a5d2fbcfb2af46ef2d85e5f81017",
+          "message": "Merge pull request #384 from dgenio/claude/github-issues-triage-i4ov52\n\nHarden the FlowExecutor execution core (#330, #331, #332, #335, #336, #337, #344, #354)",
+          "timestamp": "2026-06-13T17:26:32+01:00",
+          "tree_id": "8d35348d550cb84f7f692077f238d792fb10f531",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/aeffe8529c76a5d2fbcfb2af46ef2d85e5f81017"
+        },
+        "date": 1781368079485,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.32039500001701526,
+            "unit": "ms",
+            "extra": "min=0.27ms max=1.56ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2432609999232227,
+            "unit": "ms",
+            "extra": "min=0.20ms max=1.50ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.44021299999030816,
+            "unit": "ms",
+            "extra": "min=0.41ms max=0.46ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.29677099996661127,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.32ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.449149999984,
+            "unit": "ms",
+            "extra": "min=102.27ms max=102.56ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8357680001154222,
+            "unit": "ms",
+            "extra": "min=0.80ms max=0.97ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.754668999979,
+            "unit": "ms",
+            "extra": "min=251.69ms max=251.81ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.6803399999171234,
+            "unit": "ms",
+            "extra": "min=0.66ms max=0.76ms repeats=5"
           }
         ]
       }
