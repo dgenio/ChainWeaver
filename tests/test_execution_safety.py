@@ -132,7 +132,7 @@ class TestApprovalEnforcement:
 
     def test_callback_returns_invalid_is_denied(self) -> None:
         tool = _make_tool("writer", SideEffectLevel.WRITE, requires_approval=True)
-        executor = _single_step_executor(tool, approval_callback=lambda ctx: "yes")  # type: ignore[arg-type,return-value]
+        executor = _single_step_executor(tool, approval_callback=lambda ctx: "yes")
         result = executor.execute_flow("f", {"x": 1})
         assert result.success is False
         assert result.execution_log[0].error_type == "ApprovalDeniedError"
@@ -154,10 +154,13 @@ class TestApprovalEnforcement:
 
     def test_no_approval_required_ignores_callback(self) -> None:
         called: list[int] = []
+
+        def approver(ctx: ApprovalContext) -> ApprovalDecision:
+            called.append(1)
+            return ApprovalDecision.APPROVE
+
         tool = _make_tool("reader", SideEffectLevel.READ)  # requires_approval=False
-        executor = _single_step_executor(
-            tool, approval_callback=lambda ctx: called.append(1) or ApprovalDecision.APPROVE
-        )
+        executor = _single_step_executor(tool, approval_callback=approver)
         result = executor.execute_flow("f", {"x": 1})
         assert result.success is True
         assert called == []  # callback never consulted
