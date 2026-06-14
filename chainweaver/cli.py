@@ -170,6 +170,20 @@ def get_default_registry() -> FlowRegistry | None:
 # ---------------------------------------------------------------------------
 
 
+def _error_line(exc: BaseException) -> str:
+    """Render *exc* for stderr, prefixing the stable code for typed errors (#390).
+
+    A :class:`~chainweaver.exceptions.ChainWeaverError` is shown as
+    ``"chainweaver: [CW-Exxx] <message>"`` so the failure is greppable and
+    maps to an anchored section in ``docs/reference/error-table.md``.  Foreign
+    exceptions render without a code.
+    """
+    code = getattr(exc, "code", None)
+    if isinstance(exc, ChainWeaverError) and isinstance(code, str):
+        return f"chainweaver: [{code}] {exc}"
+    return f"chainweaver: {exc}"
+
+
 def _require_existing_file(path: Path) -> None:
     """Exit with code 2 if *path* is missing or is not a regular file.
 
@@ -632,7 +646,7 @@ def run_command(
     try:
         result = executor.execute_flow(flow.name, initial_input)
     except ChainWeaverError as exc:
-        typer.echo(f"chainweaver: {exc}", err=True)
+        typer.echo(_error_line(exc), err=True)
         raise typer.Exit(code=1) from exc
 
     if quiet:
@@ -1551,7 +1565,7 @@ def attest_command(
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except ChainWeaverError as exc:
-        typer.echo(f"chainweaver: {exc}", err=True)
+        typer.echo(_error_line(exc), err=True)
         raise typer.Exit(code=1) from exc
 
     if output_format is OutputFormat.JSON:
@@ -2909,7 +2923,7 @@ def fuzz_command(
         typer.echo(f"chainweaver: {exc.detail}", err=True)
         raise typer.Exit(code=1) from exc
     except ChainWeaverError as exc:
-        typer.echo(f"chainweaver: {exc}", err=True)
+        typer.echo(_error_line(exc), err=True)
         raise typer.Exit(code=1) from exc
 
     props_by_name = {p.name: p for p in props}
@@ -3019,6 +3033,9 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         code = exc.code
         return int(code) if isinstance(code, int) else 0
+    except ChainWeaverError as exc:
+        typer.echo(_error_line(exc), err=True)
+        return 1
     except Exception as exc:
         typer.echo(f"chainweaver: error: {exc}", err=True)
         return 1

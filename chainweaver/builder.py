@@ -15,7 +15,7 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -25,6 +25,8 @@ from chainweaver.flow import Flow, FlowStep
 
 class FlowBuilderError(ChainWeaverError):
     """Raised when :class:`FlowBuilder` cannot produce a valid :class:`Flow`."""
+
+    code: ClassVar[str] = "CW-E037"
 
     def __init__(self, detail: str) -> None:
         self.detail = detail

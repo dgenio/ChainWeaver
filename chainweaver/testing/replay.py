@@ -64,7 +64,7 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -106,6 +106,8 @@ class FixtureStaleError(ChainWeaverError):
         detail: Human-readable description of why the match failed
             (exhausted recordings, or no matching recording).
     """
+
+    code: ClassVar[str] = "CW-E040"
 
     def __init__(
         self,

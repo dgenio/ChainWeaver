@@ -816,8 +816,12 @@ All errors are typed and traceable:
 | `CostProfileError` | A cost estimate is requested for a `(provider, model)` pair absent from the maintained `PROVIDER_PRICES` table |
 | `MCPMetadataError` | A server-provided MCP tool name fails the adapter's `MetadataPolicy` (and `on_invalid_name="error"`) |
 | `MCPSchemaDriftError` | A pinned MCP tool's raw schema changed under `MCPToolAdapter(on_drift="error")` |
+| `CheckpointVersionError` | A resumed snapshot's `snapshot_version` is an incompatible MAJOR relative to the running library |
 
-All exceptions inherit from `ChainWeaverError`.
+All exceptions inherit from `ChainWeaverError` and carry a stable diagnostic
+`code` (e.g. `CW-E006`); the CLI prefixes it on error output and failing
+`StepRecord`s expose it as `error_code`. See the full code table in
+[docs/reference/error-table.md](docs/reference/error-table.md#stable-diagnostic-codes).
 
 ---
 

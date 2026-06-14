@@ -25,6 +25,7 @@
     "ChainWeaverService",
     "CheckpointDriftError",
     "CheckpointNotFoundError",
+    "CheckpointVersionError",
     "Checkpointer",
     "CheckpointerNotConfiguredError",
     "CompatibilityIssue",
@@ -399,6 +400,12 @@
       "qualname": "CheckpointNotFoundError",
       "signature": "(trace_id: str) -> None"
     },
+    "CheckpointVersionError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "CheckpointVersionError",
+      "signature": "(trace_id: str, flow_name: str, snapshot_version: str, expected_version: str) -> None"
+    },
     "Checkpointer": {
       "kind": "class",
       "module": "chainweaver.checkpoint",
@@ -616,7 +623,8 @@
         "started_at": "datetime.datetime",
         "success": "bool",
         "total_duration_ms": "float",
-        "trace_id": "str"
+        "trace_id": "str",
+        "trace_schema_version": "str"
       },
       "module": "chainweaver.executor",
       "qualname": "ExecutionResult"
@@ -631,6 +639,7 @@
         "flow_name": "str",
         "flow_version": "str",
         "initial_input": "dict[str, Any]",
+        "snapshot_version": "str",
         "started_at": "datetime.datetime",
         "tool_schema_hashes": "dict[str, str]",
         "trace_id": "str"
@@ -1268,6 +1277,7 @@
         "cached": "bool",
         "duration_ms": "float",
         "ended_at": "datetime.datetime",
+        "error_code": "str | NoneType",
         "error_message": "str | NoneType",
         "error_type": "str | NoneType",
         "fallback_used": "bool",

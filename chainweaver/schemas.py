@@ -75,6 +75,16 @@ def _model_schema(model: type[Any], title: str) -> dict[str, Any]:
             "distinguishes Flow ('Flow') from DAGFlow ('DAGFlow') on load."
         ),
     }
+    # Inject the ``format_version`` stamp that ``flow_to_dict`` writes (#394).
+    # Optional on read (legacy files omit it), so it is not added to ``required``.
+    properties["format_version"] = {
+        "type": "string",
+        "description": (
+            "Flow file format version written by chainweaver.serialization.flow_to_dict; "
+            "readers reject an incompatible MAJOR. Distinct from the flow's own 'version'. "
+            "See docs/versioning-policy.md."
+        ),
+    }
     schema["properties"] = properties
     required = list(schema.get("required", []))
     if "type" not in required:
