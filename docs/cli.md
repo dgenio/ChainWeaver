@@ -155,20 +155,56 @@ chainweaver flows list --discover-dir flows/             # see what is discovera
 
 ### `viz`
 
-Render a flow as ASCII art or DOT (Graphviz) text.
+Render a flow as ASCII art, DOT (Graphviz), or Mermaid text.
 
 ```
-chainweaver viz <flow_name> [--format ascii|dot] [discovery flags]
+chainweaver viz <flow_name> [--format ascii|dot|mermaid] [discovery flags]
+chainweaver viz --result <trace.json> --format mermaid
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--format` / `-f` | `ascii` | Visualization format: terminal-friendly ASCII or Graphviz DOT |
+| `--format` / `-f` | `ascii` | Visualization format: terminal-friendly ASCII, Graphviz DOT, or Mermaid |
+| `--result` | — | Render an `ExecutionResult` JSON file as a Mermaid status/timing overlay (file-only; no registry or flow name needed). Requires `--format mermaid` |
 | `--file` | — | Load the flow directly from a `.flow.yaml` / `.flow.json` file |
 | `--discover-dir` | — | Discover flows by scanning a directory for `.flow.*` files |
 | `--discover-entry-points` | `false` | Discover flows from installed packages via the `chainweaver.flows` entry points |
 
-Flow resolution works exactly like [`inspect`](#inspect).
+Flow resolution works exactly like [`inspect`](#inspect). Mermaid renders
+natively on GitHub and MkDocs Material, so it is the lowest-friction format for
+PR descriptions and docs.
+
+**Exit codes**: `0` = success, `1` = flow not found or no registry configured,
+`2` = usage error (no flow and no `--result`, or `--result` without
+`--format mermaid`) or a supplied file/directory does not exist.
+
+**Example**:
+
+```bash
+chainweaver viz my_etl_flow --discover-dir flows/
+chainweaver viz my_etl_flow --format dot | dot -Tpng -o my_etl_flow.png
+chainweaver viz my_etl_flow --discover-dir flows/ --format mermaid
+chainweaver viz --result trace.json --format mermaid    # overlay a real run
+```
+
+---
+
+### `explain`
+
+Render a deterministic, **LLM-free** explanation of a flow — steps, input/output
+mappings, branching conditions, governance/safety attributes, and an embedded
+Mermaid diagram — suitable for pasting into a pull-request description or a
+review. Output is stable across runs (diff-friendly).
+
+```
+chainweaver explain <flow_name> [--format md|text] [--result trace.json] [discovery flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` / `-f` | `md` | `md` (Markdown for PRs) or `text` |
+| `--result` | — | Overlay actual step outcomes from an `ExecutionResult` JSON file |
+| `--file` / `--discover-dir` / `--discover-entry-points` | — | Flow resolution, exactly like [`inspect`](#inspect) |
 
 **Exit codes**: `0` = success, `1` = flow not found or no registry configured,
 `2` = a supplied file/directory does not exist.
@@ -176,8 +212,37 @@ Flow resolution works exactly like [`inspect`](#inspect).
 **Example**:
 
 ```bash
-chainweaver viz my_etl_flow --discover-dir flows/
-chainweaver viz my_etl_flow --format dot | dot -Tpng -o my_etl_flow.png
+chainweaver explain my_etl_flow --discover-dir flows/ > flow-review.md
+chainweaver explain my_etl_flow --file flows/etl.flow.yaml --result trace.json
+```
+
+---
+
+### `init`
+
+Scaffold a runnable first flow project — tool definitions, a flow file, and a
+run script — in one command.
+
+```
+chainweaver init [directory] [--template linear|dag|mcp] [--with-tests] [--force]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--template` / `-t` | `linear` | Project template: linear flow, fan-in DAG, or MCP-ready starter |
+| `--with-tests` | `false` | Also scaffold a passing `pytest` module (`test_flow.py`) |
+| `--force` | `false` | Overwrite existing files instead of aborting on a collision |
+
+The command prints the exact next commands after generating the files.
+
+**Exit codes**: `0` = success, `1` = a target file already exists and `--force`
+was not given, `2` = *directory* exists but is not a directory.
+
+**Example**:
+
+```bash
+chainweaver init my-first-flow --template linear --with-tests
+cd my-first-flow && python run.py
 ```
 
 ---
@@ -352,19 +417,29 @@ chainweaver profile trace.json --format json
 
 ### `doctor`
 
-Diagnose ChainWeaver flows against the currently registered tools. With `--check-drift`, walks every flow file under *path* (single file or recursive directory), imports tools from the modules passed via `--tools`, and reports per-flow `missing_tool` / `schema_mismatch` issues.
+Diagnose ChainWeaver flows against the currently registered tools. With `--check-drift`, walks every flow file under *path* (single file or recursive directory), imports tools from the modules passed via `--tools`, and reports per-flow `missing_tool` / `schema_mismatch` issues. With `--preflight`, runs structural validation (tool existence and resolvable input mappings). With `--profile first-run`, skips flow analysis and checks **environment readiness** instead — Python version, optional-extra availability (with the exact install command), writable paths, and core import health — for a "is my install ready?" first check (no *path* required).
 
 ```
 chainweaver doctor <path> --check-drift [--tools MODULE...] [--format table|json]
+chainweaver doctor --profile first-run [--format table|json]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--check-drift` | — | Required. Currently the only `doctor` mode. |
+| `--check-drift` | — | Compare each step's tool reference and schema fingerprint to the current registry. |
+| `--preflight` | — | Validate flow structure: tool existence and resolvable input mappings. |
+| `--profile` | — | Named diagnostic profile. `first-run` checks environment readiness (no *path* needed). |
 | `--tools` / `-t` | (empty) | Python module path that exposes `Tool` instances at top level. Repeatable. |
 | `--format` / `-f` | `table` | Output format: human-readable table or structured JSON. |
 
-**Exit codes**: `0` = no drift, `1` = drift detected or malformed flow file, `2` = path or `--tools` module missing.
+One of `--check-drift`, `--preflight`, or `--profile` is required.
+
+**First-run JSON shape** (when `--profile first-run --format json`): a top-level
+`ok` flag plus `python`, `writable_paths`, `import_health`, and an `extras`
+array where each entry carries `extra`, `available`, `missing_modules`, and a
+copy-paste `install` command.
+
+**Exit codes**: `0` = no drift / ready, `1` = drift detected, malformed flow file, or not ready, `2` = path or `--tools` module missing.
 
 **JSON output shape** (when `--format json`):
 
