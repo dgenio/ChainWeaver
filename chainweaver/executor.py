@@ -493,7 +493,8 @@ class ExecutionResult(BaseModel):
             export) detect and adapt to trace-shape evolution instead of
             sniffing field presence.  Distinct from ``flow_version``, which
             versions the flow definition, not the trace format.  Traces written
-            before versioning load with the legacy major and remain readable.
+            before versioning carry no stamp and load with the current default
+            version (back-filled by Pydantic), so they remain readable.
         flow_name: Name of the flow that was executed.
         flow_version: The exact registered version of the flow that
             executed (issue #201).  When :meth:`FlowExecutor.execute_flow`

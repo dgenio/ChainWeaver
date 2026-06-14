@@ -68,8 +68,9 @@ class ExecutionSnapshot(BaseModel):
             :class:`~chainweaver.exceptions.CheckpointVersionError` for an
             incompatible MAJOR, so a library upgrade between write and resume
             fails loudly instead of surfacing an opaque validation error
-            mid-recovery.  Snapshots written before versioning load with the
-            legacy major.
+            mid-recovery.  Snapshots written before versioning carry no stamp
+            and load with the current default version (back-filled by Pydantic),
+            so they remain resumable.
         trace_id: Original trace id of the in-flight execution.  Used
             as the lookup key for :meth:`Checkpointer.load`.
         flow_name: Name of the flow being executed.

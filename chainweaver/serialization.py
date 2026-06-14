@@ -106,7 +106,7 @@ def flow_from_dict(data: dict[str, Any], *, source: str | None = None) -> AnyFlo
         raise FlowSerializationError(
             f"Unsupported flow file format_version {file_format_version!r}; "
             f"this ChainWeaver writes format_version '{FLOW_FORMAT_VERSION}'. "
-            f"Upgrade ChainWeaver to read this file",
+            f"Use a compatible ChainWeaver version to read this file",
             source=source,
         )
     payload = {k: v for k, v in data.items() if k not in (_TYPE_KEY, _FORMAT_VERSION_KEY)}

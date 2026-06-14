@@ -18,8 +18,15 @@ component is reserved for purely additive changes that older readers tolerate.
 
 The version strings are deliberately simple ``"MAJOR"`` or ``"MAJOR.MINOR"``
 forms (not full PEP 440 / SemVer) — these stamp a serialization *shape*, not a
-package release. Parsing is tolerant: an absent or empty version is treated as
-the legacy major ``0`` so artifacts written before versioning still load.
+package release. Parsing is tolerant: :func:`major` maps an absent, empty, or
+unparseable version to the legacy major ``0`` so a reader can always reach a
+decision without raising. Note this means an *explicit* legacy ``"0"`` is
+incompatible with the current major (``same_major("0", "1")`` is ``False``).
+Pre-versioning artifacts stay readable not through that mapping but through
+caller-side handling: they carry **no** version field, and
+:mod:`chainweaver.serialization` skips the compatibility check when the
+``format_version`` key is absent, while the trace and snapshot models back-fill
+a missing field with the current default via Pydantic.
 
 This module is import-cheap and dependency-free so it can be imported from the
 serialization, executor, and checkpoint layers without pulling anything heavy

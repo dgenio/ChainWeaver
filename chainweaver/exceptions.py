@@ -12,8 +12,13 @@ class ChainWeaverError(Exception):
     """Base exception for all ChainWeaver errors.
 
     Every subclass carries a stable diagnostic ``code`` (issue #390) — e.g.
-    ``"CW-E007"`` — assigned in the append-only registry at the bottom of this
-    module.  Codes are searchable in logs, issues, and docs, let coding agents
+    ``"CW-E007"``.  Most codes are assigned from the append-only registry at the
+    bottom of this module; subclasses that live in sibling modules to avoid
+    import cycles (``FlowBuilderError``, ``FuzzConfigError``,
+    ``AttestationInputError``, ``FixtureStaleError``) declare their ``code`` in
+    place instead.  When adding a new exception, register its code in whichever
+    of those two places matches where the class is defined.  Codes are
+    searchable in logs, issues, and docs, let coding agents
     map a failure to a documented remediation deterministically, and let
     ``--format json`` consumers branch on a code instead of string-matching
     messages.  The code is exposed as a class attribute (and surfaced in CLI

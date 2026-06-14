@@ -1550,7 +1550,7 @@ def attest_command(
             executor.register_tool(tool_obj)
             seen_tool_names.add(tool_obj.name)
 
-    from chainweaver.attest import AttestationInputError, attest_flow
+    from chainweaver.attest import attest_flow
 
     try:
         report = attest_flow(
@@ -1561,9 +1561,6 @@ def attest_command(
             seed=seed,
             seed_inputs=seed_inputs,
         )
-    except AttestationInputError as exc:
-        typer.echo(f"chainweaver: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
     except ChainWeaverError as exc:
         typer.echo(_error_line(exc), err=True)
         raise typer.Exit(code=1) from exc
