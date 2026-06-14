@@ -83,6 +83,13 @@ class TestInspectDiscovery:
         )
         assert result.exit_code == 2
 
+    def test_discover_entry_points_empty_not_found(self) -> None:
+        # No 'chainweaver.flows' entry points are registered in the test env, so
+        # discovery yields an empty ephemeral registry and the flow is not found.
+        result = _RUNNER.invoke(cli.app, ["inspect", "demo_flow", "--discover-entry-points"])
+        assert result.exit_code == 1
+        assert "--discover-entry-points" in result.output
+
     def test_default_registry_unchanged_without_flags(self) -> None:
         flow = Flow(
             name="registry_flow",
