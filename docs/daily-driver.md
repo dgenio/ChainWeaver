@@ -14,6 +14,10 @@ observe traces → mine candidates → score → draft flow → backtest → rev
 Every step before *promote* is offline and side-effect-free. Promotion is the
 single governed action that makes a flow executable.
 
+> **Tip:** install tab-completion for the daily-driver commands once with
+> `chainweaver --install-completion` (bash/zsh/fish). See
+> [docs/cli.md § Shell completion](cli.md#shell-completion).
+
 ## 1. Capture traces
 
 Record your agent's tool-use as JSONL, one event per line. Tool calls and

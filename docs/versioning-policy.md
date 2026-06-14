@@ -113,6 +113,14 @@ from `Flow.version` (which versions a flow *definition*).
 | `FLOW_FORMAT_VERSION` | `.flow.yaml` / `.flow.json` files | `format_version` | #394 |
 | `TRACE_SCHEMA_VERSION` | `ExecutionResult` traces | `trace_schema_version` | #393 |
 | `SNAPSHOT_VERSION` | `ExecutionSnapshot` checkpoints | `snapshot_version` | #395 |
+| `CLI_SCHEMA_VERSION` | CLI `--format json` envelope | `schema_version` | #440 |
+
+The `CLI_SCHEMA_VERSION` envelope (`chainweaver/cli/_shared.py`) wraps the
+`--format json` output of the result-producing commands —
+`{"schema_version", "status", "data", "errors"}`. Bump its MAJOR when the
+envelope's own shape changes incompatibly; it is independent of the three
+serialized-artifact versions above. See
+[docs/cli.md](cli.md#machine-readable-output---format-json).
 
 All three share one compatibility rule, centralised in `chainweaver/_versions.py`:
 

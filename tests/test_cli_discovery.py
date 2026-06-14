@@ -71,9 +71,7 @@ class TestInspectDiscovery:
         assert "demo_flow" in result.stdout
 
     def test_not_found_lists_available_sources(self, flow_dir: Path) -> None:
-        result = _RUNNER.invoke(
-            cli.app, ["inspect", "missing", "--discover-dir", str(flow_dir)]
-        )
+        result = _RUNNER.invoke(cli.app, ["inspect", "missing", "--discover-dir", str(flow_dir)])
         assert result.exit_code == 1
         # The error names every discoverable flow it did find.
         assert "demo_flow" in result.output
@@ -101,9 +99,7 @@ class TestInspectDiscovery:
 
     def test_malformed_file_skipped_with_warning(self, flow_dir: Path) -> None:
         (flow_dir / "broken.flow.yaml").write_text("not: [valid", encoding="utf-8")
-        result = _RUNNER.invoke(
-            cli.app, ["inspect", "demo_flow", "--discover-dir", str(flow_dir)]
-        )
+        result = _RUNNER.invoke(cli.app, ["inspect", "demo_flow", "--discover-dir", str(flow_dir)])
         assert result.exit_code == 0
         assert "skipping" in result.output
         assert "demo_flow" in result.stdout
@@ -111,9 +107,7 @@ class TestInspectDiscovery:
 
 class TestVizDiscovery:
     def test_viz_from_discover_dir(self, flow_dir: Path) -> None:
-        result = _RUNNER.invoke(
-            cli.app, ["viz", "demo_flow", "--discover-dir", str(flow_dir)]
-        )
+        result = _RUNNER.invoke(cli.app, ["viz", "demo_flow", "--discover-dir", str(flow_dir)])
         assert result.exit_code == 0
         assert result.stdout.strip()
 

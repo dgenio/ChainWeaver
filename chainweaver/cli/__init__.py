@@ -11,6 +11,14 @@ The CLI is organised as a command package rather than one large module:
 This package module imports the command submodules so their commands are
 registered, defines the ``main`` console-script entry point, and re-exports
 the stable surface that host applications and tests rely on.
+
+Exit-code contract (shared by every command):
+
+- ``0`` — success / all flows valid.
+- ``1`` — logic error: flow not found, validation failure, execution error,
+  or malformed input. Uncaught :class:`~chainweaver.exceptions.ChainWeaverError`
+  is funnelled through :func:`main` and rendered with its stable code.
+- ``2`` — an input file or directory was not found.
 """
 
 from __future__ import annotations
@@ -38,20 +46,22 @@ from chainweaver.cli import (  # noqa: F401  side-effect: command registration
 )
 from chainweaver.cli._shared import (
     OutputFormat,
-    _error_line,
-    _import_tools_from,  # noqa: F401  re-exported for host apps / tests
     app,
     flows_app,
     get_default_registry,
     set_default_registry,
     traces_app,
 )
+
+# Redundant-alias re-exports: private helpers that host apps / tests reach for
+# as ``chainweaver.cli.<name>`` (and ``_error_line``, also used by ``main``).
+# The ``as`` form marks them explicitly exported under mypy's
+# no-implicit-reexport.
+from chainweaver.cli._shared import _error_line as _error_line
+from chainweaver.cli._shared import _import_tools_from as _import_tools_from
 from chainweaver.cli.profile import profile_command
-from chainweaver.cli.run import (
-    ServeTransport,
-    _build_flow_server,  # noqa: F401  re-exported for host apps / tests
-    serve_command,
-)
+from chainweaver.cli.run import ServeTransport, serve_command
+from chainweaver.cli.run import _build_flow_server as _build_flow_server
 from chainweaver.exceptions import ChainWeaverError
 
 __all__ = [

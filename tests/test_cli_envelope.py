@@ -31,7 +31,7 @@ def _reset_registry() -> None:
 
 
 def _envelope(output: str) -> dict[str, object]:
-    payload = json.loads(output)
+    payload: dict[str, object] = json.loads(output)
     # The envelope shape is fixed and versioned (the "snapshot").
     assert set(payload) == _ENVELOPE_KEYS
     assert payload["schema_version"] == CLI_SCHEMA_VERSION
