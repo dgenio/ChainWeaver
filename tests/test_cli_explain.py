@@ -102,6 +102,8 @@ class TestExplainText:
         )
         assert result.exit_code == 0
         assert "```" not in result.stdout
+        # Table framing pipes are flattened away in text mode.
+        assert "|" not in result.stdout
         assert "Flow: demo_flow" in result.stdout
 
 

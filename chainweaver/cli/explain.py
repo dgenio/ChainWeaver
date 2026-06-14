@@ -85,7 +85,10 @@ def _step_lines(flow: Flow | DAGFlow) -> list[str]:
             )
             lines.append(f"   - Input mapping: {mapping}")
         else:
-            lines.append("   - Input mapping: (none — receives the initial input)")
+            lines.append(
+                "   - Input mapping: (none — receives the full execution context: "
+                "initial input merged with prior step outputs)"
+            )
         lines.append(f"   - On error: {step.on_error}")
         if step.input_contract:
             lines.append(f"   - Input contract: {step.input_contract}")
@@ -166,8 +169,10 @@ def _explain_markdown(flow: Flow | DAGFlow, result: ExecutionResult | None) -> s
 def _strip_markdown(markdown: str) -> str:
     """Convert the Markdown explanation to a plainer text form.
 
-    Deterministic and lossless enough for terminal reading: drops table pipes
-    and code fences while preserving the structure and content.
+    Deterministic and lossless enough for terminal reading: drops code fences,
+    demotes ATX headings, and flattens table rows (separator rows are removed
+    and the surrounding ``|`` framing of data rows is stripped into
+    space-separated columns) while preserving the structure and content.
     """
     out: list[str] = []
     for line in markdown.splitlines():
@@ -178,8 +183,11 @@ def _strip_markdown(markdown: str) -> str:
         elif line.startswith("## "):
             out.append(line[3:])
             out.append("-" * len(line[3:]))
-        elif line.startswith("| ") and "---" in line:
-            continue  # table separator row
+        elif line.startswith("|"):
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if all(set(cell) <= {"-", ":", ""} for cell in cells):
+                continue  # table separator row (e.g. "| --- | --- |")
+            out.append("  ".join(cells))
         else:
             out.append(line)
     return "\n".join(out)

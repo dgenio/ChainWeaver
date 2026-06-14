@@ -279,7 +279,7 @@ Run it directly::
     python run.py
 
 Or expose it as an MCP server (requires the mcp extra:
-``pip install \\'chainweaver[mcp]\\'``)::
+``pip install 'chainweaver[mcp]'``)::
 
     chainweaver serve my_mcp_flow.flow.yaml --tools tools
 """

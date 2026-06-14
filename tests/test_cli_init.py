@@ -38,6 +38,10 @@ class TestInitScaffold:
         assert result.exit_code == 0
         assert (target / "my_mcp_flow.flow.yaml").is_file()
         assert "chainweaver serve" in result.stdout
+        # The generated run.py must not contain stray escaped quotes in its docstring.
+        run_text = (target / "run.py").read_text(encoding="utf-8")
+        assert "\\'" not in run_text
+        assert "pip install 'chainweaver[mcp]'" in run_text
 
     def test_with_tests_adds_test_module(self, tmp_path: Path) -> None:
         target = tmp_path / "proj"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
 import importlib.util
 import sys
 import tempfile
@@ -11,7 +13,6 @@ from typing import Any
 
 import typer
 
-import chainweaver
 from chainweaver.cli._shared import (
     OutputFormat,
     _emit_json,
@@ -276,7 +277,22 @@ def _first_run_report() -> dict[str, Any]:
     tmp = Path(tempfile.gettempdir())
     cwd_writable = _check_writable(cwd)
     tmp_writable = _check_writable(tmp)
-    import_ok = importlib.util.find_spec("chainweaver.executor") is not None
+    # Actually import the core module rather than only checking find_spec: a
+    # spec can resolve while the import still raises (e.g. a missing transitive
+    # dependency), and we want to surface that as not-ready.
+    try:
+        importlib.import_module("chainweaver.executor")
+        import_ok = True
+    except Exception:
+        # Any import-time failure (e.g. a missing transitive dep) means "not
+        # importable" for readiness purposes.
+        import_ok = False
+    # Resolve the version from installed metadata so the report does not depend
+    # on the package's runtime import state.
+    try:
+        cw_version = importlib.metadata.version("chainweaver")
+    except importlib.metadata.PackageNotFoundError:
+        cw_version = "unknown"
 
     extras = _probe_extras()
     critical_ok = python_ok and cwd_writable and tmp_writable and import_ok
@@ -292,7 +308,7 @@ def _first_run_report() -> dict[str, Any]:
             "tempdir": {"path": str(tmp), "writable": tmp_writable},
         },
         "import_health": {
-            "chainweaver_version": chainweaver.__version__,
+            "chainweaver_version": cw_version,
             "core_importable": import_ok,
         },
         "extras": extras,
