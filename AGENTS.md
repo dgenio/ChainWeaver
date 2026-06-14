@@ -98,7 +98,10 @@ chainweaver/
 ├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, flows promote/ignore, traces mine/draft-flows/backtest, doctor (--check-drift / --preflight), dump-schema, service
+├── cli/               typer-based CLI command package (#333): inspect/viz, validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor (--check-drift / --preflight), fuzz, service
+│   ├── __init__.py    Wires the command submodules, defines the ``main`` entry point, re-exports the stable surface (``app``, ``set_default_registry`` …)
+│   ├── _shared.py     Typer ``app`` / sub-apps, registry state, shared flow/result loading, error→exit-code handling, ``--format json`` envelope, and flow-resolution/discovery (#381, #440)
+│   └── <command>.py   One module per command group; each registers on the shared ``app`` at import time
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
