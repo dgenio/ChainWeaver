@@ -37,10 +37,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from chainweaver._versions import FLOW_FORMAT_VERSION, same_major
 from chainweaver.exceptions import FlowSerializationError
 from chainweaver.flow import DAGFlow, Flow
 
 _TYPE_KEY = "type"
+_FORMAT_VERSION_KEY = "format_version"
 _FLOW_DISCRIMINATOR = "Flow"
 _DAG_DISCRIMINATOR = "DAGFlow"
 
@@ -56,9 +58,13 @@ def flow_to_dict(flow: AnyFlow) -> dict[str, Any]:
     """Return a JSON-serializable dict representation of *flow*.
 
     Adds a ``type`` discriminator so the inverse :func:`flow_from_dict` can
-    re-instantiate the correct class.
+    re-instantiate the correct class, and a ``format_version`` stamp (issue
+    #394) so future format changes can be handled deliberately.  ``format_version``
+    versions the *file format* (the serialization shape), which is distinct from
+    the flow's own SemVer ``Flow.version``.
     """
     payload = flow.model_dump(mode="json")
+    payload[_FORMAT_VERSION_KEY] = FLOW_FORMAT_VERSION
     if isinstance(flow, DAGFlow):
         payload[_TYPE_KEY] = _DAG_DISCRIMINATOR
     else:
@@ -70,12 +76,16 @@ def flow_from_dict(data: dict[str, Any], *, source: str | None = None) -> AnyFlo
     """Reconstruct a :class:`Flow` or :class:`DAGFlow` from a dict payload.
 
     The dict must contain a ``type`` key whose value is either ``"Flow"`` or
-    ``"DAGFlow"``.
+    ``"DAGFlow"``.  A ``format_version`` key (issue #394) is honored when
+    present: a file whose MAJOR format version differs from this library's is
+    rejected with an actionable error.  Files written before versioning (no
+    ``format_version`` key) are treated as the current major and load unchanged.
 
     Raises:
         FlowSerializationError: When the payload is not a dict, lacks a
-            valid ``type`` discriminator, or fails Pydantic validation
-            against the chosen model.
+            valid ``type`` discriminator, carries an incompatible
+            ``format_version`` major, or fails Pydantic validation against the
+            chosen model.
     """
     if not isinstance(data, dict):
         raise FlowSerializationError(
@@ -89,7 +99,17 @@ def flow_from_dict(data: dict[str, Any], *, source: str | None = None) -> AnyFlo
             f"expected 'Flow' or 'DAGFlow'",
             source=source,
         )
-    payload = {k: v for k, v in data.items() if k != _TYPE_KEY}
+    file_format_version = data.get(_FORMAT_VERSION_KEY)
+    if file_format_version is not None and not same_major(
+        str(file_format_version), FLOW_FORMAT_VERSION
+    ):
+        raise FlowSerializationError(
+            f"Unsupported flow file format_version {file_format_version!r}; "
+            f"this ChainWeaver writes format_version '{FLOW_FORMAT_VERSION}'. "
+            f"Use a compatible ChainWeaver version to read this file",
+            source=source,
+        )
+    payload = {k: v for k, v in data.items() if k not in (_TYPE_KEY, _FORMAT_VERSION_KEY)}
     model: type[AnyFlow] = DAGFlow if flow_type == _DAG_DISCRIMINATOR else Flow
     try:
         return model.model_validate(payload)

@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Explicit schema versions for serialized artifacts** (#393, #394, #395): the
+  three durable artifacts now carry a library-stamped version so consumers can
+  detect shape evolution instead of sniffing fields. A shared
+  `chainweaver._versions` module centralises the "accept same MAJOR, reject
+  incompatible MAJOR, tolerate absent (legacy)" policy.
+  - Serialized flow files (`.flow.yaml` / `.flow.json`) gain a `format_version`
+    key; `flow_from_dict` rejects an incompatible MAJOR with
+    `FlowSerializationError` and tolerates legacy files with no key (#394). The
+    emitted `schemas/flow.schema.json` documents the key.
+  - `ExecutionResult` gains `trace_schema_version`; legacy traces without it
+    load unchanged (#393).
+  - `ExecutionSnapshot` gains `snapshot_version`; `FlowExecutor.resume_flow`
+    refuses an incompatible MAJOR with the new `CheckpointVersionError` rather
+    than failing opaquely mid-recovery (#395).
+- **Stable diagnostic codes on the exception hierarchy** (#390): every
+  `ChainWeaverError` subclass carries an append-only `code` class attribute
+  (e.g. `CW-E006`). The CLI prefixes it on error output
+  (`chainweaver: [CW-E006] …`), failing `StepRecord`s expose it as the new
+  `error_code` field (auto-derived from `error_type`), and every code is
+  documented in `docs/reference/error-table.md`. A consistency test enforces
+  uniqueness, completeness, and documentation. The code is intentionally not
+  injected into `str(exc)`, preserving existing message contracts.
+
 - **FlowExecutor execution-core hardening** (#330, #331, #332, #335, #336,
   #337, #344): a cluster of architecture/reliability improvements to the
   executor core.

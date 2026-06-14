@@ -55,6 +55,10 @@
           "title": "Deterministic",
           "type": "boolean"
         },
+        "format_version": {
+          "description": "Flow file format version written by chainweaver.serialization.flow_to_dict; readers reject an incompatible MAJOR. Distinct from the flow's own 'version'. See docs/versioning-policy.md.",
+          "type": "string"
+        },
         "governance": {
           "$ref": "#/$defs/FlowGovernance"
         },
@@ -356,6 +360,10 @@
           "default": true,
           "title": "Deterministic",
           "type": "boolean"
+        },
+        "format_version": {
+          "description": "Flow file format version written by chainweaver.serialization.flow_to_dict; readers reject an incompatible MAJOR. Distinct from the flow's own 'version'. See docs/versioning-policy.md.",
+          "type": "string"
         },
         "governance": {
           "$ref": "#/$defs/FlowGovernance"

@@ -44,6 +44,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from chainweaver._versions import SNAPSHOT_VERSION
+
 if TYPE_CHECKING:  # pragma: no cover — import-cycle guard
     from chainweaver.executor import StepRecord
 
@@ -60,6 +62,15 @@ class ExecutionSnapshot(BaseModel):
     convention as :class:`~chainweaver.executor.ExecutionResult`.
 
     Attributes:
+        snapshot_version: Library-stamped version of the snapshot *shape*
+            (issue #395), e.g. ``"1"``.  On resume the executor accepts a
+            snapshot whose MAJOR matches and raises
+            :class:`~chainweaver.exceptions.CheckpointVersionError` for an
+            incompatible MAJOR, so a library upgrade between write and resume
+            fails loudly instead of surfacing an opaque validation error
+            mid-recovery.  Snapshots written before versioning carry no stamp
+            and load with the current default version (back-filled by Pydantic),
+            so they remain resumable.
         trace_id: Original trace id of the in-flight execution.  Used
             as the lookup key for :meth:`Checkpointer.load`.
         flow_name: Name of the flow being executed.
@@ -86,6 +97,7 @@ class ExecutionSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
+    snapshot_version: str = SNAPSHOT_VERSION
     trace_id: str
     flow_name: str
     flow_version: str

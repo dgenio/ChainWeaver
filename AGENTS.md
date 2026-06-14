@@ -313,6 +313,7 @@ integration.
 
 | Field | Type | Meaning |
 |-------|------|---------|
+| `trace_schema_version` | `str` | Library-stamped version of the trace *shape* (#393), e.g. `"1"`. Lets long-lived trace consumers detect shape evolution; distinct from `flow_version`. See [docs/versioning-policy.md](docs/versioning-policy.md#artifact-schema-versions). |
 | `flow_name` | `str` | Name of the executed flow. |
 | `success` | `bool` | `True` when all steps completed without error. |
 | `final_output` | `dict \| None` | Merged execution context, or `None` on failure. |
@@ -332,6 +333,7 @@ integration.
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |
 | `error_type` | `str \| None` | Exception class name (e.g. `"FlowExecutionError"`) when the step failed; `None` on success. |
+| `error_code` | `str \| None` | Stable diagnostic code (#390, e.g. `"CW-E006"`) auto-derived from `error_type` for typed `ChainWeaverError`s; `None` on success or a foreign exception. |
 | `error_message` | `str \| None` | Human-readable error text when the step failed; `None` on success. |
 | `success` | `bool` | `True` when the step completed without error. |
 | `started_at` | `datetime` | UTC timestamp when the step began. |
