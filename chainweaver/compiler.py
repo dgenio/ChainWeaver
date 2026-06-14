@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from chainweaver.flow import Flow
+from chainweaver.step_index import flow_output_step_index
 from chainweaver.tools import Tool
 
 # Types considered numeric for widening compatibility.
@@ -321,7 +322,7 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
             if name not in context_fields:
                 errors.append(
                     CompilationError(
-                        step_index=len(flow.steps),
+                        step_index=flow_output_step_index(flow),
                         tool_name=flow.name,
                         field_name=name,
                         issue_type="output_schema_gap",
@@ -337,7 +338,7 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                 if not _types_compatible(actual_type, expected_type):
                     errors.append(
                         CompilationError(
-                            step_index=len(flow.steps),
+                            step_index=flow_output_step_index(flow),
                             tool_name=flow.name,
                             field_name=name,
                             issue_type="output_type_mismatch",

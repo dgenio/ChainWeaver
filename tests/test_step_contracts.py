@@ -31,6 +31,7 @@ from chainweaver.flow import (
 )
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json
+from chainweaver.step_index import flow_output_step_index
 from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
@@ -354,7 +355,7 @@ class TestFlowContextSchema:
         # context-schema gate.
         assert len(result.execution_log) == 2
         gate = result.execution_log[-1]
-        assert gate.step_index == len(flow.steps)
+        assert gate.step_index == flow_output_step_index(flow)
         assert gate.error_type == "SchemaValidationError"
         assert "flow_context" in (gate.error_message or "")
 

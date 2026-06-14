@@ -99,6 +99,7 @@ from chainweaver.middleware import (
 )
 from chainweaver.observation import TraceRecorder
 from chainweaver.registry import AnyFlow, FlowRegistry
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.tools import Tool
 
 _logger = get_logger("chainweaver.executor")
@@ -386,8 +387,9 @@ class StepRecord(BaseModel):
         step_index: Position of this record in the flow.  For normal steps
             this is the zero-based step index.  Two sentinel values are
             used for flow-level schema validation:
-            ``-1`` — input validation (before any step runs),
-            ``len(steps)`` — output validation (after all steps complete).
+            ``FLOW_INPUT_STEP_INDEX`` — input validation (before any step
+            runs), and ``flow_output_step_index(flow)`` — output validation
+            (after all steps complete).
         tool_name: Name of the tool that was invoked (or the flow name for
             flow-level validation records).
         inputs: The validated inputs that were passed to the tool.
@@ -478,10 +480,10 @@ class ExecutionResult(BaseModel):
             one entry per executed tool step.  When ``input_schema`` or
             ``output_schema`` is set on the flow and the corresponding
             validation **fails**, a synthetic record is appended carrying
-            the validation error (``step_index == -1`` for input failures,
-            ``step_index == len(steps)`` for output failures); successful
-            validations do not produce records, so the log is unchanged
-            on the happy path.
+            the validation error (``FLOW_INPUT_STEP_INDEX`` for input
+            failures, ``flow_output_step_index(flow)`` for output failures);
+            successful validations do not produce records, so the log is
+            unchanged on the happy path.
         trace_id: UUID4 hex string assigned at the start of the execution.
             Use this to correlate the result with logs or external systems.
         started_at: UTC timestamp when the execution began.
@@ -1422,7 +1424,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=initial_input,
                 schema=flow.input_schema,
-                step_index=-1,
+                step_index=FLOW_INPUT_STEP_INDEX,
                 context_label="flow_input",
             )
             if validation_record is not None:
@@ -1537,7 +1539,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=context,
                 schema=flow.output_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_output",
             )
             if validation_record is not None:
@@ -1564,7 +1566,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=context,
                 schema=flow.context_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_context",
             )
             if context_record is not None:
@@ -1752,7 +1754,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=initial_input,
                 schema=flow.input_schema,
-                step_index=-1,
+                step_index=FLOW_INPUT_STEP_INDEX,
                 context_label="flow_input",
             )
             if validation_record is not None:
@@ -1815,7 +1817,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=context,
                 schema=flow.output_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_output",
             )
             if validation_record is not None:
@@ -1879,7 +1881,7 @@ class FlowExecutor:
                 flow_name=flow.name,
                 payload=initial_input,
                 schema=flow.input_schema,
-                step_index=-1,
+                step_index=FLOW_INPUT_STEP_INDEX,
                 context_label="flow_input",
             )
             if validation_record is not None:
@@ -2029,7 +2031,7 @@ class FlowExecutor:
                 flow_name=flow.name,
                 payload=context,
                 schema=flow.output_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_output",
             )
             if validation_record is not None:
@@ -2682,10 +2684,11 @@ class FlowExecutor:
         Args:
             tool_step_count: Number of *tool* step records in
                 ``execution_log`` (excluding the synthetic flow-level
-                schema-validation records that may carry ``step_index ==
-                -1`` or ``step_index == len(steps)``).  Used to compute
-                ``cost_report.llm_calls_avoided`` so validation records
-                don't inflate the estimate.  When ``None`` (the default),
+                schema-validation records that may carry
+                ``FLOW_INPUT_STEP_INDEX`` or ``flow_output_step_index(flow)``).
+                Used to compute ``cost_report.llm_calls_avoided`` so
+                validation records don't inflate the estimate.  When ``None``
+                (the default),
                 falls back to ``len(execution_log)`` for callers that do
                 not append validation records.  Composed sub-flow steps
                 (issue #75) are expanded to their nested tool invocations
@@ -2959,7 +2962,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=context,
                 schema=flow.output_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_output",
             )
             if validation_record is not None:
@@ -2981,7 +2984,7 @@ class FlowExecutor:
                 flow_name=flow_name,
                 payload=context,
                 schema=flow.context_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_context",
             )
             if context_record is not None:
@@ -4256,7 +4259,7 @@ class FlowExecutor:
                 flow_name=flow.name,
                 payload=initial_input,
                 schema=flow.input_schema,
-                step_index=-1,
+                step_index=FLOW_INPUT_STEP_INDEX,
                 context_label="flow_input",
             )
             if validation_record is not None:
@@ -4641,7 +4644,7 @@ class FlowExecutor:
                 flow_name=flow.name,
                 payload=context,
                 schema=flow.output_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_output",
             )
             if validation_record is not None:
@@ -4668,7 +4671,7 @@ class FlowExecutor:
                 flow_name=flow.name,
                 payload=context,
                 schema=flow.context_schema,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 context_label="flow_context",
             )
             if context_record is not None:
