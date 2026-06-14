@@ -448,3 +448,33 @@ class TestDoctorFirstRunProfile:
         captured = capsys.readouterr()
         assert exit_code == 2
         assert "flow path is required" in captured.err
+
+    def test_first_run_not_ready_table_exits_one(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Force a critical-check failure (a non-writable path) so the profile
+        # reports NOT READY and exits 1 — the failure branch the CI env, which
+        # is always ready, can never reach on its own.
+        monkeypatch.setattr("chainweaver.cli.doctor._check_writable", lambda _path: False)
+        exit_code = cli.main(["doctor", "--profile", "first-run"])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "NOT READY" in captured.out
+
+    def test_first_run_not_ready_json_exits_one(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Same failure, JSON surface: ``ok`` is False and the unwritable cwd
+        # is reflected in the structured payload.
+        monkeypatch.setattr("chainweaver.cli.doctor._check_writable", lambda _path: False)
+        exit_code = cli.main(["doctor", "--profile", "first-run", "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        payload = json.loads(captured.out)
+        assert payload["ok"] is False
+        assert payload["writable_paths"]["cwd"]["writable"] is False
+        assert payload["writable_paths"]["tempdir"]["writable"] is False
