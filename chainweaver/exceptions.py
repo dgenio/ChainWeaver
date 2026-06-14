@@ -8,6 +8,12 @@ if TYPE_CHECKING:
     from chainweaver.executor import ExecutionResult
 
 
+# Bumped whenever a ChainWeaverError subclass is defined (including in sibling
+# modules, on import).  error_code_registry() reads it to cache its result and
+# rebuild only when the live subclass tree actually changes.
+_ERROR_CODE_GENERATION = 0
+
+
 class ChainWeaverError(Exception):
     """Base exception for all ChainWeaver errors.
 
@@ -30,6 +36,14 @@ class ChainWeaverError(Exception):
 
     #: Stable diagnostic code; overridden per subclass via the registry below.
     code: ClassVar[str] = "CW-E000"
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        # Bump the generation counter so error_code_registry() knows the live
+        # subclass tree has grown and rebuilds its cache (subclasses defined in
+        # sibling modules register here on import).
+        super().__init_subclass__(**kwargs)
+        global _ERROR_CODE_GENERATION
+        _ERROR_CODE_GENERATION += 1
 
 
 class ToolNotFoundError(ChainWeaverError):
@@ -827,9 +841,31 @@ def _iter_error_classes(
     return seen
 
 
+_CODE_MAP_CACHE: dict[str, str] = {}
+_CODE_MAP_GENERATION = -1
+
+
+def _error_code_map() -> dict[str, str]:
+    """Return the cached ``{class name: code}`` map, shared across callers.
+
+    The map is rebuilt only when the live :class:`ChainWeaverError` subclass
+    tree has grown since the last build (tracked by ``_ERROR_CODE_GENERATION``).
+    Failing :class:`~chainweaver.executor.StepRecord`s look up their code on
+    every validation, so caching here avoids re-walking the subclass tree per
+    record while still picking up exceptions defined in sibling modules once
+    they are imported.
+    """
+    global _CODE_MAP_GENERATION
+    if _CODE_MAP_GENERATION != _ERROR_CODE_GENERATION:
+        _CODE_MAP_CACHE.clear()
+        _CODE_MAP_CACHE.update((cls.__name__, cls.code) for cls in _iter_error_classes())
+        _CODE_MAP_GENERATION = _ERROR_CODE_GENERATION
+    return _CODE_MAP_CACHE
+
+
 def error_code_registry() -> dict[str, str]:
     """Return a ``{exception class name: code}`` map over all loaded error types."""
-    return {cls.__name__: cls.code for cls in _iter_error_classes()}
+    return dict(_error_code_map())
 
 
 def error_code_for(name: str | None) -> str | None:
@@ -842,4 +878,4 @@ def error_code_for(name: str | None) -> str | None:
     """
     if name is None:
         return None
-    return error_code_registry().get(name)
+    return _error_code_map().get(name)

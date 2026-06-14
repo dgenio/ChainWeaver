@@ -83,3 +83,13 @@ def test_cli_error_line_prefixes_code() -> None:
 
     foreign = ValueError("boom")
     assert _error_line(foreign) == "chainweaver: boom"
+
+
+def test_error_code_registry_returns_a_fresh_copy() -> None:
+    # The registry is memoized internally; callers get a copy so mutating the
+    # returned map cannot corrupt the shared cache.
+    first = error_code_registry()
+    first["__mutation_probe__"] = "CW-E999"
+    second = error_code_registry()
+    assert "__mutation_probe__" not in second
+    assert second["CheckpointVersionError"] == "CW-E021"
