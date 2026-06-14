@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   companion `chainweaver flows list` command (table + JSON) to preview what is
   discoverable.
 - **Structured `--format json` envelope** (#440): `inspect`, `validate`,
-  `check`, `profile`, `diff`, and `attest` now wrap their JSON output in a
-  documented, versioned envelope —
+  `check`, `profile`, `diff`, `attest`, and `flows list` now wrap their JSON
+  output in a documented, versioned envelope —
   `{"schema_version", "status", "data", "errors"}` — so automation and CI can
   branch on `status` / stable error `code`s (#390) instead of scraping text.
   Trace-bearing commands (`profile`, `diff`) carry the source

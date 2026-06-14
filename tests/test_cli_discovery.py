@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from chainweaver import cli
+from chainweaver.cli._shared import CLI_SCHEMA_VERSION
 from chainweaver.flow import Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 
@@ -132,7 +133,10 @@ class TestFlowsList:
             cli.app, ["flows", "list", "--discover-dir", str(flow_dir), "--format", "json"]
         )
         assert result.exit_code == 0
-        payload = json.loads(result.stdout)
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == CLI_SCHEMA_VERSION
+        assert envelope["status"] == "ok"
+        payload = envelope["data"]
         names = sorted(entry["name"] for entry in payload)
         assert names == ["demo_flow", "other_flow"]
         assert all(entry["source"].endswith(".flow.yaml") for entry in payload)

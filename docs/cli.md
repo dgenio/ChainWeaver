@@ -23,9 +23,9 @@ All commands share the same top-level exit-code contract:
 ## Machine-readable output (`--format json`)
 
 The result-producing commands — `inspect`, `validate`, `check`, `profile`,
-`diff`, and `attest` — wrap their `--format json` payload in a stable,
-versioned envelope so automation and CI can branch on `status` / error codes
-instead of scraping human-readable text:
+`diff`, `attest`, and `flows list` — wrap their `--format json` payload in a
+stable, versioned envelope so automation and CI can branch on `status` / error
+codes instead of scraping human-readable text:
 
 ```json
 {

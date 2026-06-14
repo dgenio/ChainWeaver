@@ -10,13 +10,13 @@ from chainweaver.cli._shared import (
     _FLOW_FILE_ARG,
     _FORMAT_OPTION,
     OutputFormat,
-    _emit_json,
     _iter_flow_files,
     _load_flow_file,
     _load_persisted_candidate,
     _require_existing_dir,
     _require_existing_file,
     _write_candidate,
+    emit_envelope,
     flows_app,
     get_default_registry,
 )
@@ -96,7 +96,7 @@ def list_flows_command(
         discover_entry_points=discover_entry_points,
     )
     if output_format is OutputFormat.JSON:
-        _emit_json(
+        emit_envelope(
             [
                 {
                     "name": flow.name,
