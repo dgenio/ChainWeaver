@@ -209,9 +209,13 @@ def diff_command(
     Non-deterministic fields (``trace_id``, timestamps, total/per-step
     durations) are ignored by default.
 
-    Exit codes: 0 = identical, 1 = differs, 2 = file not found or
-    malformed input.
+    Exit codes: 0 = identical, 1 = differs or malformed trace input,
+    2 = file not found or invalid argument.
     """
+    if perf_tolerance is not None and perf_tolerance < 0:
+        typer.echo("chainweaver: --perf-tolerance must be >= 0.", err=True)
+        raise typer.Exit(code=2)
+
     result_a = _load_execution_result(trace_a)
     result_b = _load_execution_result(trace_b)
     diff = _compare_traces(result_a, result_b, perf_tolerance=perf_tolerance)

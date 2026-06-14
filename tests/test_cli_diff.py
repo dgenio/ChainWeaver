@@ -96,6 +96,20 @@ class TestDiffIdentical:
         assert exit_code == 0
         assert "identical" in captured.out.lower()
 
+    def test_negative_perf_tolerance_rejected(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        a = tmp_path / "a.json"
+        b = tmp_path / "b.json"
+        _write(a, _result(trace_id="trace_a"))
+        _write(b, _result(trace_id="trace_b"))
+        exit_code = cli.main(["diff", str(a), str(b), "--perf-tolerance", "-5"])
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "--perf-tolerance must be >= 0" in captured.err
+
     def test_identical_json_output(
         self,
         tmp_path: Path,

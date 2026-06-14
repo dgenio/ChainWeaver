@@ -62,7 +62,8 @@ class TestInspectDiscovery:
 
     def test_file_takes_precedence_over_dir(self, flow_dir: Path, tmp_path: Path) -> None:
         # An explicit --file pointing at demo wins even when --discover-dir is also set.
-        only = tmp_path / "demo.flow.yaml"
+        only = tmp_path / "only.flow.yaml"
+        only.write_text(_DEMO_FLOW, encoding="utf-8")
         result = _RUNNER.invoke(
             cli.app,
             ["inspect", "demo_flow", "--file", str(only), "--discover-dir", str(flow_dir)],
