@@ -25,10 +25,11 @@ from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Any, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from chainweaver._execution import merge_step_outputs
+from chainweaver._versions import SNAPSHOT_VERSION, TRACE_SCHEMA_VERSION, same_major
 from chainweaver.approvals import (
     ApprovalCallable,
     ApprovalCallback,
@@ -59,6 +60,7 @@ from chainweaver.exceptions import (
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
+    CheckpointVersionError,
     DecisionCallbackError,
     FlowCancelledError,
     FlowCompositionError,
@@ -72,6 +74,7 @@ from chainweaver.exceptions import (
     ToolNotFoundError,
     ToolOutputSizeError,
     ToolTimeoutError,
+    error_code_for,
 )
 from chainweaver.flow import (
     DAGFlow,
@@ -395,6 +398,12 @@ class StepRecord(BaseModel):
             the step failed.
         error_type: Exception class name (e.g. ``"FlowExecutionError"``)
             when the step failed, or ``None`` on success.
+        error_code: Stable diagnostic code for the failing exception (issue
+            #390), e.g. ``"CW-E007"``.  Auto-derived from ``error_type`` when
+            that names a known :class:`~chainweaver.exceptions.ChainWeaverError`
+            subclass; ``None`` on success or when the failure was a non-typed
+            (foreign) exception.  Lets ``--format json`` consumers branch on a
+            stable code instead of string-matching messages or class names.
         error_message: Human-readable error message when the step failed,
             or ``None`` on success.
         success: ``True`` when the step completed without error (including
@@ -441,6 +450,7 @@ class StepRecord(BaseModel):
     inputs: dict[str, Any]
     outputs: dict[str, Any] | None = None
     error_type: str | None = None
+    error_code: str | None = None
     error_message: str | None = None
     success: bool = True
     started_at: datetime
@@ -455,6 +465,19 @@ class StepRecord(BaseModel):
     sub_result: ExecutionResult | None = None
     approval: ApprovalRecord | None = None
 
+    @model_validator(mode="after")
+    def _fill_error_code(self) -> StepRecord:
+        """Derive ``error_code`` from ``error_type`` when not set explicitly.
+
+        Every failing :class:`StepRecord` already records the exception class
+        name in ``error_type``; mapping that to the stable code here means the
+        ~14 record-construction sites in the executor stay untouched and a
+        loaded legacy trace (no ``error_code``) is back-filled on validation.
+        """
+        if self.error_code is None and self.error_type is not None:
+            object.__setattr__(self, "error_code", error_code_for(self.error_type))
+        return self
+
 
 class ExecutionResult(BaseModel):
     """The final result of a :meth:`FlowExecutor.execute_flow` call.
@@ -464,6 +487,13 @@ class ExecutionResult(BaseModel):
     :meth:`pydantic.BaseModel.model_validate_json`.
 
     Attributes:
+        trace_schema_version: Library-stamped version of the trace *shape*
+            (issue #393), e.g. ``"1"``.  Lets long-lived trace consumers
+            (``chainweaver profile`` / ``diff``, external trace stores, OTel
+            export) detect and adapt to trace-shape evolution instead of
+            sniffing field presence.  Distinct from ``flow_version``, which
+            versions the flow definition, not the trace format.  Traces written
+            before versioning load with the legacy major and remain readable.
         flow_name: Name of the flow that was executed.
         flow_version: The exact registered version of the flow that
             executed (issue #201).  When :meth:`FlowExecutor.execute_flow`
@@ -515,6 +545,7 @@ class ExecutionResult(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    trace_schema_version: str = TRACE_SCHEMA_VERSION
     flow_name: str
     flow_version: str
     success: bool
@@ -2852,12 +2883,23 @@ class FlowExecutor:
             CheckpointDriftError: When the flow's version or any tool's
                 ``schema_hash`` has changed since the snapshot was
                 written.
+            CheckpointVersionError: When the snapshot's ``snapshot_version``
+                has an incompatible MAJOR component relative to the version
+                this library writes (issue #395).
         """
         if self._checkpointer is None:
             raise CheckpointerNotConfiguredError()
         snapshot = self._checkpointer.load(trace_id)
         if snapshot is None:
             raise CheckpointNotFoundError(trace_id)
+
+        if not same_major(snapshot.snapshot_version, SNAPSHOT_VERSION):
+            raise CheckpointVersionError(
+                trace_id,
+                snapshot.flow_name,
+                snapshot.snapshot_version,
+                SNAPSHOT_VERSION,
+            )
 
         flow = self._registry.get_flow(snapshot.flow_name)
         if flow.version != snapshot.flow_version:

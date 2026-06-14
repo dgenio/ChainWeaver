@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from chainweaver.executor import ExecutionResult
 
 
 class ChainWeaverError(Exception):
-    """Base exception for all ChainWeaver errors."""
+    """Base exception for all ChainWeaver errors.
+
+    Every subclass carries a stable diagnostic ``code`` (issue #390) — e.g.
+    ``"CW-E007"`` — assigned in the append-only registry at the bottom of this
+    module.  Codes are searchable in logs, issues, and docs, let coding agents
+    map a failure to a documented remediation deterministically, and let
+    ``--format json`` consumers branch on a code instead of string-matching
+    messages.  The code is exposed as a class attribute (and surfaced in CLI
+    error output and on :attr:`~chainweaver.executor.StepRecord.error_code`); it
+    is deliberately *not* injected into ``str(exc)`` so existing message
+    contracts are preserved.  Each code maps to an anchored section in
+    ``docs/reference/error-table.md``.
+    """
+
+    #: Stable diagnostic code; overridden per subclass via the registry below.
+    code: ClassVar[str] = "CW-E000"
 
 
 class ToolNotFoundError(ChainWeaverError):
@@ -375,6 +390,44 @@ class CheckpointNotFoundError(ChainWeaverError):
         super().__init__(f"No snapshot found for trace_id '{trace_id}'.")
 
 
+class CheckpointVersionError(ChainWeaverError):
+    """Raised when a snapshot's format version is incompatible with this library (issue #395).
+
+    Crash-resume (issue #128) persists :class:`~chainweaver.checkpoint.ExecutionSnapshot`
+    JSON designed to outlive the process — the very scenario where a library
+    upgrade between write and resume is most likely.  Each snapshot carries a
+    ``snapshot_version`` stamp; :meth:`~chainweaver.executor.FlowExecutor.resume_flow`
+    accepts a snapshot whose MAJOR component matches the version this library
+    writes and raises this typed error for an incompatible MAJOR, rather than
+    surfacing an opaque Pydantic validation error mid-recovery.  Remediation:
+    re-run the flow from the start, or resume with the matching library version.
+
+    Attributes:
+        trace_id: Trace id of the snapshot that could not be safely resumed.
+        flow_name: Name of the flow recorded in the snapshot.
+        snapshot_version: The ``snapshot_version`` read from the snapshot.
+        expected_version: The snapshot version this library writes.
+    """
+
+    def __init__(
+        self,
+        trace_id: str,
+        flow_name: str,
+        snapshot_version: str,
+        expected_version: str,
+    ) -> None:
+        self.trace_id = trace_id
+        self.flow_name = flow_name
+        self.snapshot_version = snapshot_version
+        self.expected_version = expected_version
+        super().__init__(
+            f"Cannot resume trace '{trace_id}' for flow '{flow_name}': snapshot_version "
+            f"'{snapshot_version}' is incompatible with this ChainWeaver "
+            f"(writes '{expected_version}'). Re-run from the start or resume with the "
+            f"matching library version."
+        )
+
+
 class PluginDiscoveryError(ChainWeaverError):
     """Raised when an entry-point plugin loader fails irrecoverably.
 
@@ -695,3 +748,93 @@ class PredicateSyntaxError(ChainWeaverError):
         self.predicate = predicate
         self.detail = detail
         super().__init__(f"Invalid predicate '{predicate}': {detail}")
+
+
+# ---------------------------------------------------------------------------
+# Stable diagnostic codes (issue #390)
+# ---------------------------------------------------------------------------
+#
+# Append-only registry mapping each exception class to its stable ``CW-Exxx``
+# code.  **Codes are forever**: once released, never renumber or reuse one — add
+# new codes at the end with the next free number.  A consistency test
+# (tests/test_error_codes.py) enforces uniqueness, that every public exception
+# has a code, and that each code is documented in docs/reference/error-table.md.
+#
+# Exceptions defined in sibling modules (FlowBuilderError, FuzzConfigError,
+# AttestationInputError, FixtureStaleError) declare their own ``code`` in place
+# to avoid import cycles; they are validated by the same consistency test.
+_ERROR_CODES: dict[type[ChainWeaverError], str] = {
+    ChainWeaverError: "CW-E000",
+    ToolNotFoundError: "CW-E001",
+    FlowNotFoundError: "CW-E002",
+    FlowAlreadyExistsError: "CW-E003",
+    SchemaValidationError: "CW-E004",
+    InputMappingError: "CW-E005",
+    FlowExecutionError: "CW-E006",
+    ToolDefinitionError: "CW-E007",
+    ToolTimeoutError: "CW-E008",
+    ToolOutputSizeError: "CW-E009",
+    DAGDefinitionError: "CW-E010",
+    FlowStatusError: "CW-E011",
+    FlowCancelledError: "CW-E012",
+    ContextKeyCollisionError: "CW-E013",
+    AsyncLaneUnsupportedError: "CW-E014",
+    FlowCompositionError: "CW-E015",
+    InvalidFlowVersionError: "CW-E016",
+    FlowSerializationError: "CW-E017",
+    CheckpointDriftError: "CW-E018",
+    CheckpointerNotConfiguredError: "CW-E019",
+    CheckpointNotFoundError: "CW-E020",
+    CheckpointVersionError: "CW-E021",
+    PluginDiscoveryError: "CW-E022",
+    ContribError: "CW-E023",
+    MCPError: "CW-E024",
+    MCPSchemaConversionError: "CW-E025",
+    MCPToolInvocationError: "CW-E026",
+    MCPMetadataError: "CW-E027",
+    MCPSchemaDriftError: "CW-E028",
+    ApprovalDeniedError: "CW-E029",
+    SafetyCeilingError: "CW-E030",
+    DecisionCallbackError: "CW-E031",
+    KernelInvocationError: "CW-E032",
+    CostProfileError: "CW-E033",
+    OfflineLLMError: "CW-E034",
+    AgentTraceImportError: "CW-E035",
+    PredicateSyntaxError: "CW-E036",
+}
+
+for _exc_cls, _exc_code in _ERROR_CODES.items():
+    _exc_cls.code = _exc_code
+del _exc_cls, _exc_code
+
+
+def _iter_error_classes(
+    root: type[ChainWeaverError] = ChainWeaverError,
+) -> list[type[ChainWeaverError]]:
+    """Return *root* and every (transitive) :class:`ChainWeaverError` subclass.
+
+    Walks the live subclass tree so exceptions defined in sibling modules are
+    included once those modules have been imported.
+    """
+    seen: list[type[ChainWeaverError]] = [root]
+    for sub in root.__subclasses__():
+        seen.extend(_iter_error_classes(sub))
+    return seen
+
+
+def error_code_registry() -> dict[str, str]:
+    """Return a ``{exception class name: code}`` map over all loaded error types."""
+    return {cls.__name__: cls.code for cls in _iter_error_classes()}
+
+
+def error_code_for(name: str | None) -> str | None:
+    """Return the stable code for an exception class *name*, or ``None``.
+
+    *name* is an exception's ``__class__.__name__`` (as stored in
+    :attr:`~chainweaver.executor.StepRecord.error_type`).  Returns ``None`` for
+    foreign (non-:class:`ChainWeaverError`) exception names so trace records
+    from arbitrary tool failures simply carry no code.
+    """
+    if name is None:
+        return None
+    return error_code_registry().get(name)

@@ -52,7 +52,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -76,6 +76,8 @@ class AttestationInputError(ChainWeaverError):
         field_name: Name of the field that couldn't be generated.
         annotation_repr: ``str(annotation)`` of the offending field.
     """
+
+    code: ClassVar[str] = "CW-E039"
 
     def __init__(self, field_name: str, annotation_repr: str) -> None:
         self.field_name = field_name
