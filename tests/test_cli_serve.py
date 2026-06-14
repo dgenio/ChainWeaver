@@ -81,7 +81,7 @@ class TestBuildFlowServer:
             )
             raise typer.Exit(code=1)
 
-        monkeypatch.setattr(cli, "_import_flow_server", _raise_missing_extra)
+        monkeypatch.setattr(cli.run, "_import_flow_server", _raise_missing_extra)
         exit_code = cli.main(["serve", str(_EXAMPLE_FLOW)])
         assert exit_code == 1
         assert "requires the MCP extra" in capsys.readouterr().err
@@ -92,7 +92,7 @@ class TestServeCommandWiring:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         fake = _FakeServer()
-        monkeypatch.setattr(cli, "_build_flow_server", lambda *a, **k: fake)
+        monkeypatch.setattr(cli.run, "_build_flow_server", lambda *a, **k: fake)
         cli.serve_command(
             flow_file=_EXAMPLE_FLOW,
             tools=[],

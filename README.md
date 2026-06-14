@@ -1080,13 +1080,17 @@ chainweaver serve examples/double_add_format.flow.yaml \
 chainweaver validate flows/etl.flow.yaml
 chainweaver check flows/                  # whole-directory variant
 
-# Render a registered flow as ASCII or Graphviz DOT.
-# (See note below — `viz` reads from an in-memory registry, not a file.)
-chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
+# Render a flow as ASCII or Graphviz DOT. Discover it from a directory of
+# flow files, an installed package's entry points, or the default registry.
+chainweaver viz my_flow --discover-dir flows/ --format dot | dot -Tpng -o my_flow.png
 
-# Inspect a registered flow's structure (table or JSON).
-# (See note below — `inspect` reads from an in-memory registry, not a file.)
-chainweaver inspect my_flow --format json
+# Inspect a flow's structure (table or JSON). `flows list` previews what is
+# discoverable so you can see what `inspect`/`viz` can target.
+chainweaver inspect my_flow --discover-dir flows/ --format json
+chainweaver flows list --discover-dir flows/
+
+# Install tab-completion for your shell (bash/zsh/fish).
+chainweaver --install-completion
 
 # Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
 # and per-step / per-tool retry / skip / fallback / failure aggregates.
@@ -1128,18 +1132,25 @@ reporting subcommands also accept `--format json` for machine consumption
 (`inspect`, `validate`, `check`, `run`, `profile`, `diff`, `attest`,
 `suggest`, `doctor`); the two exceptions are `viz`, which uses
 `--format ascii|dot`, and `dump-schema`, which writes a raw JSON Schema
-and has no `--format` flag. All subcommands share the same exit-code
-contract (`0` success, `1` business-logic error, `2` file-not-found /
-argument error).
+and has no `--format` flag. The result-producing commands (`inspect`,
+`validate`, `check`, `profile`, `diff`, `attest`) wrap their `--format json`
+output in a stable, versioned envelope
+(`{"schema_version", "status", "data", "errors"}`) so automation can branch on
+`status` / error codes — see
+[machine-readable output](docs/cli.md#machine-readable-output---format-json).
+All subcommands share the same exit-code contract (`0` success, `1`
+business-logic error, `2` file-not-found / argument error), and the CLI ships
+tab-completion (`chainweaver --install-completion`).
 
-**`inspect` and `viz` need a registry — they don't read from disk.**
-Unlike `run`/`validate`/`check`/`profile`/`diff`/`attest`/`suggest`/`doctor`
-(which load a flow file every time they run), `inspect` and `viz` operate on
-a process-scoped, in-memory registry that **you must install programmatically
-before invoking the CLI**.  Running `chainweaver inspect my_flow` against a
-fresh install will exit `1` with `No registry configured. Call
-chainweaver.cli.set_default_registry(...) before invoking the CLI.` —
-that's expected.  The fix is to wire a small entry script:
+**`inspect` and `viz` resolve flows from disk or a registry.**
+Pass `--file <path>`, `--discover-dir <dir>`, or `--discover-entry-points` to
+resolve a flow without writing any Python (issue #381); `chainweaver flows
+list` previews what is discoverable. With no discovery flag they fall back to a
+process-scoped, in-memory registry installed programmatically — running
+`chainweaver inspect my_flow` with neither a flag nor a configured registry
+exits `1` with `No registry configured. Call
+chainweaver.cli.set_default_registry(...) before invoking the CLI.`. To wire
+the default-registry path, use a small entry script:
 
 ```python
 # my_cli_entry.py

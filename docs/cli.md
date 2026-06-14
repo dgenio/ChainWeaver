@@ -20,6 +20,49 @@ All commands share the same top-level exit-code contract:
 
 ---
 
+## Machine-readable output (`--format json`)
+
+The result-producing commands — `inspect`, `validate`, `check`, `profile`,
+`diff`, `attest`, and `flows list` — wrap their `--format json` payload in a
+stable, versioned envelope so automation and CI can branch on `status` / error
+codes instead of scraping human-readable text:
+
+```json
+{
+  "schema_version": "1",
+  "status": "ok",
+  "data": { "...": "command-specific payload" },
+  "errors": [{ "code": "CW-E017", "message": "…" }]
+}
+```
+
+- `schema_version` versions the **envelope itself** — distinct from a flow's
+  SemVer `version` and from the `trace_schema_version` of a trace. A MAJOR bump
+  signals an incompatible envelope-shape change.
+- `status` is `"ok"` or `"error"`; on failure, `errors` carries
+  `{code, message}` entries using the stable
+  [error codes](reference/error-table.md).
+- Trace-bearing commands (`profile`, `diff`) include the source
+  `trace_schema_version` in `data`.
+
+`run` and `dump-schema` keep their existing (un-enveloped) JSON output.
+
+---
+
+## Shell completion
+
+The CLI ships tab-completion for bash, zsh, and fish (provided by typer). It
+covers every command and option. Install it once per shell:
+
+```bash
+chainweaver --install-completion          # auto-detect the current shell
+chainweaver --show-completion bash        # print the script without installing
+```
+
+Restart your shell (or re-source its rc file) after installing.
+
+---
+
 ## Flow file format
 
 The file-oriented commands (`run`, `validate`, `check`, `doctor`, `attest`,
@@ -77,45 +120,63 @@ implementations referenced by `tool_name`.
 
 ### `inspect`
 
-Print the structure of a registered flow.
+Print the structure of a flow.
 
 ```
-chainweaver inspect <flow_name> [--format table|json]
+chainweaver inspect <flow_name> [--format table|json] [discovery flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` / `-f` | `table` | Output format: human-readable table or machine-readable JSON |
+| `--file` | — | Load the flow directly from a `.flow.yaml` / `.flow.json` file |
+| `--discover-dir` | — | Discover flows by scanning a directory for `.flow.*` files |
+| `--discover-entry-points` | `false` | Discover flows from installed packages via the `chainweaver.flows` entry points |
 
-**Exit codes**: `0` = success, `1` = flow not registered or no registry configured.
+Without a discovery flag, the flow is resolved from the registry installed via
+`set_default_registry` (see [Programmatic registration](#programmatic-registration-inspect-viz)).
+Discovery precedence is `--file` → `--discover-dir` → `--discover-entry-points`
+→ the default registry; a no-match error names the source consulted and the
+flows it found. Use `chainweaver flows list` to preview what is discoverable.
+
+**Exit codes**: `0` = success, `1` = flow not found or no registry configured,
+`2` = a supplied file/directory does not exist.
 
 **Example**:
 
 ```bash
-chainweaver inspect my_etl_flow
-chainweaver inspect my_etl_flow --format json
+chainweaver inspect my_etl_flow                          # from the default registry
+chainweaver inspect my_etl_flow --discover-dir flows/    # no Python setup needed
+chainweaver inspect my_etl_flow --file flows/etl.flow.yaml --format json
+chainweaver flows list --discover-dir flows/             # see what is discoverable
 ```
 
 ---
 
 ### `viz`
 
-Render a registered flow as ASCII art or DOT (Graphviz) text.
+Render a flow as ASCII art or DOT (Graphviz) text.
 
 ```
-chainweaver viz <flow_name> [--format ascii|dot]
+chainweaver viz <flow_name> [--format ascii|dot] [discovery flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` / `-f` | `ascii` | Visualization format: terminal-friendly ASCII or Graphviz DOT |
+| `--file` | — | Load the flow directly from a `.flow.yaml` / `.flow.json` file |
+| `--discover-dir` | — | Discover flows by scanning a directory for `.flow.*` files |
+| `--discover-entry-points` | `false` | Discover flows from installed packages via the `chainweaver.flows` entry points |
 
-**Exit codes**: `0` = success, `1` = flow not found or no registry configured.
+Flow resolution works exactly like [`inspect`](#inspect).
+
+**Exit codes**: `0` = success, `1` = flow not found or no registry configured,
+`2` = a supplied file/directory does not exist.
 
 **Example**:
 
 ```bash
-chainweaver viz my_etl_flow
+chainweaver viz my_etl_flow --discover-dir flows/
 chainweaver viz my_etl_flow --format dot | dot -Tpng -o my_etl_flow.png
 ```
 

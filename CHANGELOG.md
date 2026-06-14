@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CLI flow discovery for `inspect` / `viz`** (#381): both commands gain
+  `--file`, `--discover-dir`, and `--discover-entry-points` so a flow can be
+  resolved without a programmatic `set_default_registry` call. Resolution
+  precedence is file → directory → entry points → the default registry, and a
+  no-match error names the source consulted and the flows it found. Adds a
+  companion `chainweaver flows list` command (table + JSON) to preview what is
+  discoverable.
+- **Structured `--format json` envelope** (#440): `inspect`, `validate`,
+  `check`, `profile`, `diff`, `attest`, and `flows list` now wrap their JSON
+  output in a documented, versioned envelope —
+  `{"schema_version", "status", "data", "errors"}` — so automation and CI can
+  branch on `status` / stable error `code`s (#390) instead of scraping text.
+  Trace-bearing commands (`profile`, `diff`) carry the source
+  `trace_schema_version` (#393). The new `CLI_SCHEMA_VERSION` constant versions
+  the envelope itself. **Behaviour change:** the JSON shape of those commands
+  changed — the previous payload now lives under `data`; `run` and
+  `dump-schema` are unchanged.
+- **Shell completion** (#436): documented and tested tab-completion for
+  bash/zsh/fish via `chainweaver --install-completion` / `--show-completion`.
+
 - **Explicit schema versions for serialized artifacts** (#393, #394, #395): the
   three durable artifacts now carry a library-stamped version so consumers can
   detect shape evolution instead of sniffing fields. A shared
@@ -100,6 +120,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persist an explicit safety contract in JSON/YAML, tools report whether their
   safety was explicitly declared, and MCP annotations are derived from the
   effective contract.
+
+### Changed
+
+- **CLI restructured into a command package** (#333): the single 3,284-line
+  `chainweaver/cli.py` is now a `chainweaver/cli/` package — shared Typer
+  app/loading/error/output helpers in `_shared.py`, one module per command
+  group, and a thin `__init__.py` that wires them while keeping the
+  `chainweaver.cli:main` entry point and re-exported surface stable. Behaviour
+  is unchanged; private helpers moved to their owning submodule
+  (e.g. `chainweaver.cli.run._build_flow_server`).
 
 ### Deprecated
 

@@ -59,6 +59,26 @@ class TestRender:
         assert "ok.flow.yaml" not in out  # valid files produce no annotation
         assert "chainweaver: 1 invalid / 2 flow file(s)" in out
 
+    def test_unwraps_format_json_envelope(self, capsys: pytest.CaptureFixture[str]) -> None:
+        # ``chainweaver check --format json`` now nests the payload under the
+        # versioned envelope (issue #440); render must unwrap ``data``.
+        payload: dict[str, Any] = {
+            "schema_version": "1",
+            "status": "error",
+            "data": {
+                "results": [
+                    {"path": "ok.flow.yaml", "valid": True},
+                    {"path": "bad.flow.yaml", "valid": False, "error": "boom"},
+                ],
+            },
+            "errors": [],
+        }
+        invalid = annotate.render(payload)
+        out = capsys.readouterr().out
+        assert invalid == 1
+        assert "::error file=bad.flow.yaml::boom" in out
+        assert "chainweaver: 1 invalid / 2 flow file(s)" in out
+
     def test_escapes_windows_path_and_comma_in_annotation(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
