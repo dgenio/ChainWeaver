@@ -20,6 +20,7 @@ from chainweaver.exceptions import (
 from chainweaver.executor import ExecutionResult
 from chainweaver.flow import DAGFlow, Flow
 from chainweaver.observer import ChainObserver
+from chainweaver.plugins import discover_flows
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_from_yaml, flow_to_yaml
 from chainweaver.tools import Tool
@@ -167,6 +168,88 @@ def _iter_flow_files(directory: Path) -> list[Path]:
         if path.is_file() and path.name.lower().endswith(_FLOW_FILE_SUFFIXES):
             matches.append(path)
     return matches
+
+
+def _registry_from_dir(directory: Path) -> FlowRegistry:
+    """Build an ephemeral registry from every flow file under *directory* (#381).
+
+    Malformed files are skipped with a stderr warning rather than aborting,
+    matching the lenient ``chainweaver check`` discovery semantics.
+    """
+    registry = FlowRegistry()
+    for path in _iter_flow_files(directory):
+        try:
+            registry.register_flow(_load_flow_file(path), overwrite=True)
+        except ChainWeaverError as exc:
+            detail = getattr(exc, "detail", None) or str(exc)
+            typer.echo(f"chainweaver: skipping {path}: {detail}", err=True)
+    return registry
+
+
+def _discovery_registry(
+    *,
+    file: Path | None,
+    discover_dir: Path | None,
+    discover_entry_points: bool,
+) -> tuple[FlowRegistry | None, str]:
+    """Resolve a flow source into an ephemeral registry (issue #381).
+
+    Precedence, highest first: ``--file`` → ``--discover-dir`` →
+    ``--discover-entry-points``.  Returns ``(registry, source_label)``.  When
+    no discovery flag is supplied, returns ``(None, ...)`` so the caller falls
+    back to the programmatically installed default registry.
+    """
+    if file is not None:
+        _require_existing_file(file)
+        registry = FlowRegistry()
+        try:
+            registry.register_flow(_load_flow_file(file))
+        except FlowSerializationError as exc:
+            typer.echo(f"chainweaver: {exc.detail}", err=True)
+            raise typer.Exit(code=1) from exc
+        return registry, f"--file {file}"
+    if discover_dir is not None:
+        _require_existing_dir(discover_dir)
+        return _registry_from_dir(discover_dir), f"--discover-dir {discover_dir}"
+    if discover_entry_points:
+        registry = FlowRegistry()
+        for flow in discover_flows():
+            registry.register_flow(flow, overwrite=True)
+        return registry, "--discover-entry-points (group 'chainweaver.flows')"
+    return None, "the default registry"
+
+
+def _resolve_flow(
+    flow_name: str,
+    *,
+    file: Path | None = None,
+    discover_dir: Path | None = None,
+    discover_entry_points: bool = False,
+) -> Flow | DAGFlow:
+    """Resolve *flow_name* from a discovery source or the default registry (#381).
+
+    Lets registry-backed commands (``inspect`` / ``viz``) find flows without
+    a programmatic ``set_default_registry`` call.  When no discovery flag is
+    passed, behaviour is unchanged (the default registry is consulted).  A
+    no-match error names the source consulted and the flows it did find.
+    """
+    registry, source = _discovery_registry(
+        file=file,
+        discover_dir=discover_dir,
+        discover_entry_points=discover_entry_points,
+    )
+    if registry is None:
+        return _load_flow_from_registry(flow_name)
+    try:
+        return registry.get_flow(flow_name)
+    except FlowNotFoundError as exc:
+        available = sorted({flow.name for flow in registry.list_flows()})
+        hint = ", ".join(available) if available else "(none found)"
+        typer.echo(
+            f"chainweaver: flow '{flow_name}' not found via {source}. Discoverable flows: {hint}.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
 
 
 def _import_tools_from(module_name: str) -> list[Tool]:
