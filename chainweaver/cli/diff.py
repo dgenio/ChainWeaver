@@ -10,9 +10,9 @@ from deepdiff import DeepDiff
 
 from chainweaver.cli._shared import (
     OutputFormat,
-    _emit_json,
     _load_execution_result,
     app,
+    emit_envelope,
 )
 from chainweaver.executor import ExecutionResult
 
@@ -215,9 +215,15 @@ def diff_command(
     result_a = _load_execution_result(trace_a)
     result_b = _load_execution_result(trace_b)
     diff = _compare_traces(result_a, result_b, perf_tolerance=perf_tolerance)
+    diff["trace_schema_version"] = {
+        "a": result_a.trace_schema_version,
+        "b": result_b.trace_schema_version,
+    }
 
     if output_format is OutputFormat.JSON:
-        _emit_json(diff)
+        # The comparison itself succeeded even when the traces differ; the
+        # ``data.identical`` flag and the exit code convey the result.
+        emit_envelope(diff)
     else:
         typer.echo(_format_diff_table(diff))
 

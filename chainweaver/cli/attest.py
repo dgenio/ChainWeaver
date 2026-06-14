@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 
 from chainweaver.cli._shared import (
     OutputFormat,
-    _emit_json,
     _error_line,
     _import_tools_from,
     _load_flow_file,
     _require_existing_file,
     app,
+    emit_envelope,
 )
 
 _ATTEST_FLOW_ARG = typer.Argument(
@@ -158,7 +158,10 @@ def attest_command(
         raise typer.Exit(code=1) from exc
 
     if output_format is OutputFormat.JSON:
-        _emit_json(json.loads(report.model_dump_json()))
+        emit_envelope(
+            json.loads(report.model_dump_json()),
+            status="ok" if report.observed_deterministic else "error",
+        )
     else:
         typer.echo(_attest_report_to_table(report))
 

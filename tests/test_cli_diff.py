@@ -108,7 +108,7 @@ class TestDiffIdentical:
         exit_code = cli.main(["diff", str(a), str(b), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["identical"] is True
         assert payload["flow_name"] is None
         assert payload["step_count"] is None
@@ -175,7 +175,7 @@ class TestDiffDivergent:
         exit_code = cli.main(["diff", str(a), str(b), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 1
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["identical"] is False
         # Snapshot: exact DeepDiff serialization contract for a scalar change.
         # DeepDiff names paths as "root['key']" in tree-view mode.

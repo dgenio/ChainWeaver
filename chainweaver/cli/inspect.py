@@ -10,11 +10,11 @@ import typer
 from chainweaver.cli._shared import (
     _FORMAT_OPTION,
     OutputFormat,
-    _emit_json,
     _flow_to_dict,
     _flow_to_table,
     _resolve_flow,
     app,
+    emit_envelope,
 )
 from chainweaver.viz import flow_to_ascii, flow_to_dot
 
@@ -69,7 +69,7 @@ def inspect_command(
     )
 
     if output_format is OutputFormat.JSON:
-        _emit_json(_flow_to_dict(flow))
+        emit_envelope(_flow_to_dict(flow))
     else:
         typer.echo(_flow_to_table(flow))
 

@@ -10,9 +10,9 @@ import typer
 
 from chainweaver.cli._shared import (
     OutputFormat,
-    _emit_json,
     _load_execution_result,
     app,
+    emit_envelope,
 )
 from chainweaver.executor import ExecutionResult
 from chainweaver.viz import _render_step_bar_chart
@@ -177,6 +177,7 @@ def _profile_single(result: ExecutionResult, *, top: int) -> tuple[dict[str, Any
 
     payload = {
         "trace_count": 1,
+        "trace_schema_version": result.trace_schema_version,
         "flow_name": result.flow_name,
         "trace_id": result.trace_id,
         "success": result.success,
@@ -297,6 +298,7 @@ def _profile_multi(results: list[ExecutionResult], *, top: int) -> tuple[dict[st
 
     payload = {
         "trace_count": len(results),
+        "trace_schema_versions": sorted({r.trace_schema_version for r in results}),
         "flow_name": flow_name,
         "step_count": step_count,
         "total_duration_ms": total_stats,
@@ -393,6 +395,6 @@ def profile_command(
         payload, table = _profile_multi(results, top=top)
 
     if output_format is OutputFormat.JSON:
-        _emit_json(payload)
+        emit_envelope(payload)
     else:
         typer.echo(table)

@@ -130,6 +130,52 @@ def _emit_json(payload: object) -> None:
     typer.echo(json.dumps(payload, indent=2, default=str))
 
 
+# Version of the ``--format json`` envelope itself (issue #440), independent of
+# the per-flow SemVer ``version`` and the trace schema version (#393).  Bump the
+# MAJOR when the envelope's own shape changes incompatibly.
+CLI_SCHEMA_VERSION = "1"
+
+
+def emit_envelope(
+    data: object,
+    *,
+    status: str = "ok",
+    errors: list[dict[str, Any]] | None = None,
+) -> None:
+    """Emit *data* wrapped in the documented machine-readable CLI envelope (#440).
+
+    Shape — a stable, versioned top-level object so automation can branch on
+    ``status`` / error ``code`` instead of scraping human text::
+
+        {"schema_version": "1", "status": "ok" | "error",
+         "data": <command payload>, "errors": [{"code", "message"}]}
+
+    ``status`` defaults to ``"ok"``; pass ``"error"`` with *errors* on failure.
+    """
+    typer.echo(
+        json.dumps(
+            {
+                "schema_version": CLI_SCHEMA_VERSION,
+                "status": status,
+                "data": data,
+                "errors": errors or [],
+            },
+            indent=2,
+            default=str,
+        )
+    )
+
+
+def error_entry(exc: BaseException) -> dict[str, Any]:
+    """Render *exc* as one envelope ``errors`` entry, carrying its stable code (#390/#440)."""
+    code = getattr(exc, "code", None)
+    detail = getattr(exc, "detail", None)
+    return {
+        "code": code if isinstance(code, str) else None,
+        "message": str(detail) if detail is not None else str(exc),
+    }
+
+
 class OutputFormat(str, Enum):
     """Output format options for ``chainweaver inspect``."""
 

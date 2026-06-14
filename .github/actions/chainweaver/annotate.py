@@ -47,9 +47,17 @@ def _emit_error(path: str, message: str) -> None:
 def render(payload: Any) -> int:
     """Emit annotations for a ``check`` payload; return the invalid-file count.
 
-    Always prints a one-line summary for the recognised ``check`` shape
-    (``{"results": [...], ...}``); other shapes are ignored.
+    Accepts the ``--format json`` envelope (issue #440) —
+    ``{"schema_version": ..., "status": ..., "data": {"results": [...]}, ...}``
+    — unwrapping ``data`` before rendering.  The legacy un-enveloped
+    ``{"results": [...]}`` shape is still tolerated; other shapes are ignored.
     """
+    if (
+        isinstance(payload, dict)
+        and "schema_version" in payload
+        and isinstance(payload.get("data"), dict)
+    ):
+        payload = payload["data"]
     if not (isinstance(payload, dict) and isinstance(payload.get("results"), list)):
         return 0
 

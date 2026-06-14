@@ -10,12 +10,13 @@ import typer
 
 from chainweaver.cli._shared import (
     OutputFormat,
-    _emit_json,
     _iter_flow_files,
     _load_flow_file,
     _require_existing_dir,
     _require_existing_file,
     app,
+    emit_envelope,
+    error_entry,
 )
 from chainweaver.exceptions import (
     FlowSerializationError,
@@ -65,13 +66,17 @@ def validate_command(
         flow = _load_flow_file(file_path)
     except FlowSerializationError as exc:
         if output_format is OutputFormat.JSON:
-            _emit_json({"path": str(file_path), "valid": False, "error": exc.detail})
+            emit_envelope(
+                {"path": str(file_path), "valid": False, "error": exc.detail},
+                status="error",
+                errors=[error_entry(exc)],
+            )
         else:
             typer.echo(f"INVALID  {file_path}: {exc.detail}", err=True)
         raise typer.Exit(code=1) from exc
 
     if output_format is OutputFormat.JSON:
-        _emit_json(
+        emit_envelope(
             {
                 "path": str(file_path),
                 "valid": True,
@@ -134,13 +139,14 @@ def check_command(
             typer.echo(f"OK       {path}: {flow.name} v{flow.version} [{kind}]")
 
     if output_format is OutputFormat.JSON:
-        _emit_json(
+        emit_envelope(
             {
                 "directory": str(directory),
                 "valid_count": valid_count,
                 "invalid_count": invalid_count,
                 "results": results,
-            }
+            },
+            status="error" if invalid_count > 0 else "ok",
         )
     elif not quiet:
         typer.echo(f"\n{valid_count} valid, {invalid_count} invalid")
