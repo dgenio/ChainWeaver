@@ -587,13 +587,36 @@ input/output validation.
 ```python
 FlowStep(
     tool_name="my_tool",
-    input_mapping={"key_for_tool": "key_from_context"},
+    input_mapping={
+        "key_for_tool": "key_from_context",   # flat top-level lookup
+        "city": "/user/address/city",         # RFC-6901 pointer into nested context
+        "limit": 10,                          # non-string -> literal constant
+    },
+    output_mapping={"renamed": "value"},      # rename/prune outputs before merge
 )
 ```
 
-Maps keys from the accumulated execution context into the tool's input schema.
-String values are looked up in the context; non-string values are treated as
-literal constants.
+`input_mapping` maps keys from the accumulated execution context into the
+tool's input schema. String values are looked up in the context — a plain key
+is a top-level lookup, and a string starting with `/` is an RFC-6901 JSON
+pointer into the nested context (#387) — while non-string values are literal
+constants.
+
+`output_mapping` (#386) optionally renames and prunes a tool's outputs before
+they merge into the context: `{context_key: output_key}` keeps only the listed
+output keys, each renamed. Omit it to merge every output key verbatim.
+
+To inject per-request secrets that must never appear in a model-visible schema
+(auth tokens, account numbers), pass them at execute-time instead of in
+`initial_input`:
+
+```python
+result = executor.execute_flow(
+    "account_overview",
+    {"query": "what's my balance?"},          # LLM-visible
+    dynamic_params={"billingAccountNumber": "1.60007029"},  # hidden, injected (#316)
+)
+```
 
 #### `Flow`
 

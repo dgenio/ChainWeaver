@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import queue
 import threading
 import time
@@ -28,7 +29,8 @@ from typing import Any, NoReturn
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
-from chainweaver._execution import merge_step_outputs
+from chainweaver._execution import apply_output_mapping, merge_step_outputs
+from chainweaver._pointer import PointerResolutionError, is_pointer, resolve_pointer
 from chainweaver._versions import SNAPSHOT_VERSION, TRACE_SCHEMA_VERSION, same_major
 from chainweaver.approvals import (
     ApprovalCallable,
@@ -130,20 +132,28 @@ class _StreamSentinel:
 _STREAM_SENTINEL: _StreamSentinel = _StreamSentinel()
 
 
-class _RunScopedState(threading.local):
-    """Per-thread run-scoped executor state (issue #336).
+class _RunScopedState:
+    """Run-scoped executor state (issue #336).
 
-    Subclassing :class:`threading.local` so the slots default per thread keeps
-    the hot ``_fire_hook`` path a plain attribute read — no ``getattr`` default
-    and no per-call ``AttributeError`` round-trip — and, crucially, isolates the
-    per-run markers so concurrent ``execute_flow`` / ``execute_flow_async`` calls
-    on one executor never race:
+    A plain attribute container held in a :class:`contextvars.ContextVar` rather
+    than a :class:`threading.local` slot.  A ContextVar isolates the state both
+    **per thread** (a freshly spawned thread starts with an empty context, so it
+    gets its own state — matching the old ``threading.local`` behaviour) **and
+    per asyncio task**: concurrent ``execute_flow_async`` calls scheduled on the
+    same event-loop thread each run in their own copied context, so they no
+    longer share — and clobber — one another's markers across an ``await``.  That
+    closes the cross-contamination window ``threading.local`` left open for
+    ``dynamic_params`` (often per-request secrets) and the other run markers.
+
+    Each public entry point (:meth:`FlowExecutor._run_scope`) binds a *fresh
+    copy* of the enclosing state, so sub-flow recursion still inherits the
+    parent's values while concurrent tasks stay isolated.
 
     - ``middleware``: run-scoped lifecycle middleware (e.g. the ``stream_flow``
       event collector), composed on top of the shared ``self._middleware``.
-    - ``active_flow_version``: version of the flow currently executing on this
-      thread (#201); ``_make_result`` stamps ``ExecutionResult.flow_version``
-      from it. Sub-flow recursion save/restores it on the same thread.
+    - ``active_flow_version``: version of the flow currently executing in this
+      scope (#201); ``_make_result`` stamps ``ExecutionResult.flow_version``
+      from it. Sub-flow recursion inherits it via the scoped copy.
     - ``in_replay``: ``True`` while inside ``replay_flow`` so the step cache is
       bypassed (replay must always re-execute).
     - ``resume_snapshot``: the snapshot a ``resume_flow`` call is resuming from,
@@ -158,10 +168,36 @@ class _RunScopedState(threading.local):
         # Dry-run mode (issue #357): set for the duration of an
         # ``execute_flow(dry_run=True)`` call.  ``dry_run_unsupported`` is the
         # policy applied to side-effecting steps that declare no ``dry_run_fn``
-        # ("skip" stubs them, "abort" fails the step).  Both are save/restored
-        # around sub-flow recursion alongside ``active_flow_version``.
+        # ("skip" stubs them, "abort" fails the step).  Both are inherited by
+        # sub-flow recursion through the scoped copy alongside
+        # ``active_flow_version``.
         self.dry_run: bool = False
         self.dry_run_unsupported: str = "skip"
+        # Dynamic parameter injection (issue #316): params supplied at
+        # execute-time and merged into the running context after input_schema
+        # validation, so they reach every step's input_mapping and the final
+        # output without ever appearing in the LLM-visible input_schema.  Set
+        # for the duration of an ``execute_flow(dynamic_params=...)`` call and
+        # inherited by sub-flow recursion like the dry-run markers.
+        self.dynamic_params: dict[str, Any] = {}
+
+    def copy(self) -> _RunScopedState:
+        """Return a shallow per-scope clone (mutable containers duplicated).
+
+        :meth:`FlowExecutor._run_scope` binds this clone so a nested or
+        concurrent scope can mutate its markers without disturbing the scope it
+        inherited from.  ``resume_snapshot`` is shared by reference — it is read
+        only, never mutated in place.
+        """
+        clone = _RunScopedState()
+        clone.middleware = list(self.middleware)
+        clone.active_flow_version = self.active_flow_version
+        clone.in_replay = self.in_replay
+        clone.resume_snapshot = self.resume_snapshot
+        clone.dry_run = self.dry_run
+        clone.dry_run_unsupported = self.dry_run_unsupported
+        clone.dynamic_params = dict(self.dynamic_params)
+        return clone
 
 
 class _StreamCollectorMiddleware(BaseMiddleware):
@@ -602,9 +638,13 @@ class FlowExecutor:
     instance supports **concurrent** :meth:`execute_flow`,
     :meth:`execute_flow_async`, and :meth:`stream_flow` calls.  Run-scoped
     state — the stream event collector and (where applicable) replay/resume
-    markers — is held per-thread on a :class:`threading.local` slot rather
-    than the shared instance, so concurrent runs never dispatch each other's
-    lifecycle events.  The bundled :class:`~chainweaver.cache.InMemoryStepCache`
+    markers and injected ``dynamic_params`` — is held in a per-instance
+    :class:`contextvars.ContextVar` rather than the shared instance, so
+    concurrent runs never dispatch each other's lifecycle events.  Because it is
+    a ContextVar (not a :class:`threading.local`), this isolation holds for
+    concurrent ``execute_flow_async`` tasks sharing one event-loop thread, not
+    just for separate OS threads.  The bundled
+    :class:`~chainweaver.cache.InMemoryStepCache`
     and :class:`~chainweaver.checkpoint.InMemoryCheckpointer` are internally
     locked, so sharing them across one executor's concurrent runs is safe.
 
@@ -697,13 +737,18 @@ class FlowExecutor:
         self._redaction_policy = redaction_policy
         self._trace_recorder = trace_recorder
         self._middleware: list[FlowExecutorMiddleware] = list(middleware) if middleware else []
-        # Per-run, per-thread middleware (issue #336).  ``stream_flow`` and any
-        # other run-scoped observer registers here instead of mutating the
-        # shared ``self._middleware`` list, so two concurrent runs on one
-        # executor never dispatch each other's events.  Keyed by thread because
-        # each run executes within a single thread (the calling thread, or the
-        # stream worker thread).
-        self._local = _RunScopedState()
+        # Per-run middleware (issue #336).  ``stream_flow`` and any other
+        # run-scoped observer registers here instead of mutating the shared
+        # ``self._middleware`` list, so two concurrent runs on one executor
+        # never dispatch each other's events.  The run-scoped state lives in a
+        # per-instance :class:`contextvars.ContextVar`, which isolates it per
+        # thread *and* per asyncio task (see :class:`_RunScopedState`).  The var
+        # is per-instance (not module-level) so two executors never share state;
+        # executors are expected to be long-lived, so the ContextVar registry
+        # cost is negligible.
+        self._state_var: contextvars.ContextVar[_RunScopedState] = contextvars.ContextVar(
+            f"chainweaver._run_scoped_state.{id(self):x}"
+        )
         # Guided decision-point callback (issue #102).  Wraps a bare
         # callable in an adapter so the executor can call
         # ``self._decision_callback.decide(ctx)`` uniformly regardless
@@ -739,14 +784,14 @@ class FlowExecutor:
         self._delete_on_success = delete_on_success
         # Per-run markers — the in-replay flag (cache bypass), the resume
         # snapshot, and the executing flow version (#201) — live on the
-        # per-thread ``_RunScopedState`` (issue #336) alongside the stream
-        # collector, not the shared instance, so concurrent runs of different
-        # flows/versions never stamp each other's ``flow_version`` or bypass
-        # the cache.  Sub-flow composition (#75) recurses through
-        # ``execute_flow`` on the *same* thread and save/restores
-        # ``_local.active_flow_version`` around the recursive call, so the
-        # parent's value is not clobbered; replay/resume set/restore their
-        # markers on the same thread too.
+        # contextvar-backed ``_RunScopedState`` (issue #336) alongside the
+        # stream collector, not the shared instance, so concurrent runs of
+        # different flows/versions never stamp each other's ``flow_version`` or
+        # bypass the cache.  Sub-flow composition (#75) recurses through
+        # ``execute_flow``, which binds a scoped copy that inherits
+        # ``active_flow_version`` and restores the parent's on exit, so the
+        # parent's value is not clobbered; replay/resume scope their markers
+        # the same way.
         # Flow composition (issue #75): the maximum nesting depth of
         # ``flow_name`` sub-flow references.  Checked statically before
         # execution so runaway / cyclic recursion fails loudly.
@@ -845,11 +890,53 @@ class FlowExecutor:
                     exc,
                 )
 
+    @property
+    def _local(self) -> _RunScopedState:
+        """The run-scoped state bound to the current thread / asyncio task.
+
+        Lazily seeds a fresh :class:`_RunScopedState` the first time it is
+        touched outside a :meth:`_run_scope` block (e.g. a bare ``stream_flow``
+        worker thread), preserving the ``threading.local`` invariant that the
+        state is always available.
+        """
+        state = self._state_var.get(None)
+        if state is None:
+            state = _RunScopedState()
+            self._state_var.set(state)
+        return state
+
+    @contextlib.contextmanager
+    def _run_scope(self) -> Iterator[_RunScopedState]:
+        """Bind a fresh per-scope copy of the run-scoped state for one run.
+
+        Public entry points (:meth:`execute_flow`, :meth:`execute_flow_async`,
+        :meth:`replay_flow`) wrap their body in this scope.  The bound state is a
+        :meth:`_RunScopedState.copy` of the enclosing scope (or a fresh default
+        when there is none), so:
+
+        - **sub-flow recursion** inherits the parent's ``dynamic_params`` /
+          ``dry_run`` / ``active_flow_version`` (it copies them forward); and
+        - **concurrent asyncio tasks** each mutate their own copy — a
+          ``ContextVar.set`` inside one task never leaks into another, even when
+          the parent context already bound a state (closing the
+          ``threading.local`` cross-task leak, issue #336).
+
+        Resetting the token on exit restores the enclosing scope wholesale, so
+        the markers a run mutated never outlive it.
+        """
+        parent = self._state_var.get(None)
+        state = parent.copy() if parent is not None else _RunScopedState()
+        token = self._state_var.set(state)
+        try:
+            yield state
+        finally:
+            self._state_var.reset(token)
+
     @contextlib.contextmanager
     def _scoped_middleware(self, middleware: FlowExecutorMiddleware) -> Iterator[None]:
-        """Register *middleware* for the duration of the current thread's run.
+        """Register *middleware* for the duration of the current run.
 
-        Run-scoped middleware lives on a :class:`threading.local` slot rather
+        Run-scoped middleware lives on the contextvar-backed run state rather
         than the shared ``self._middleware`` list, so concurrent runs on one
         executor (issue #336) never see each other's run-scoped observers.
         """
@@ -1058,18 +1145,16 @@ class FlowExecutor:
 
         # Bypass the step cache for the duration of replay — replay
         # must always re-execute tools (per the existing replay
-        # semantics and issue #127's acceptance criteria).
-        previous_in_replay = self._local.in_replay
-        self._local.in_replay = True
-        try:
+        # semantics and issue #127's acceptance criteria).  The scoped copy
+        # carries ``in_replay=True`` into the nested ``execute_flow`` call.
+        with self._run_scope() as state:
+            state.in_replay = True
             if resume_from_step <= 0:
                 new_result = self.execute_flow(result.flow_name, dict(result.initial_input))
             else:
                 if isinstance(flow, DAGFlow):
                     raise ValueError("resume_from_step is not supported for DAGFlow yet.")
                 new_result = self._replay_linear_from(flow, result, resume_from_step)
-        finally:
-            self._local.in_replay = previous_in_replay
 
         diffs: list[StepDiff] = []
         if mode is ReplayMode.VERIFY:
@@ -1102,7 +1187,23 @@ class FlowExecutor:
         # invocations).
         context: dict[str, Any] = dict(result.initial_input)
         for record in result.execution_log[:resume_from_step]:
-            if record.outputs:
+            if not record.outputs:
+                continue
+            # Re-apply the step's output_mapping (#386) so the reconstructed
+            # context matches what the original run merged.  Records that are
+            # not a plain step (e.g. a flow-input validation record at index
+            # -1) fall back to a verbatim merge.
+            if 0 <= record.step_index < len(flow.steps):
+                replayed_step = flow.steps[record.step_index]
+                context.update(
+                    apply_output_mapping(
+                        record.outputs,
+                        replayed_step.output_mapping,
+                        tool_name=replayed_step.display_name,
+                        step_index=record.step_index,
+                    )
+                )
+            else:
                 context.update(record.outputs)
 
         trace_id = _new_trace_id()
@@ -1139,7 +1240,14 @@ class FlowExecutor:
                 )
 
             assert step_record.outputs is not None
-            context.update(step_record.outputs)
+            context.update(
+                apply_output_mapping(
+                    step_record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
 
         return self._make_result(
             flow_name=flow.name,
@@ -1255,9 +1363,17 @@ class FlowExecutor:
                 if tool is not None:
                     input_schema_shape = _schema_field_shape(tool.input_schema)
                     output_schema_shape = _schema_field_shape(tool.output_schema)
-                    # Merge the projected output keys into the cumulative context.
-                    for field_name, field_type in output_schema_shape.items():
-                        projected_context[field_name] = field_type
+                    # Merge the projected output keys into the cumulative context,
+                    # honouring output_mapping (#386): a mapped step contributes
+                    # its renamed context keys, not the raw tool output fields.
+                    if step.output_mapping is None:
+                        for field_name, field_type in output_schema_shape.items():
+                            projected_context[field_name] = field_type
+                    else:
+                        for context_key, output_key in step.output_mapping.items():
+                            projected_context[context_key] = output_schema_shape.get(
+                                output_key, "Any"
+                            )
 
             if unresolved:
                 any_warnings = True
@@ -1297,7 +1413,14 @@ class FlowExecutor:
         sources: dict[str, str] = {}
         for target_key, raw in step.input_mapping.items():
             if isinstance(raw, str):
-                if raw in projected_context:
+                # For a JSON pointer (#387) only the first token is a context
+                # key; the rest addresses nested structure the static projection
+                # cannot see, so resolvability is judged on that first token.
+                lookup = raw
+                if is_pointer(raw):
+                    tokens = raw[1:].split("/")
+                    lookup = tokens[0].replace("~1", "/").replace("~0", "~")
+                if lookup in projected_context:
                     sources[target_key] = f"context['{raw}']"
                 else:
                     sources[target_key] = f"context['{raw}'] (UNRESOLVED)"
@@ -1317,11 +1440,13 @@ class FlowExecutor:
         cancel_token: CancellationToken | None = None,
         dry_run: bool = False,
         dry_run_unsupported: str = "skip",
+        dynamic_params: dict[str, Any] | None = None,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
 
-        See :meth:`_execute_flow_impl` for the full parameter reference; the two
-        extra keyword arguments here add the opt-in dry-run mode (issue #357):
+        See :meth:`_execute_flow_impl` for the full parameter reference; the
+        extra keyword arguments here add the opt-in dry-run mode (issue #357)
+        and runtime dynamic-parameter injection (issue #316):
 
         Args:
             dry_run: When ``True``, run the flow as a side-effect-free rehearsal.
@@ -1336,6 +1461,13 @@ class FlowExecutor:
                 ``dry_run_fn`` under ``dry_run=True``: ``"skip"`` (the default)
                 records a ``skipped`` stub and continues; ``"abort"`` fails the
                 step for a high-fidelity rehearsal.
+            dynamic_params: Optional parameters merged into the running context
+                *after* ``input_schema`` validation, so they are available to
+                every step's ``input_mapping`` and flow through to the final
+                output without appearing in the LLM-visible ``input_schema``
+                (issue #316).  Use this for per-request secrets — auth tokens,
+                account numbers — that a model must never see or hallucinate.
+                Composed sub-flows (#75) inherit the injected params.
 
         Returns:
             An :class:`ExecutionResult`; ``dry_run`` reflects the mode it ran in.
@@ -1344,16 +1476,18 @@ class FlowExecutor:
             raise ValueError(
                 f"dry_run_unsupported must be 'skip' or 'abort', got {dry_run_unsupported!r}."
             )
-        # Save/restore the per-thread dry-run markers so a composed sub-flow
-        # (#75) inherits the parent's mode and a later normal call on the same
-        # thread is unaffected.  ``dry_run or previous`` lets a nested call with
-        # the default ``dry_run=False`` stay in the parent's dry run.
-        previous_dry_run = self._local.dry_run
-        previous_unsupported = self._local.dry_run_unsupported
-        self._local.dry_run = dry_run or previous_dry_run
-        if dry_run:
-            self._local.dry_run_unsupported = dry_run_unsupported
-        try:
+        # Bind a scoped copy of the run state so a composed sub-flow (#75)
+        # inherits the parent's mode (the copy carries it forward) and a later
+        # call — or a concurrent asyncio task — is unaffected once the scope
+        # exits.  ``dry_run or state.dry_run`` lets a nested call with the
+        # default ``dry_run=False`` stay in the parent's dry run.  Dynamic
+        # params (#316) merge onto the inherited copy the same way.
+        with self._run_scope() as state:
+            state.dry_run = dry_run or state.dry_run
+            if dry_run:
+                state.dry_run_unsupported = dry_run_unsupported
+            if dynamic_params is not None:
+                state.dynamic_params = {**state.dynamic_params, **dynamic_params}
             return self._execute_flow_impl(
                 flow_name,
                 initial_input,
@@ -1362,9 +1496,6 @@ class FlowExecutor:
                 deadline=deadline,
                 cancel_token=cancel_token,
             )
-        finally:
-            self._local.dry_run = previous_dry_run
-            self._local.dry_run_unsupported = previous_unsupported
 
     def _execute_flow_impl(
         self,
@@ -1480,7 +1611,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
@@ -1554,6 +1688,7 @@ class FlowExecutor:
                 step_index=idx,
                 step_name=step.display_name,
                 logger=_logger,
+                output_mapping=step.output_mapping,
             )
 
             # Crash-resume checkpoint (issue #128) — write after every
@@ -1643,6 +1778,7 @@ class FlowExecutor:
         force: bool = False,
         deadline: float | None = None,
         cancel_token: CancellationToken | None = None,
+        dynamic_params: dict[str, Any] | None = None,
     ) -> ExecutionResult:
         """Asynchronously execute a registered flow (issue #80).
 
@@ -1688,6 +1824,10 @@ class FlowExecutor:
                 between steps / DAG levels, mirroring :meth:`execute_flow`.
             cancel_token: Optional :class:`CancellationToken` (issue #142);
                 checked between steps / DAG levels.
+            dynamic_params: Optional parameters merged into the running context
+                after ``input_schema`` validation and hidden from the
+                LLM-visible ``input_schema`` (issue #316); see
+                :meth:`execute_flow` for full semantics.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
@@ -1706,13 +1846,20 @@ class FlowExecutor:
 
         self._assert_async_lane_supported(flow)
 
-        if isinstance(flow, DAGFlow):
-            return await self._execute_dag_flow_async(
+        # A scoped copy per call is what makes concurrent ``execute_flow_async``
+        # tasks on one event-loop thread safe: each task mutates its own
+        # ``dynamic_params`` copy, so secrets injected by one no longer leak into
+        # another across the ``await`` below (issue #336).
+        with self._run_scope() as state:
+            if dynamic_params is not None:
+                state.dynamic_params = {**state.dynamic_params, **dynamic_params}
+            if isinstance(flow, DAGFlow):
+                return await self._execute_dag_flow_async(
+                    flow, initial_input, deadline=deadline, cancel_token=cancel_token
+                )
+            return await self._execute_linear_flow_async(
                 flow, initial_input, deadline=deadline, cancel_token=cancel_token
             )
-        return await self._execute_linear_flow_async(
-            flow, initial_input, deadline=deadline, cancel_token=cancel_token
-        )
 
     @staticmethod
     def _assert_async_lane_supported(flow: Any) -> None:
@@ -1805,7 +1952,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
         for idx, step in enumerate(flow.steps):
             # Cooperative cancellation at the step boundary (issue #142).
@@ -1845,6 +1995,7 @@ class FlowExecutor:
                 step_index=idx,
                 step_name=step.display_name,
                 logger=_logger,
+                output_mapping=step.output_mapping,
             )
 
         if flow.output_schema is not None:
@@ -1932,7 +2083,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
         flat_index = 0
         levels = self._compute_dag_levels(flow)
@@ -2016,7 +2170,16 @@ class FlowExecutor:
                         initial_input=initial_input,
                     )
                 assert record.outputs is not None
-                for key, value in record.outputs.items():
+                # Project each step's outputs through its output_mapping (#386)
+                # before sibling-collision detection and the level merge, so
+                # collisions are judged on the keys that actually reach context.
+                mapped_outputs = apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=record.step_index,
+                )
+                for key, value in mapped_outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
                             step.display_name,
@@ -2994,7 +3157,14 @@ class FlowExecutor:
                 )
 
             assert record.outputs is not None  # success guarantees outputs
-            context.update(record.outputs)
+            context.update(
+                apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
 
             self._save_linear_snapshot(
                 trace_id=trace_id,
@@ -3164,6 +3334,11 @@ class FlowExecutor:
 
         If *input_mapping* is empty the full *context* is returned as-is.
 
+        String mapping values are resolved against *context*: a plain key is a
+        top-level lookup, while a string starting with ``/`` is an RFC-6901 JSON
+        pointer resolved against the nested context (issue #387).  Non-string
+        values are literal constants.
+
         Args:
             step: The flow step whose inputs need to be resolved.
             context: The accumulated context built from the initial input and
@@ -3174,8 +3349,8 @@ class FlowExecutor:
             A dictionary ready to be passed to the tool.
 
         Raises:
-            InputMappingError: When a string mapping value is not present in
-                *context*.
+            InputMappingError: When a plain key is absent from *context* or a
+                JSON pointer cannot be resolved against it.
         """
         if not step.input_mapping:
             return dict(context)
@@ -3184,9 +3359,15 @@ class FlowExecutor:
         step_label = step.display_name or step.flow_name or "<step>"
         for target_key, source in step.input_mapping.items():
             if isinstance(source, str):
-                if source not in context:
+                if is_pointer(source):
+                    try:
+                        resolved[target_key] = resolve_pointer(context, source)
+                    except PointerResolutionError as exc:
+                        raise InputMappingError(step_label, step_index, exc.failed_at) from exc
+                elif source not in context:
                     raise InputMappingError(step_label, step_index, source)
-                resolved[target_key] = context[source]
+                else:
+                    resolved[target_key] = context[source]
             else:
                 # Literal constant — use the value directly.
                 resolved[target_key] = source
@@ -3345,9 +3526,10 @@ class FlowExecutor:
             )
         )
 
-        # Recurse. ``execute_flow`` resets ``_active_flow_version`` to the
-        # sub-flow's version; save and restore so the parent's result is
-        # stamped with the parent's version.  Forward the parent's
+        # Recurse. ``execute_flow`` now runs the sub-flow in its own
+        # ``_run_scope``, so it no longer clobbers the parent's
+        # ``active_flow_version``; this save/restore is a defensive belt-and-
+        # suspenders that also documents the dependency.  Forward the parent's
         # ``deadline`` / ``cancel_token`` so flow-level cancellation and the
         # wall-clock budget are observed *between* the sub-flow's own steps,
         # not just at the parent boundary (issue #142). The deadline is an
@@ -4345,7 +4527,8 @@ class FlowExecutor:
             log = list(resume.execution_log)
             flat_index = len(log)
         else:
-            context = dict(initial_input)
+            # Layer dynamic params (#316) over the validated initial input.
+            context = {**initial_input, **self._local.dynamic_params}
             log = []
             flat_index = 0
         levels = self._compute_dag_levels(flow)
@@ -4469,7 +4652,13 @@ class FlowExecutor:
                             initial_input=initial_input,
                         )
                     assert record.outputs is not None
-                    for key, value in record.outputs.items():
+                    mapped_outputs = apply_output_mapping(
+                        record.outputs,
+                        step.output_mapping,
+                        tool_name=step.display_name,
+                        step_index=record.step_index,
+                    )
+                    for key, value in mapped_outputs.items():
                         if key in level_outputs:
                             conflict_err = FlowExecutionError(
                                 step.display_name,
@@ -4575,8 +4764,17 @@ class FlowExecutor:
                     )
 
                 assert record.outputs is not None  # success guarantees outputs
+                # Project through output_mapping (#386) before sibling-conflict
+                # detection, the level merge, and branch evaluation, so every
+                # downstream check sees the keys that actually reach context.
+                mapped_outputs = apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=record.step_index,
+                )
                 # Detect sibling key conflicts to preserve determinism.
-                for key, value in record.outputs.items():
+                for key, value in mapped_outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
                             step.display_name,
@@ -4624,7 +4822,7 @@ class FlowExecutor:
                         step=step,
                         context=context,
                         level_outputs=level_outputs,
-                        step_outputs=record.outputs,
+                        step_outputs=mapped_outputs,
                     )
                     if isinstance(branch_outcome, PredicateSyntaxError):
                         err_type, err_msg = _exc_to_strings(branch_outcome)

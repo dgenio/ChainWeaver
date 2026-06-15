@@ -106,6 +106,27 @@ class InputMappingError(ChainWeaverError):
         )
 
 
+class OutputMappingError(ChainWeaverError):
+    """Raised when a step's ``output_mapping`` references a missing output key.
+
+    The mapping renames/prunes a tool's validated outputs before they merge into
+    the execution context (issue #386); this fires when a mapped ``output_key``
+    is not among the keys the tool actually produced.
+    """
+
+    def __init__(
+        self, tool_name: str, step_index: int, output_key: str, available: list[str]
+    ) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.output_key = output_key
+        self.available = available
+        super().__init__(
+            f"Output mapping references key '{output_key}' not produced by tool "
+            f"'{tool_name}' at step {step_index}. Available output keys: {sorted(available)}."
+        )
+
+
 class FlowExecutionError(ChainWeaverError):
     """Raised when a flow step raises an unexpected runtime error."""
 
@@ -820,6 +841,7 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     OfflineLLMError: "CW-E034",
     AgentTraceImportError: "CW-E035",
     PredicateSyntaxError: "CW-E036",
+    OutputMappingError: "CW-E041",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

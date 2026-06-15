@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from chainweaver._pointer import PointerResolutionError, parse_pointer, resolve_pointer
 from chainweaver.decorators import tool
 from chainweaver.exceptions import ContribError
 from chainweaver.tools import Tool
@@ -50,65 +51,27 @@ if TYPE_CHECKING:  # pragma: no cover — type-only references
 def _parse_pointer(pointer: str, *, tool_name: str) -> list[str]:
     """Split a RFC-6901 JSON pointer into its decoded reference tokens.
 
-    Tokens are decoded per the spec: ``~1`` → ``/``, ``~0`` → ``~``,
-    in that order.  An empty pointer ``""`` refers to the whole
-    document and yields ``[]``.
-
-    Raises:
-        ContribError: When *pointer* does not start with ``"/"`` (the
-            only legal form for a non-empty pointer).
+    Thin wrapper over :func:`chainweaver._pointer.parse_pointer` that translates
+    the shared resolver's private error into :class:`ContribError`, preserving
+    this module's public error contract.
     """
-    if pointer == "":
-        return []
-    if not pointer.startswith("/"):
-        raise ContribError(
-            tool_name,
-            f"JSON pointer '{pointer}' must start with '/' (RFC 6901)",
-        )
-    # Strip the leading "/" before splitting so ``"/"`` yields ``[""]``
-    # (the root child whose key is the empty string — a legal RFC-6901
-    # token, even if rare).
-    raw_tokens = pointer[1:].split("/")
-    return [t.replace("~1", "/").replace("~0", "~") for t in raw_tokens]
+    try:
+        return parse_pointer(pointer)
+    except PointerResolutionError as exc:
+        raise ContribError(tool_name, str(exc)) from exc
 
 
 def _pointer_get(data: Any, pointer: str, *, tool_name: str) -> Any:
     """Resolve *pointer* against *data*, returning the referenced value.
 
-    Walks ``dict`` and ``list`` shapes per RFC 6901.  Missing keys,
-    out-of-range list indices, and non-integer tokens on a list raise
-    :class:`ContribError` rather than ``KeyError`` / ``IndexError`` so
-    callers can match on a single ChainWeaver exception type.
+    Delegates to the shared :func:`chainweaver._pointer.resolve_pointer` (used by
+    the executor's ``input_mapping`` pointer support too) and re-raises any miss
+    as :class:`ContribError` so contrib callers keep matching one exception type.
     """
-    tokens = _parse_pointer(pointer, tool_name=tool_name)
-    current: Any = data
-    for idx, token in enumerate(tokens):
-        path = "/" + "/".join(tokens[: idx + 1])
-        if isinstance(current, dict):
-            if token not in current:
-                raise ContribError(tool_name, f"JSON pointer '{path}' not found")
-            current = current[token]
-        elif isinstance(current, list):
-            try:
-                position = int(token)
-            except ValueError as exc:
-                raise ContribError(
-                    tool_name,
-                    f"JSON pointer '{path}' addresses a list but token "
-                    f"'{token}' is not an integer",
-                ) from exc
-            if position < 0 or position >= len(current):
-                raise ContribError(
-                    tool_name,
-                    f"JSON pointer '{path}' out of range for list of length {len(current)}",
-                )
-            current = current[position]
-        else:
-            raise ContribError(
-                tool_name,
-                f"JSON pointer '{path}' cannot descend into {type(current).__name__}",
-            )
-    return current
+    try:
+        return resolve_pointer(data, pointer)
+    except PointerResolutionError as exc:
+        raise ContribError(tool_name, str(exc)) from exc
 
 
 def _pointer_set(

@@ -14,6 +14,6 @@ module (see ``docs/agent-context/invariants.md`` and
 
 from __future__ import annotations
 
-from chainweaver._execution.context import merge_step_outputs
+from chainweaver._execution.context import apply_output_mapping, merge_step_outputs
 
-__all__ = ["merge_step_outputs"]
+__all__ = ["apply_output_mapping", "merge_step_outputs"]
