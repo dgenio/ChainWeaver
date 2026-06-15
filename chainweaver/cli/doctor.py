@@ -416,14 +416,20 @@ _OPENCODE_FLOWSERVER_SNIPPET = """{
 }"""
 
 
+# Matches a JSON string literal (with escapes) OR a block / line comment. The
+# string alternative comes first so comment markers *inside* strings (e.g. the
+# ``//`` in a ``"https://…"`` URL) are matched as part of the string and kept.
+_JSONC_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*', re.DOTALL)
+
+
 def _strip_jsonc_comments(text: str) -> str:
     """Strip ``//`` line and ``/* */`` block comments from JSONC text.
 
-    Deliberately simple — good enough for editor config files, which do not, in
-    practice, embed comment markers inside string literals.
+    String literals are preserved verbatim, so comment markers that appear
+    inside strings (such as ``//`` in a URL) are not removed and valid JSON is
+    never corrupted.
     """
-    no_block = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return re.sub(r"(?m)//.*$", "", no_block)
+    return _JSONC_TOKEN.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", text)
 
 
 def _load_json_config(path: Path) -> tuple[bool, dict[str, Any] | None, str | None]:
@@ -504,7 +510,7 @@ def _mcp_config_checks(
                     "detail": f"{config_path} is not valid JSON: {parse_error}",
                 }
             ],
-            [],
+            [f"Fix the JSON syntax in {config_path} so its MCP servers can be inspected."],
         )
     raw = data.get(servers_key) if isinstance(data, dict) else None
     servers = raw if isinstance(raw, dict) else {}
@@ -529,13 +535,15 @@ def _trace_dir_check(workspace: Path) -> dict[str, Any]:
             "status": "missing",
             "detail": f"no trace directory at {trace_dir}",
         }
-    files = [p for p in trace_dir.rglob("*") if p.is_file()]
+    # Stream the count rather than materialising every path: trace histories
+    # can be large and we only need "how many" / "any?".
+    file_count = sum(1 for p in trace_dir.rglob("*") if p.is_file())
     return {
         "name": "trace capture",
-        "status": "ok" if files else "info",
+        "status": "ok" if file_count else "info",
         "detail": (
-            f"{len(files)} trace file(s) under {trace_dir}"
-            if files
+            f"{file_count} trace file(s) under {trace_dir}"
+            if file_count
             else f"{trace_dir} exists but holds no trace files yet"
         ),
     }
@@ -645,7 +653,8 @@ def _claude_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
     checks.append(hooks_check)
     if hooks_check["status"] == "missing":
         recommendations.append(
-            "Add a PostToolUse hook in .claude/settings.json to passively capture tool traces."
+            "Add a PostToolUse hook in .claude/settings.local.json (local scope, kept out of "
+            "version control) to passively capture tool traces."
         )
     checks.append(_trace_dir_check(workspace))
     checks.append(_active_flows_check(workspace))
@@ -673,24 +682,33 @@ def _opencode_config_path(workspace: Path) -> Path:
 
 
 def _opencode_plugin_check(workspace: Path, config: dict[str, Any] | None) -> dict[str, Any]:
-    """Report whether an OpenCode ChainWeaver plugin is configured."""
+    """Report whether a *ChainWeaver* OpenCode plugin is configured.
+
+    Matching is ChainWeaver-specific so an unrelated plugin does not produce a
+    false-positive "ready" signal: a plugin file under ``.opencode/plugin/``
+    whose name mentions ``chainweaver``, or a ``plugin`` config entry that
+    references ``chainweaver``.
+    """
     plugin_dir = workspace / ".opencode" / "plugin"
-    if plugin_dir.is_dir() and any(plugin_dir.iterdir()):
+    if plugin_dir.is_dir():
+        for entry in plugin_dir.iterdir():
+            if entry.is_file() and _FLOWSERVER_HINT in entry.name.lower():
+                return {
+                    "name": "OpenCode plugin",
+                    "status": "ok",
+                    "detail": f"ChainWeaver plugin file '{entry.name}' present under {plugin_dir}",
+                }
+    plugin_cfg = config.get("plugin") if isinstance(config, dict) else None
+    if plugin_cfg is not None and _FLOWSERVER_HINT in json.dumps(plugin_cfg).lower():
         return {
             "name": "OpenCode plugin",
             "status": "ok",
-            "detail": f"plugin files present under {plugin_dir}",
-        }
-    if isinstance(config, dict) and config.get("plugin"):
-        return {
-            "name": "OpenCode plugin",
-            "status": "ok",
-            "detail": "a 'plugin' entry is declared in the OpenCode config",
+            "detail": "a ChainWeaver 'plugin' entry is declared in the OpenCode config",
         }
     return {
         "name": "OpenCode plugin",
         "status": "missing",
-        "detail": "no ChainWeaver OpenCode plugin (.opencode/plugin/) or config 'plugin' entry",
+        "detail": "no ChainWeaver OpenCode plugin (.opencode/plugin/) or 'plugin' config entry",
     }
 
 

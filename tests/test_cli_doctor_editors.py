@@ -202,7 +202,9 @@ class TestDoctorOpenCode:
     ) -> None:
         _write(tmp_path / "opencode.json", {"mcp": {"chainweaver": _flowserver_spec()}})
         (tmp_path / ".opencode" / "plugin").mkdir(parents=True)
-        (tmp_path / ".opencode" / "plugin" / "cw.js").write_text("// plugin\n", encoding="utf-8")
+        (tmp_path / ".opencode" / "plugin" / "chainweaver-observe.js").write_text(
+            "// plugin\n", encoding="utf-8"
+        )
         # A discoverable flow triggers the tool-name-collision reminder.
         (tmp_path / "etl.flow.yaml").write_text(
             "type: Flow\nname: etl\nversion: '0.1.0'\ndescription: d\nsteps: []\n",
@@ -222,9 +224,11 @@ class TestDoctorOpenCode:
     def test_jsonc_config_with_comments_parses(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        # The config has a real comment *and* a URL string containing "//":
+        # comment stripping must not corrupt the URL inside the string.
         (tmp_path / "opencode.jsonc").write_text(
             '{\n  // project MCP servers\n  "mcp": {"chainweaver": '
-            '{"command": "chainweaver"}}\n}\n',
+            '{"command": "chainweaver", "url": "https://example.test/mcp"}}\n}\n',
             encoding="utf-8",
         )
         exit_code = cli.main(
@@ -248,3 +252,31 @@ class TestDoctorOpenCode:
         by_name = {c["name"]: c for c in report["checks"]}
         assert by_name["OpenCode plugin"]["status"] == "missing"
         assert any("plugin" in rec for rec in report["recommendations"])
+
+    def test_unrelated_plugin_does_not_count_as_chainweaver(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # An unrelated plugin must not produce a false-positive "ready" signal.
+        _write(tmp_path / "opencode.json", {"mcp": {}, "plugin": ["some-other-plugin"]})
+        (tmp_path / ".opencode" / "plugin").mkdir(parents=True)
+        (tmp_path / ".opencode" / "plugin" / "unrelated.js").write_text("//\n", encoding="utf-8")
+        exit_code = cli.main(
+            ["doctor", "opencode", "--workspace", str(tmp_path), "--format", "json"]
+        )
+        report = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        by_name = {c["name"]: c for c in report["checks"]}
+        assert by_name["OpenCode plugin"]["status"] == "missing"
+
+    def test_invalid_json_config_recommends_fix(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "opencode.json").write_text("{ broken", encoding="utf-8")
+        exit_code = cli.main(
+            ["doctor", "opencode", "--workspace", str(tmp_path), "--format", "json"]
+        )
+        report = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        config_check = next(c for c in report["checks"] if c["name"] == "OpenCode MCP config")
+        assert config_check["status"] == "missing"
+        assert any("JSON syntax" in rec for rec in report["recommendations"])
