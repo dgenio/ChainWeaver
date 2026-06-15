@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`chainweaver init` project scaffolder** (#441): generate a runnable first
+  flow project — tool definitions, a `.flow.yaml`, and a `run.py` — in one
+  command, with `linear`, `dag`, and `mcp` templates, an optional `--with-tests`
+  passing pytest module, and printed next commands. Refuses to overwrite
+  existing files unless `--force` is given.
+- **`chainweaver explain`** (#420): a deterministic, LLM-free flow explanation
+  (steps, input/output mappings, branching conditions, governance/safety, and an
+  embedded Mermaid diagram) in Markdown (`--format md`, default) or `text`,
+  suitable for pasting into a PR. `--result trace.json` overlays actual step
+  outcomes. Output is stable across runs and works file-first without a
+  programmatic registry.
+- **Mermaid output and result overlays for `chainweaver viz`** (#392): `viz`
+  gains `--format mermaid` and a `--result trace.json` mode that renders an
+  `ExecutionResult` as a status/timing Mermaid overlay (file-only — no registry
+  or flow name required).
+- **First-run doctor profile** (#442): `chainweaver doctor --profile first-run`
+  checks environment readiness — Python version, optional-extra availability
+  (with the exact `pip install 'chainweaver[...]'` command), writable paths, and
+  core import health — and emits machine-readable JSON with `--format json`. No
+  flow *path* is required in this mode.
 - **CLI flow discovery for `inspect` / `viz`** (#381): both commands gain
   `--file`, `--discover-dir`, and `--discover-entry-points` so a flow can be
   resolved without a programmatic `set_default_registry` call. Resolution

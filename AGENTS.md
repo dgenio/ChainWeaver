@@ -95,10 +95,10 @@ chainweaver/
 ├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py
 ├── lessons.py         trace_to_lesson_candidate() + LessonCandidate/LessonEvidenceStep/LessonReview: normalise an ExecutionResult into a reviewable, workflow-scoped lesson candidate for lessonweaver (#210); no hard dep on lessonweaver; banned from executor.py
 ├── service.py         ChainWeaverService: continuous analyze→observe→propose→govern loop tying analyzer + observer + a proposal gate (#101); banned from executor.py
-├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
+├── viz.py             ASCII + Mermaid + DOT renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli/               typer-based CLI command package (#333): inspect/viz, validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor (--check-drift / --preflight), fuzz, service
+├── cli/               typer-based CLI command package (#333): inspect/viz (ascii/dot/mermaid + --result overlay, #392), explain (deterministic LLM-free review render, #420), init (project scaffolder, #441), validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor (--check-drift / --preflight / --profile first-run, #442), fuzz, service
 │   ├── __init__.py    Wires the command submodules, defines the ``main`` entry point, re-exports the stable surface (``app``, ``set_default_registry`` …)
 │   ├── _shared.py     Typer ``app`` / sub-apps, registry state, shared flow/result loading, error→exit-code handling, ``--format json`` envelope, and flow-resolution/discovery (#381, #440)
 │   └── <command>.py   One module per command group; each registers on the shared ``app`` at import time

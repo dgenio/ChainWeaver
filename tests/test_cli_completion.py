@@ -34,6 +34,8 @@ _EXPECTED_COMMANDS = (
     "suggest",
     "record",
     "doctor",
+    "explain",
+    "init",
     "fuzz",
     "dump-schema",
     "service",

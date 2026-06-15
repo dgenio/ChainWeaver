@@ -1,7 +1,13 @@
-"""``chainweaver doctor`` command (issue #175)."""
+"""``chainweaver doctor`` command (issues #175, #442)."""
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
+import importlib.util
+import sys
+import tempfile
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -201,9 +207,167 @@ def _run_doctor_preflight(
         raise typer.Exit(code=1)
 
 
+class DoctorProfile(str, Enum):
+    """Named diagnostic profiles for ``chainweaver doctor``."""
+
+    FIRST_RUN = "first-run"
+
+
+# Optional extras → the import name(s) that prove the extra is installed.
+# Keys match the ``pip install 'chainweaver[<extra>]'`` extra names.
+_EXTRA_IMPORTS: dict[str, tuple[str, ...]] = {
+    "yaml": ("yaml",),
+    "otel": ("opentelemetry",),
+    "mcp": ("mcp", "fastmcp"),
+    "langchain": ("langchain_core",),
+    "llamaindex": ("llama_index.core",),
+    "langgraph": ("langgraph",),
+    "openai-agents": ("agents",),
+    "test": ("hypothesis",),
+}
+
+
+def _module_available(module_name: str) -> bool:
+    """Return whether *module_name* can be imported, without importing it.
+
+    Uses :func:`importlib.util.find_spec` so probing heavy optional deps does
+    not pull them into the process.  A failed parent import (the module's
+    package is itself missing) is treated as unavailable rather than an error.
+    """
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def _probe_extras() -> list[dict[str, Any]]:
+    """Report availability of each optional extra and its install command."""
+    rows: list[dict[str, Any]] = []
+    for extra, modules in _EXTRA_IMPORTS.items():
+        missing = [m for m in modules if not _module_available(m)]
+        rows.append(
+            {
+                "extra": extra,
+                "available": not missing,
+                "missing_modules": missing,
+                "install": f"pip install 'chainweaver[{extra}]'",
+            }
+        )
+    return rows
+
+
+def _check_writable(path: Path) -> bool:
+    """Return whether a probe file can be created and removed under *path*."""
+    try:
+        with tempfile.NamedTemporaryFile(dir=path, prefix=".cw-doctor-", delete=True):
+            return True
+    except OSError:
+        return False
+
+
+def _first_run_report() -> dict[str, Any]:
+    """Assemble the first-run environment-readiness report (issue #442).
+
+    Critical checks (Python version, writable paths, core import health)
+    drive the ``ok`` flag; missing optional extras are advisory only.
+    """
+    py = sys.version_info
+    python_ok = py >= (3, 10)
+    cwd = Path.cwd()
+    tmp = Path(tempfile.gettempdir())
+    cwd_writable = _check_writable(cwd)
+    tmp_writable = _check_writable(tmp)
+    # Actually import the core module rather than only checking find_spec: a
+    # spec can resolve while the import still raises (e.g. a missing transitive
+    # dependency), and we want to surface that as not-ready.
+    try:
+        importlib.import_module("chainweaver.executor")
+        import_ok = True
+    except Exception:
+        # Any import-time failure (e.g. a missing transitive dep) means "not
+        # importable" for readiness purposes.
+        import_ok = False
+    # Resolve the version from installed metadata so the report does not depend
+    # on the package's runtime import state.
+    try:
+        cw_version = importlib.metadata.version("chainweaver")
+    except importlib.metadata.PackageNotFoundError:
+        cw_version = "unknown"
+
+    extras = _probe_extras()
+    critical_ok = python_ok and cwd_writable and tmp_writable and import_ok
+    return {
+        "ok": critical_ok,
+        "python": {
+            "version": f"{py.major}.{py.minor}.{py.micro}",
+            "ok": python_ok,
+            "required": ">=3.10",
+        },
+        "writable_paths": {
+            "cwd": {"path": str(cwd), "writable": cwd_writable},
+            "tempdir": {"path": str(tmp), "writable": tmp_writable},
+        },
+        "import_health": {
+            "chainweaver_version": cw_version,
+            "core_importable": import_ok,
+        },
+        "extras": extras,
+    }
+
+
+def _format_first_run_table(report: dict[str, Any]) -> str:
+    """Render the first-run report as a human-readable table."""
+    py = report["python"]
+    cwd = report["writable_paths"]["cwd"]
+    tmp = report["writable_paths"]["tempdir"]
+    health = report["import_health"]
+    cw_version = health["chainweaver_version"]
+
+    def _mark(ok: bool) -> str:
+        return "OK  " if ok else "FAIL"
+
+    lines = [
+        "ChainWeaver first-run readiness",
+        "─" * 60,
+        f" [{_mark(py['ok'])}] Python {py['version']} (required {py['required']})",
+        f" [{_mark(cwd['writable'])}] writable cwd: {cwd['path']}",
+        f" [{_mark(tmp['writable'])}] writable tempdir: {tmp['path']}",
+        f" [{_mark(health['core_importable'])}] chainweaver {cw_version} importable",
+        "",
+        "Optional extras:",
+    ]
+    for row in report["extras"]:
+        status = "installed" if row["available"] else "missing"
+        line = f"  [{status:>9}] {row['extra']}"
+        if not row["available"]:
+            line += f"  →  {row['install']}"
+        lines.append(line)
+    lines.append("")
+    lines.append("READY" if report["ok"] else "NOT READY — resolve the FAIL checks above")
+    return "\n".join(lines)
+
+
+def _run_first_run_profile(fmt: OutputFormat) -> None:
+    """Emit the first-run readiness report and exit 1 when not ready."""
+    report = _first_run_report()
+    if fmt is OutputFormat.JSON:
+        _emit_json(report)
+    else:
+        typer.echo(_format_first_run_table(report))
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
 _DOCTOR_PATH_ARG = typer.Argument(
-    ...,
-    help="Path to a .flow.* file or a directory of flow files.",
+    None,
+    help="Path to a .flow.* file or a directory of flow files (not required with --profile).",
+)
+_DOCTOR_PROFILE_OPTION = typer.Option(
+    None,
+    "--profile",
+    case_sensitive=False,
+    help="Run a named diagnostic profile instead of flow checks. "
+    "'first-run' verifies Python version, extras, writable paths, and import health.",
 )
 _DOCTOR_TOOLS_OPTION = typer.Option(
     [],
@@ -235,13 +399,20 @@ _DOCTOR_FORMAT_OPTION = typer.Option(
 
 @app.command("doctor")
 def doctor_command(
-    path: Path = _DOCTOR_PATH_ARG,
+    path: Path | None = _DOCTOR_PATH_ARG,
     check_drift: bool = _DOCTOR_CHECK_DRIFT_OPTION,
     preflight: bool = _DOCTOR_PREFLIGHT_OPTION,
+    profile: DoctorProfile | None = _DOCTOR_PROFILE_OPTION,
     tools: list[str] = _DOCTOR_TOOLS_OPTION,
     output_format: OutputFormat = _DOCTOR_FORMAT_OPTION,
 ) -> None:
     """Diagnose ChainWeaver flows against the currently registered tools.
+
+    With ``--profile first-run`` (issue #442), runs an environment-readiness
+    check instead of flow analysis — Python version, optional-extra
+    availability (with the exact install command), writable paths, and core
+    import health — and emits machine-readable JSON with ``--format json``.
+    This mode needs no flow *path*.
 
     With ``--check-drift``, loads every flow file under *path* (single
     file or recursive directory) and compares each step's referenced tool
@@ -269,15 +440,26 @@ def doctor_command(
     - ``2`` — *path* itself does not exist, is neither a file nor a
       directory, or a ``--tools`` module is not importable.
     """
+    if profile is not None:
+        _run_first_run_profile(output_format)
+        return
+
     if not check_drift and not preflight:
         typer.echo(
-            "chainweaver: 'doctor' requires --check-drift or --preflight.",
+            "chainweaver: 'doctor' requires --check-drift, --preflight, or --profile.",
             err=True,
         )
         raise typer.Exit(code=1)
     if check_drift and preflight:
         typer.echo(
             "chainweaver: pass only one of --check-drift / --preflight.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if path is None:
+        typer.echo(
+            "chainweaver: a flow path is required (or use --profile first-run).",
             err=True,
         )
         raise typer.Exit(code=2)

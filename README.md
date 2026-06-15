@@ -1080,14 +1080,25 @@ chainweaver serve examples/double_add_format.flow.yaml \
 chainweaver validate flows/etl.flow.yaml
 chainweaver check flows/                  # whole-directory variant
 
-# Render a flow as ASCII or Graphviz DOT. Discover it from a directory of
-# flow files, an installed package's entry points, or the default registry.
+# Scaffold a runnable first flow project (tools + flow file + run script).
+chainweaver init my-first-flow --template linear --with-tests
+
+# Render a flow as ASCII, Graphviz DOT, or Mermaid. Discover it from a directory
+# of flow files, an installed package's entry points, or the default registry.
 chainweaver viz my_flow --discover-dir flows/ --format dot | dot -Tpng -o my_flow.png
+chainweaver viz my_flow --discover-dir flows/ --format mermaid
+chainweaver viz --result trace.json --format mermaid   # overlay a real run
+
+# Explain a flow deterministically (LLM-free) for review — paste into a PR.
+chainweaver explain my_flow --discover-dir flows/ > flow-review.md
 
 # Inspect a flow's structure (table or JSON). `flows list` previews what is
 # discoverable so you can see what `inspect`/`viz` can target.
 chainweaver inspect my_flow --discover-dir flows/ --format json
 chainweaver flows list --discover-dir flows/
+
+# Check that your environment is ready before running anything.
+chainweaver doctor --profile first-run
 
 # Install tab-completion for your shell (bash/zsh/fish).
 chainweaver --install-completion
@@ -1130,9 +1141,9 @@ declare a `type: Flow` (or `type: DAGFlow`) discriminator at the top — see
 the [flow file format](docs/cli.md#flow-file-format) reference. Most
 reporting subcommands also accept `--format json` for machine consumption
 (`inspect`, `validate`, `check`, `run`, `profile`, `diff`, `attest`,
-`suggest`, `doctor`); the two exceptions are `viz`, which uses
-`--format ascii|dot`, and `dump-schema`, which writes a raw JSON Schema
-and has no `--format` flag. The result-producing commands (`inspect`,
+`suggest`, `doctor`); the exceptions are `viz`, which uses
+`--format ascii|dot|mermaid`, `explain`, which uses `--format md|text`, and
+`dump-schema`, which writes a raw JSON Schema and has no `--format` flag. The result-producing commands (`inspect`,
 `validate`, `check`, `profile`, `diff`, `attest`) wrap their `--format json`
 output in a stable, versioned envelope
 (`{"schema_version", "status", "data", "errors"}`) so automation can branch on
