@@ -21,7 +21,7 @@ across releases.
 | Field | Type | Meaning |
 |---|---|---|
 | `step_index` | `int` | Zero-based position (`-1` for input-validation record). |
-| `tool_name` | `str` | Tool invoked. |
+| `tool_name` | `str` | Configured primary tool for the step. Remains stable when a fallback runs. |
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |
 | `error_type` | `str \| None` | Exception class name on failure. |
@@ -29,6 +29,8 @@ across releases.
 | `success` | `bool` | Step status. |
 | `started_at` / `ended_at` | `datetime` | UTC timestamps. |
 | `duration_ms` | `float` | Wall-clock duration in milliseconds. |
+| `fallback_used` | `bool` | Whether the step attempted its configured `on_error` fallback. |
+| `fallback_tool_name` | `str \| None` | Name of the fallback target, or `None` when no fallback ran. |
 
 ## Serialization
 

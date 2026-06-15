@@ -506,3 +506,115 @@ class TestMissingRequiredInput:
         # Optional input field `value` should not produce a missing_required_input
         # error — but the `_dummy` mapping target is unknown.
         assert not any(e.issue_type == "missing_required_input" for e in result.errors)
+
+
+class TestFallbackInputCompatibility:
+    def test_compatible_fallback_compiles(self) -> None:
+        tools = _make_tools()
+        flow = Flow(
+            name="fallback_ok",
+            description="Compatible fallback.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:double",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        assert result.success is True
+        assert not any(error.issue_type.startswith("fallback_") for error in result.errors)
+
+    def test_missing_fallback_tool_is_error(self) -> None:
+        flow = Flow(
+            name="fallback_missing",
+            description="Missing fallback.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:missing",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, _make_tools())
+
+        error = next(
+            error for error in result.errors if error.issue_type == "missing_fallback_tool"
+        )
+        assert result.success is False
+        assert error.tool_name == "missing"
+
+    def test_fallback_type_mismatch_is_error(self) -> None:
+        class TextNumberInput(BaseModel):
+            number: str
+
+        tools = _make_tools()
+        tools["backup"] = Tool(
+            name="backup",
+            description="Requires text.",
+            input_schema=TextNumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": len(inp.number)},
+        )
+        flow = Flow(
+            name="fallback_type",
+            description="Fallback type mismatch.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:backup",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        error = next(
+            error for error in result.errors if error.issue_type == "fallback_type_mismatch"
+        )
+        assert result.success is False
+        assert error.tool_name == "backup"
+        assert error.field_name == "number"
+
+    def test_fallback_mapping_shape_is_checked(self) -> None:
+        class TextInput(BaseModel):
+            text: str
+
+        tools = _make_tools()
+        tools["backup"] = Tool(
+            name="backup",
+            description="Requires text.",
+            input_schema=TextInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": len(inp.text)},
+        )
+        flow = Flow(
+            name="fallback_shape",
+            description="Fallback mapping mismatch.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:backup",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        issue_types = {error.issue_type for error in result.errors}
+        assert result.success is False
+        assert issue_types >= {
+            "fallback_unknown_target_key",
+            "fallback_missing_required_input",
+        }

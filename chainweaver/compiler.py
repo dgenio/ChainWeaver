@@ -8,6 +8,7 @@ catching wiring errors (missing tools, unmapped keys, type mismatches) at
 from __future__ import annotations
 
 import types
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Union, get_args, get_origin
 
@@ -129,6 +130,78 @@ def _get_model_fields(model: type[BaseModel]) -> dict[str, FieldInfo]:
     return model.model_fields
 
 
+def _validate_fallback_inputs(
+    *,
+    step_index: int,
+    fallback_tool: Tool,
+    input_mapping: Mapping[str, object],
+    context_fields: dict[str, type | None],
+) -> list[CompilationError]:
+    """Validate the primary step's resolved inputs against its fallback tool."""
+    errors: list[CompilationError] = []
+    fallback_fields = _get_model_fields(fallback_tool.input_schema)
+
+    if input_mapping:
+        for target_key, source in input_mapping.items():
+            target_field = fallback_fields.get(target_key)
+            if target_field is None:
+                errors.append(
+                    CompilationError(
+                        step_index=step_index,
+                        tool_name=fallback_tool.name,
+                        field_name=target_key,
+                        issue_type="fallback_unknown_target_key",
+                        detail=(
+                            f"Step {step_index} fallback tool ('{fallback_tool.name}'): "
+                            f"input key '{target_key}' is not a declared input field "
+                            f"{set(fallback_fields.keys())}."
+                        ),
+                    )
+                )
+            elif isinstance(source, str) and source in context_fields:
+                source_type = context_fields[source]
+                target_type = _get_field_type(target_field)
+                if not _types_compatible(source_type, target_type):
+                    errors.append(
+                        CompilationError(
+                            step_index=step_index,
+                            tool_name=fallback_tool.name,
+                            field_name=target_key,
+                            issue_type="fallback_type_mismatch",
+                            detail=(
+                                f"Step {step_index} fallback tool ('{fallback_tool.name}'): "
+                                f"field '{target_key}' expects "
+                                f"{target_type.__name__ if target_type else 'unknown'}, got "
+                                f"{source_type.__name__ if source_type else 'unknown'} "
+                                f"from '{source}'."
+                            ),
+                        )
+                    )
+
+    for field_name, finfo in fallback_fields.items():
+        if not finfo.is_required():
+            continue
+        if input_mapping:
+            if field_name in input_mapping:
+                continue
+        elif field_name in context_fields:
+            continue
+        errors.append(
+            CompilationError(
+                step_index=step_index,
+                tool_name=fallback_tool.name,
+                field_name=field_name,
+                issue_type="fallback_missing_required_input",
+                detail=(
+                    f"Step {step_index} fallback tool ('{fallback_tool.name}'): required "
+                    f"input field '{field_name}' is not satisfied by input_mapping or "
+                    f"the accumulated context."
+                ),
+            )
+        )
+    return errors
+
+
 def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
     """Perform static validation of a flow's step sequence.
 
@@ -142,7 +215,9 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
     5. Required input coverage — every required tool input field is supplied
        either by an explicit mapping or, when ``input_mapping`` is empty, by
        the accumulated context.
-    6. Output coverage — if the flow has an output_schema, the accumulated
+    6. Fallback compatibility — ``fallback:<tool_name>`` targets exist and
+       accept the same resolved inputs as the primary tool.
+    7. Output coverage — if the flow has an output_schema, the accumulated
        context satisfies it.
 
     Args:
@@ -183,6 +258,20 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
 
         tool = tools[step.tool_name]
         tool_input_fields = _get_model_fields(tool.input_schema)
+        fallback_tool: Tool | None = None
+        if step.on_error.startswith("fallback:"):
+            fallback_name = step.on_error[len("fallback:") :]
+            fallback_tool = tools.get(fallback_name)
+            if fallback_tool is None:
+                errors.append(
+                    CompilationError(
+                        step_index=idx,
+                        tool_name=fallback_name,
+                        field_name=None,
+                        issue_type="missing_fallback_tool",
+                        detail=f"Fallback tool '{fallback_name}' is not registered.",
+                    )
+                )
 
         # 2. + 3. Input mapping resolution and target validity.
         if step.input_mapping:
@@ -278,6 +367,16 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                         f"'{field_name}' is not satisfied by input_mapping or "
                         f"the accumulated context."
                     ),
+                )
+            )
+
+        if fallback_tool is not None:
+            errors.extend(
+                _validate_fallback_inputs(
+                    step_index=idx,
+                    fallback_tool=fallback_tool,
+                    input_mapping=step.input_mapping,
+                    context_fields=context_fields,
                 )
             )
 

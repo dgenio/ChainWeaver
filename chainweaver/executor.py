@@ -430,6 +430,10 @@ class StepRecord(BaseModel):
             fallback tool (issue #176).  Set regardless of whether the
             fallback itself succeeded or failed; ``False`` for normal
             execution, retry-success, ``skip``, and ``fail`` paths.
+        fallback_tool_name: Name of the fallback target when
+            ``fallback_used=True``; ``None`` otherwise.  ``tool_name`` keeps
+            identifying the configured primary step so traces remain stable
+            across runs that do and do not need recovery (issue #338).
         flow_name: For a composed sub-flow step (issue #75), the name of the
             sub-flow that was executed; ``None`` for ordinary tool steps.
             When set, ``tool_name`` mirrors it so existing trace consumers
@@ -461,6 +465,7 @@ class StepRecord(BaseModel):
     skipped: bool = False
     cached: bool = False
     fallback_used: bool = False
+    fallback_tool_name: str | None = None
     flow_name: str | None = None
     sub_result: ExecutionResult | None = None
     approval: ApprovalRecord | None = None
@@ -488,7 +493,7 @@ class ExecutionResult(BaseModel):
 
     Attributes:
         trace_schema_version: Library-stamped version of the trace *shape*
-            (issue #393), e.g. ``"1"``.  Lets long-lived trace consumers
+            (issue #393), currently ``"1.1"``.  Lets long-lived trace consumers
             (``chainweaver profile`` / ``diff``, external trace stores, OTel
             export) detect and adapt to trace-shape evolution instead of
             sniffing field presence.  Distinct from ``flow_version``, which
@@ -2165,6 +2170,7 @@ class FlowExecutor:
             skipped: bool,
             retry_errors: list[str],
             fallback_used: bool = False,
+            fallback_tool_name: str | None = None,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             retry_count = max(0, tool_attempts[0] - 1)
@@ -2184,6 +2190,7 @@ class FlowExecutor:
                 skipped=skipped,
                 cached=False,
                 fallback_used=fallback_used,
+                fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
             )
 
@@ -2402,12 +2409,13 @@ class FlowExecutor:
                     skipped=False,
                     retry_errors=retry_errors,
                     fallback_used=True,
+                    fallback_tool_name=fb_name,
                 )
             try:
                 outputs = await fb_tool.run_async(inputs)
             except Exception as exc:
                 retry_errors.append(f"fallback '{fb_name}' failed: {exc}")
-                wrapped_fb = self._wrap_tool_exception(step, step_index, exc)
+                wrapped_fb = self._wrap_tool_exception(step, step_index, exc, tool_name=fb_name)
                 return make_record(
                     inputs=inputs,
                     outputs=None,
@@ -2416,6 +2424,7 @@ class FlowExecutor:
                     skipped=False,
                     retry_errors=retry_errors,
                     fallback_used=True,
+                    fallback_tool_name=fb_name,
                 )
             return make_record(
                 inputs=inputs,
@@ -2425,6 +2434,7 @@ class FlowExecutor:
                 skipped=False,
                 retry_errors=retry_errors,
                 fallback_used=True,
+                fallback_tool_name=fb_name,
             )
         # Unrecognised on_error → treat as fail.
         return make_record(
@@ -3537,6 +3547,7 @@ class FlowExecutor:
             retry_errors: list[str],
             cached: bool = False,
             fallback_used: bool = False,
+            fallback_tool_name: str | None = None,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -3560,6 +3571,7 @@ class FlowExecutor:
                 skipped=skipped,
                 cached=cached,
                 fallback_used=fallback_used,
+                fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
             )
 
@@ -4052,6 +4064,8 @@ class FlowExecutor:
         step: FlowStep,
         step_index: int,
         exc: Exception,
+        *,
+        tool_name: str | None = None,
     ) -> Exception:
         """Convert a tool-side exception into the right ChainWeaver type.
 
@@ -4060,11 +4074,12 @@ class FlowExecutor:
           through (their ``error_type`` is preserved on the StepRecord).
         - Any other exception → :class:`FlowExecutionError`.
         """
+        attributed_tool = tool_name or step.display_name
         if isinstance(exc, ValidationError):
-            return SchemaValidationError(step.display_name, step_index, str(exc))
+            return SchemaValidationError(attributed_tool, step_index, str(exc))
         if isinstance(exc, (ToolTimeoutError, ToolOutputSizeError)):
             return exc
-        return FlowExecutionError(step.display_name, step_index, str(exc))
+        return FlowExecutionError(attributed_tool, step_index, str(exc))
 
     def _apply_on_error(
         self,
@@ -4123,12 +4138,15 @@ class FlowExecutor:
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
                 fallback_used=True,
+                fallback_tool_name=fallback_name,
             )
 
         try:
             outputs = fallback_tool.run(inputs)
         except Exception as fallback_exc:
-            wrapped = self._wrap_tool_exception(step, step_index, fallback_exc)
+            wrapped = self._wrap_tool_exception(
+                step, step_index, fallback_exc, tool_name=fallback_name
+            )
             return make_record(
                 inputs=inputs,
                 outputs=None,
@@ -4137,6 +4155,7 @@ class FlowExecutor:
                 skipped=False,
                 retry_errors=[*retry_errors, str(wrapped_error)],
                 fallback_used=True,
+                fallback_tool_name=fallback_name,
             )
 
         return make_record(
@@ -4147,6 +4166,7 @@ class FlowExecutor:
             skipped=False,
             retry_errors=[*retry_errors, str(wrapped_error)],
             fallback_used=True,
+            fallback_tool_name=fallback_name,
         )
 
     # ------------------------------------------------------------------
