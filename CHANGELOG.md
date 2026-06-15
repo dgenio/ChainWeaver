@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-15
+
 ### Added
 
 - **`chainweaver init` project scaffolder** (#441): generate a runnable first
@@ -1136,7 +1138,8 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/dgenio/ChainWeaver/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/dgenio/ChainWeaver/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/dgenio/ChainWeaver/compare/v0.10.0...v0.11.0

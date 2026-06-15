@@ -27,7 +27,7 @@ inputs:
       Pinned by default to a known-good release; pass an empty string
       to install the latest published version.
     required: false
-    default: "0.12.1"
+    default: "0.13.0"
   extra-args:
     description: |
       Additional arguments appended verbatim to the ``chainweaver``

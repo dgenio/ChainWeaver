@@ -246,7 +246,7 @@ ExecutionSnapshot.model_rebuild(_types_namespace=_forward_namespace)
 # applications can configure logging centrally without interference.
 logging.getLogger("chainweaver").addHandler(logging.NullHandler())
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 
 __all__ = [
     "BUILTIN_PROPERTIES",
