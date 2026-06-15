@@ -316,7 +316,7 @@ integration.
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `trace_schema_version` | `str` | Library-stamped version of the trace *shape* (#393), e.g. `"1"`. Lets long-lived trace consumers detect shape evolution; distinct from `flow_version`. See [docs/versioning-policy.md](docs/versioning-policy.md#artifact-schema-versions). |
+| `trace_schema_version` | `str` | Library-stamped version of the trace *shape* (#393), currently `"1.1"`. Lets long-lived trace consumers detect shape evolution; distinct from `flow_version`. See [docs/versioning-policy.md](docs/versioning-policy.md#artifact-schema-versions). |
 | `flow_name` | `str` | Name of the executed flow. |
 | `success` | `bool` | `True` when all steps completed without error. |
 | `final_output` | `dict \| None` | Merged execution context, or `None` on failure. |
@@ -332,7 +332,7 @@ integration.
 | Field | Type | Meaning |
 |-------|------|---------|
 | `step_index` | `int` | Zero-based position (`-1` = flow-input validation, `len(steps)` = flow-output validation). |
-| `tool_name` | `str` | Tool invoked (or flow name for validation records). |
+| `tool_name` | `str` | Configured primary tool for the step (or flow name for validation records). Remains the primary name when a fallback runs so step identity is stable across traces. |
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |
 | `error_type` | `str \| None` | Exception class name (e.g. `"FlowExecutionError"`) when the step failed; `None` on success. |
@@ -342,6 +342,8 @@ integration.
 | `started_at` | `datetime` | UTC timestamp when the step began. |
 | `ended_at` | `datetime` | UTC timestamp when the step finished. |
 | `duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
+| `fallback_used` | `bool` | `True` when `on_error="fallback:<tool_name>"` attempted recovery, including missing or failing fallbacks. |
+| `fallback_tool_name` | `str \| None` | The configured fallback target when `fallback_used=True`; `None` otherwise. |
 | `approval` | `ApprovalRecord \| None` | The decision for a step gated by an execution-time approval callback (#356); `None` when no approval was required. |
 
 > **Serialization:** `ExecutionResult` and `StepRecord` are Pydantic models;

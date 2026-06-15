@@ -383,7 +383,68 @@ class TestExecuteFlowAsyncFallback:
         assert result.final_output["value"] == 8  # backup: 7 + 1
         assert len(result.execution_log) == 1
         assert result.execution_log[0].fallback_used is True
+        assert result.execution_log[0].fallback_tool_name == "backup"
         assert result.execution_log[0].success is True
+
+    async def test_fallback_input_validation_names_fallback_tool(self) -> None:
+        class _BackupInput(BaseModel):
+            text: str
+
+        called = False
+
+        async def _fail(inp: _Inp) -> dict[str, Any]:
+            raise RuntimeError("primary down")
+
+        async def _backup(inp: _BackupInput) -> dict[str, Any]:
+            nonlocal called
+            called = True
+            return {"value": len(inp.text)}
+
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="fb_invalid",
+                version="1.0.0",
+                description="",
+                steps=[
+                    FlowStep(
+                        tool_name="primary",
+                        input_mapping={"n": "n"},
+                        on_error="fallback:backup",
+                    ),
+                ],
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="primary",
+                description="",
+                input_schema=_Inp,
+                output_schema=_Out,
+                fn=_fail,
+            )
+        )
+        executor.register_tool(
+            Tool(
+                name="backup",
+                description="",
+                input_schema=_BackupInput,
+                output_schema=_Out,
+                fn=_backup,
+            )
+        )
+
+        result = await executor.execute_flow_async("fb_invalid", {"n": 7})
+
+        assert result.success is False
+        record = result.execution_log[0]
+        assert called is False
+        assert record.tool_name == "primary"
+        assert record.fallback_tool_name == "backup"
+        assert record.error_type == "SchemaValidationError"
+        assert record.error_message is not None
+        assert "tool 'backup'" in record.error_message
 
 
 class TestExecuteFlowAsyncEventLoopUnblocked:

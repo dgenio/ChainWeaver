@@ -39,7 +39,7 @@ from __future__ import annotations
 # only for a breaking shape change (removed/renamed/retyped field); bump MINOR
 # for additive fields older readers can ignore. See docs/versioning-policy.md.
 FLOW_FORMAT_VERSION = "1"
-TRACE_SCHEMA_VERSION = "1"
+TRACE_SCHEMA_VERSION = "1.1"
 SNAPSHOT_VERSION = "1"
 
 # How an absent version field is interpreted on read (pre-versioning artifact).

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from helpers import NumberInput, ValueOutput
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import Flow, FlowStep, RetryPolicy
@@ -257,6 +257,43 @@ class TestOnErrorFallback:
         assert any("intermittent failure" in msg for msg in record.retry_errors)
         # Successful fallback must be flagged for profile aggregation (issue #176).
         assert record.fallback_used is True
+        assert record.fallback_tool_name == "alt"
+
+    def test_fallback_input_validation_names_fallback_tool(self) -> None:
+        class TextInput(BaseModel):
+            text: str
+
+        called = False
+
+        def _backup(inp: TextInput) -> dict[str, Any]:
+            nonlocal called
+            called = True
+            return {"value": len(inp.text)}
+
+        primary = _make_tool("primary", _Counter(fail_until_attempt=10))
+        backup = Tool(
+            name="backup",
+            description="Requires text.",
+            input_schema=TextInput,
+            output_schema=ValueOutput,
+            fn=_backup,
+        )
+        ex = _build_executor(
+            primary,
+            on_error="fallback:backup",
+            extra_tools=(backup,),
+        )
+
+        result = ex.execute_flow("retry_flow", {"number": 7})
+
+        assert result.success is False
+        record = result.execution_log[0]
+        assert called is False
+        assert record.tool_name == "primary"
+        assert record.fallback_tool_name == "backup"
+        assert record.error_type == "SchemaValidationError"
+        assert record.error_message is not None
+        assert "tool 'backup'" in record.error_message
 
     def test_fallback_failure_still_marked_fallback_used(self) -> None:
         # Fallback tool exists but also fails — record must reflect that
@@ -283,6 +320,7 @@ class TestOnErrorFallback:
         assert result.success is False
         record = result.execution_log[0]
         assert record.error_type == "ToolNotFoundError"
+        assert record.fallback_tool_name == "does_not_exist"
         # The policy invoked the fallback path even though the tool was
         # missing — surface that distinction so profile aggregates can
         # separate "fallback configured but unusable" from "no fallback".

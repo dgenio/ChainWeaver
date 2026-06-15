@@ -64,7 +64,7 @@ graph = DAGFlow(
 | `tool_name` | Name of the tool to invoke at this step. |
 | `input_mapping` | `dict[str, Any]` — see below. |
 | `retry_policy` | Optional `RetryPolicy` (delegated to `tenacity`). |
-| `on_error` | Optional fallback strategy (`skip`, `fallback_tool`). |
+| `on_error` | Error policy: `fail`, `skip`, or `fallback:<tool_name>`. |
 
 ### `input_mapping` semantics
 
@@ -76,6 +76,26 @@ graph = DAGFlow(
 
 The accumulated context starts as the `initial_input` dict and grows as each step's
 validated outputs are merged in.
+
+### Fallback semantics
+
+`on_error="fallback:<tool_name>"` runs the named fallback after the primary
+tool exhausts its attempts. The fallback receives the same resolved input
+dictionary that was passed to the primary tool, then `Tool.run` or
+`Tool.run_async` validates that dictionary against the fallback's own input
+schema before its callable runs.
+
+`compile_flow()` applies the same contract statically: the fallback must be
+registered, every mapped target must exist on its input schema, required
+fields must be supplied, and mapped types must be compatible. These are
+blocking compilation errors because the fallback would deterministically fail
+whenever recovery was needed.
+
+In the execution trace, `StepRecord.tool_name` remains the primary tool so a
+step keeps one stable identity across runs. `fallback_used=True` records that
+recovery was attempted, and `fallback_tool_name` identifies the target. A
+fallback schema failure is a `SchemaValidationError` attributed to the
+fallback tool.
 
 ## `FlowRegistry` and `FlowExecutor`
 
