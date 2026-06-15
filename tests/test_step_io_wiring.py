@@ -4,7 +4,8 @@ Covers three related step-I/O features that share the executor's input-binding
 and output-merge machinery:
 
 * ``output_mapping`` — rename/prune a tool's outputs before the context merge.
-* dotted-path / RFC-6901 ``input_mapping`` — pull nested values from context.
+* RFC-6901 JSON-pointer ``input_mapping`` — pull nested values from context via
+  a leading-``/`` pointer (plain keys remain top-level lookups).
 * ``dynamic_params`` — inject runtime params hidden from ``input_schema``.
 """
 
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from chainweaver.builder import FlowBuilder
 from chainweaver.compiler import compile_flow
 from chainweaver.exceptions import OutputMappingError
-from chainweaver.executor import FlowExecutor
+from chainweaver.executor import ExecutionResult, FlowExecutor
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
 from chainweaver.serialization import flow_from_json, flow_to_json
@@ -474,3 +475,94 @@ class TestDynamicParams:
         restored = flow_from_json(flow_to_json(self._flow()))
         assert isinstance(restored, Flow)
         assert restored.dynamic_params == ("account",)
+
+    def test_concurrent_async_runs_isolate_run_scoped_state(self) -> None:
+        # Regression for the run-scoped-state leak (#336): two flows of
+        # different versions run concurrently as asyncio tasks on one
+        # event-loop thread.  An event barrier forces both to be mid-flight —
+        # both have stamped ``active_flow_version`` and injected their own
+        # ``dynamic_params`` on the run-scoped state — before either finishes.
+        # With the old ``threading.local`` slot the state was shared across the
+        # tasks (a ``threading.local`` does not isolate per asyncio task), so
+        # both results were stamped with whichever value was written last.  The
+        # contextvars-backed ``_run_scope`` gives each task its own copy.
+        async def main() -> tuple[ExecutionResult, ExecutionResult]:
+            entered_a = asyncio.Event()
+            entered_b = asyncio.Event()
+
+            async def fn_a(inp: _QueryIn) -> dict[str, Any]:
+                entered_a.set()
+                await entered_b.wait()
+                return {"answer": f"{inp.query} for account {inp.account}"}
+
+            async def fn_b(inp: _QueryIn) -> dict[str, Any]:
+                entered_b.set()
+                await entered_a.wait()
+                return {"answer": f"{inp.query} for account {inp.account}"}
+
+            tool_a = Tool(
+                name="overview_a",
+                description="Async account overview (run A).",
+                input_schema=_QueryIn,
+                output_schema=_AccountOut,
+                fn=fn_a,
+            )
+            tool_b = Tool(
+                name="overview_b",
+                description="Async account overview (run B).",
+                input_schema=_QueryIn,
+                output_schema=_AccountOut,
+                fn=fn_b,
+            )
+            flow_a = Flow(
+                name="flow_a",
+                version="1.0.0",
+                description="Run A.",
+                dynamic_params=("account",),
+                steps=[
+                    FlowStep(
+                        tool_name="overview_a",
+                        input_mapping={"query": "query", "account": "account"},
+                    )
+                ],
+            )
+            flow_b = Flow(
+                name="flow_b",
+                version="2.0.0",
+                description="Run B.",
+                dynamic_params=("account",),
+                steps=[
+                    FlowStep(
+                        tool_name="overview_b",
+                        input_mapping={"query": "query", "account": "account"},
+                    )
+                ],
+            )
+            registry = FlowRegistry()
+            registry.register_flow(flow_a)
+            registry.register_flow(flow_b)
+            ex = FlowExecutor(registry=registry)
+            ex.register_tool(tool_a)
+            ex.register_tool(tool_b)
+
+            return await asyncio.gather(
+                ex.execute_flow_async(
+                    "flow_a", {"query": "qa"}, dynamic_params={"account": "ACC-A"}
+                ),
+                ex.execute_flow_async(
+                    "flow_b", {"query": "qb"}, dynamic_params={"account": "ACC-B"}
+                ),
+            )
+
+        result_a, result_b = asyncio.run(main())
+
+        # active_flow_version must reflect each run's own flow, not whichever
+        # task wrote the shared slot last.
+        assert result_a.flow_version == "1.0.0"
+        assert result_b.flow_version == "2.0.0"
+        # dynamic_params (often per-request secrets) must not cross between
+        # concurrent runs.
+        assert result_a.final_output is not None
+        assert result_b.final_output is not None
+        assert result_a.final_output["answer"] == "qa for account ACC-A"
+        assert result_b.final_output["answer"] == "qb for account ACC-B"

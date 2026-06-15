@@ -231,8 +231,12 @@ statically detectable overwrites (suppressed under `"overwrite"`). See
 ### Concurrency contract (#336)
 
 A single `FlowExecutor` instance supports **concurrent** `execute_flow` /
-`execute_flow_async` / `stream_flow` calls: run-scoped state (e.g. the stream
-event collector) lives per-thread on a `threading.local` slot, and the bundled
+`execute_flow_async` / `stream_flow` calls: run-scoped state (the stream event
+collector, `active_flow_version`, replay/resume markers, injected
+`dynamic_params`) lives in a per-instance `contextvars.ContextVar` and each
+entry point binds a fresh per-scope copy, so the isolation holds across both OS
+threads **and** concurrent `execute_flow_async` tasks sharing one event-loop
+thread (a `threading.local` would not isolate the latter). The bundled
 `InMemoryStepCache` / `InMemoryCheckpointer` are internally locked. The one
 rule: **mutating operations (`register_tool`, `add_middleware`,
 `accept_drift`) must not run concurrently with executions** — do them at setup.

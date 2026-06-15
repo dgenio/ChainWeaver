@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flow expects for hosts and export adapters. Composed sub-flows inherit the
   injected params.
 
+### Fixed
+
+- **Run-scoped state is now isolated per asyncio task** (#336): the executor's
+  run-scoped markers (injected `dynamic_params`, `active_flow_version`, the
+  replay/resume flags, and the `stream_flow` event collector) moved from a
+  `threading.local` slot to a per-instance `contextvars.ContextVar` bound to a
+  fresh copy at each entry point. A `threading.local` does not isolate state
+  between concurrent `execute_flow_async` tasks sharing one event-loop thread,
+  so previously two concurrent async runs could clobber each other's
+  `active_flow_version` and injected `dynamic_params` (often per-request
+  secrets) across an `await`. Sub-flow recursion still inherits the parent's
+  values via the scoped copy.
+
 ## [0.13.0] - 2026-06-15
 
 ### Added

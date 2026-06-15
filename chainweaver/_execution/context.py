@@ -46,8 +46,11 @@ def apply_output_mapping(
 
     ``output_mapping`` maps ``{context_key: output_key}``: only the listed output
     keys are kept, each renamed to its context key.  ``None`` (the default)
-    returns a shallow copy of *outputs* unchanged — the historical merge-verbatim
-    behaviour.
+    returns *outputs* unchanged — the historical merge-verbatim behaviour. When
+    *outputs* is already a ``dict`` the original object is returned (no defensive
+    copy), keeping the no-mapping common case off the O(n) copy path; callers
+    must therefore treat the result as read-only, which every internal caller
+    does (it is fed straight into ``context.update`` / iteration).
 
     Args:
         outputs: The tool's validated outputs.
@@ -59,7 +62,9 @@ def apply_output_mapping(
         OutputMappingError: When a mapped ``output_key`` is absent from *outputs*.
     """
     if output_mapping is None:
-        return dict(outputs)
+        # Fast path: a plain ``dict`` is returned as-is; only a non-dict
+        # ``Mapping`` is materialised to satisfy the ``dict`` return type.
+        return outputs if isinstance(outputs, dict) else dict(outputs)
     mapped: dict[str, Any] = {}
     for context_key, output_key in output_mapping.items():
         if output_key not in outputs:

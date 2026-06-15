@@ -98,6 +98,14 @@ class FlowBuilder:
 
         Returns:
             ``self`` — supports method chaining.
+
+        Note:
+            ``output_mapping`` is a reserved keyword of this method, so a tool
+            whose ``input_schema`` legitimately has a field *named*
+            ``output_mapping`` cannot bind it through ``**mapping`` here. In that
+            (rare) case construct the :class:`~chainweaver.flow.FlowStep`
+            directly and add it via :meth:`step_from`, where ``input_mapping`` is
+            a plain dict with no reserved keys.
         """
         self._steps.append(
             FlowStep(
