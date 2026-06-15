@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781453998989,
+  "lastUpdate": 1781540962016,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -2952,6 +2952,78 @@ window.BENCHMARK_DATA = {
             "value": 0.8029629999555254,
             "unit": "ms",
             "extra": "min=0.72ms max=0.87ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec096157cb62774c80f808e7b78e9663031119ac",
+          "message": "Merge pull request #455 from dgenio/fix/338-fallback-input-validation\n\nfix: validate fallback inputs against fallback schema",
+          "timestamp": "2026-06-15T17:27:48+01:00",
+          "tree_id": "991fff903a54ca1a9353339e5e81e0e79a345cbb",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/ec096157cb62774c80f808e7b78e9663031119ac"
+        },
+        "date": 1781540961323,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3249459999778992,
+            "unit": "ms",
+            "extra": "min=0.29ms max=0.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.23057000009885087,
+            "unit": "ms",
+            "extra": "min=0.21ms max=0.35ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.5045399999517031,
+            "unit": "ms",
+            "extra": "min=0.45ms max=1.95ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.3377179999688451,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.34ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.89078900007098,
+            "unit": "ms",
+            "extra": "min=102.25ms max=103.32ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.9770330000264948,
+            "unit": "ms",
+            "extra": "min=0.78ms max=1.20ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 252.03842500002338,
+            "unit": "ms",
+            "extra": "min=251.93ms max=252.20ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7809570001882093,
+            "unit": "ms",
+            "extra": "min=0.72ms max=0.86ms repeats=5"
           }
         ]
       }
