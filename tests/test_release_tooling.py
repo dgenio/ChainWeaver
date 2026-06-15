@@ -61,18 +61,23 @@ def test_prepare_release_updates_all_governed_references(
     release_module: ModuleType,
     release_tree: Path,
 ) -> None:
-    release_module.prepare_release(release_tree, "0.12.2", "2026-06-09")
+    current = release_module.source_version(release_tree)
+    assert current.startswith("0.")
+    parts = [int(p) for p in current.split(".")]
+    target = f"{parts[0]}.{parts[1]}.{parts[2] + 1}"
 
-    assert release_module.source_version(release_tree) == "0.12.2"
-    assert release_module.release_issues(release_tree, expected_version="0.12.2") == []
+    release_module.prepare_release(release_tree, target, "2026-06-09")
+
+    assert release_module.source_version(release_tree) == target
+    assert release_module.release_issues(release_tree, expected_version=target) == []
 
     manifest = json.loads((release_tree / "server.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.12.2"
-    assert manifest["packages"][0]["version"] == "0.12.2"
+    assert manifest["version"] == target
+    assert manifest["packages"][0]["version"] == target
 
     changelog = (release_tree / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## [Unreleased]\n\n## [0.12.2] - 2026-06-09" in changelog
-    assert "[0.12.2]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...v0.12.2" in changelog
+    assert f"## [Unreleased]\n\n## [{target}] - 2026-06-09" in changelog
+    assert f"[{target}]: https://github.com/dgenio/ChainWeaver/compare/v{current}...v{target}" in changelog
 
 
 @pytest.mark.parametrize("target", ["0.12.1", "0.12.0", "v0.12.2", "0.12"])
@@ -89,24 +94,26 @@ def test_release_status_reports_manual_trackers(
     release_module: ModuleType,
     release_tree: Path,
 ) -> None:
+    current = release_module.source_version(release_tree)
+    older = "0.0.0"
     action = release_tree / ".github/actions/chainweaver/action.yml"
     action.write_text(
         action.read_text(encoding="utf-8").replace(
-            '    default: "0.12.1"',
-            '    default: "0.12.0"',
+            f'    default: "{current}"',
+            f'    default: "{older}"',
             1,
         ),
         encoding="utf-8",
     )
     status = release_module.release_status(
         release_tree,
-        expected_version="0.12.1",
+        expected_version=current,
         generated_on="2026-06-08",
     )
 
     assert "Generated: 2026-06-08" in status
     assert "| Release metadata consistency | FAIL |" in status
-    assert "action default is 0.12.0, expected 0.12.1" in status
+    assert f"action default is {older}, expected {current}" in status
     assert "[Tracked in #325](https://github.com/dgenio/ChainWeaver/issues/325)" in status
     assert "[Tracked in #231](https://github.com/dgenio/ChainWeaver/issues/231)" in status
     assert "| MANUAL | Not completed |" in status
