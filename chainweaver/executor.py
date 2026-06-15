@@ -28,7 +28,8 @@ from typing import Any, NoReturn
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
 
-from chainweaver._execution import merge_step_outputs
+from chainweaver._execution import apply_output_mapping, merge_step_outputs
+from chainweaver._pointer import PointerResolutionError, is_pointer, resolve_pointer
 from chainweaver._versions import SNAPSHOT_VERSION, TRACE_SCHEMA_VERSION, same_major
 from chainweaver.approvals import (
     ApprovalCallable,
@@ -162,6 +163,13 @@ class _RunScopedState(threading.local):
         # around sub-flow recursion alongside ``active_flow_version``.
         self.dry_run: bool = False
         self.dry_run_unsupported: str = "skip"
+        # Dynamic parameter injection (issue #316): params supplied at
+        # execute-time and merged into the running context after input_schema
+        # validation, so they reach every step's input_mapping and the final
+        # output without ever appearing in the LLM-visible input_schema.  Set
+        # for the duration of an ``execute_flow(dynamic_params=...)`` call and
+        # save/restored around sub-flow recursion like the dry-run markers.
+        self.dynamic_params: dict[str, Any] = {}
 
 
 class _StreamCollectorMiddleware(BaseMiddleware):
@@ -1097,7 +1105,23 @@ class FlowExecutor:
         # invocations).
         context: dict[str, Any] = dict(result.initial_input)
         for record in result.execution_log[:resume_from_step]:
-            if record.outputs:
+            if not record.outputs:
+                continue
+            # Re-apply the step's output_mapping (#386) so the reconstructed
+            # context matches what the original run merged.  Records that are
+            # not a plain step (e.g. a flow-input validation record at index
+            # -1) fall back to a verbatim merge.
+            if 0 <= record.step_index < len(flow.steps):
+                replayed_step = flow.steps[record.step_index]
+                context.update(
+                    apply_output_mapping(
+                        record.outputs,
+                        replayed_step.output_mapping,
+                        tool_name=replayed_step.display_name,
+                        step_index=record.step_index,
+                    )
+                )
+            else:
                 context.update(record.outputs)
 
         trace_id = _new_trace_id()
@@ -1134,7 +1158,14 @@ class FlowExecutor:
                 )
 
             assert step_record.outputs is not None
-            context.update(step_record.outputs)
+            context.update(
+                apply_output_mapping(
+                    step_record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
 
         return self._make_result(
             flow_name=flow.name,
@@ -1250,9 +1281,17 @@ class FlowExecutor:
                 if tool is not None:
                     input_schema_shape = _schema_field_shape(tool.input_schema)
                     output_schema_shape = _schema_field_shape(tool.output_schema)
-                    # Merge the projected output keys into the cumulative context.
-                    for field_name, field_type in output_schema_shape.items():
-                        projected_context[field_name] = field_type
+                    # Merge the projected output keys into the cumulative context,
+                    # honouring output_mapping (#386): a mapped step contributes
+                    # its renamed context keys, not the raw tool output fields.
+                    if step.output_mapping is None:
+                        for field_name, field_type in output_schema_shape.items():
+                            projected_context[field_name] = field_type
+                    else:
+                        for context_key, output_key in step.output_mapping.items():
+                            projected_context[context_key] = output_schema_shape.get(
+                                output_key, "Any"
+                            )
 
             if unresolved:
                 any_warnings = True
@@ -1292,7 +1331,14 @@ class FlowExecutor:
         sources: dict[str, str] = {}
         for target_key, raw in step.input_mapping.items():
             if isinstance(raw, str):
-                if raw in projected_context:
+                # For a JSON pointer (#387) only the first token is a context
+                # key; the rest addresses nested structure the static projection
+                # cannot see, so resolvability is judged on that first token.
+                lookup = raw
+                if is_pointer(raw):
+                    tokens = raw[1:].split("/")
+                    lookup = tokens[0].replace("~1", "/").replace("~0", "~")
+                if lookup in projected_context:
                     sources[target_key] = f"context['{raw}']"
                 else:
                     sources[target_key] = f"context['{raw}'] (UNRESOLVED)"
@@ -1312,11 +1358,13 @@ class FlowExecutor:
         cancel_token: CancellationToken | None = None,
         dry_run: bool = False,
         dry_run_unsupported: str = "skip",
+        dynamic_params: dict[str, Any] | None = None,
     ) -> ExecutionResult:
         """Execute a registered flow from *initial_input*.
 
-        See :meth:`_execute_flow_impl` for the full parameter reference; the two
-        extra keyword arguments here add the opt-in dry-run mode (issue #357):
+        See :meth:`_execute_flow_impl` for the full parameter reference; the
+        extra keyword arguments here add the opt-in dry-run mode (issue #357)
+        and runtime dynamic-parameter injection (issue #316):
 
         Args:
             dry_run: When ``True``, run the flow as a side-effect-free rehearsal.
@@ -1331,6 +1379,13 @@ class FlowExecutor:
                 ``dry_run_fn`` under ``dry_run=True``: ``"skip"`` (the default)
                 records a ``skipped`` stub and continues; ``"abort"`` fails the
                 step for a high-fidelity rehearsal.
+            dynamic_params: Optional parameters merged into the running context
+                *after* ``input_schema`` validation, so they are available to
+                every step's ``input_mapping`` and flow through to the final
+                output without appearing in the LLM-visible ``input_schema``
+                (issue #316).  Use this for per-request secrets — auth tokens,
+                account numbers — that a model must never see or hallucinate.
+                Composed sub-flows (#75) inherit the injected params.
 
         Returns:
             An :class:`ExecutionResult`; ``dry_run`` reflects the mode it ran in.
@@ -1342,12 +1397,16 @@ class FlowExecutor:
         # Save/restore the per-thread dry-run markers so a composed sub-flow
         # (#75) inherits the parent's mode and a later normal call on the same
         # thread is unaffected.  ``dry_run or previous`` lets a nested call with
-        # the default ``dry_run=False`` stay in the parent's dry run.
+        # the default ``dry_run=False`` stay in the parent's dry run.  Dynamic
+        # params (#316) follow the same save/restore discipline.
         previous_dry_run = self._local.dry_run
         previous_unsupported = self._local.dry_run_unsupported
+        previous_dynamic_params = self._local.dynamic_params
         self._local.dry_run = dry_run or previous_dry_run
         if dry_run:
             self._local.dry_run_unsupported = dry_run_unsupported
+        if dynamic_params is not None:
+            self._local.dynamic_params = {**previous_dynamic_params, **dynamic_params}
         try:
             return self._execute_flow_impl(
                 flow_name,
@@ -1360,6 +1419,7 @@ class FlowExecutor:
         finally:
             self._local.dry_run = previous_dry_run
             self._local.dry_run_unsupported = previous_unsupported
+            self._local.dynamic_params = previous_dynamic_params
 
     def _execute_flow_impl(
         self,
@@ -1475,7 +1535,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
 
         for idx, step in enumerate(flow.steps):
@@ -1549,6 +1612,7 @@ class FlowExecutor:
                 step_index=idx,
                 step_name=step.display_name,
                 logger=_logger,
+                output_mapping=step.output_mapping,
             )
 
             # Crash-resume checkpoint (issue #128) — write after every
@@ -1638,6 +1702,7 @@ class FlowExecutor:
         force: bool = False,
         deadline: float | None = None,
         cancel_token: CancellationToken | None = None,
+        dynamic_params: dict[str, Any] | None = None,
     ) -> ExecutionResult:
         """Asynchronously execute a registered flow (issue #80).
 
@@ -1683,6 +1748,10 @@ class FlowExecutor:
                 between steps / DAG levels, mirroring :meth:`execute_flow`.
             cancel_token: Optional :class:`CancellationToken` (issue #142);
                 checked between steps / DAG levels.
+            dynamic_params: Optional parameters merged into the running context
+                after ``input_schema`` validation and hidden from the
+                LLM-visible ``input_schema`` (issue #316); see
+                :meth:`execute_flow` for full semantics.
 
         Returns:
             An :class:`ExecutionResult` with the full execution log.
@@ -1701,13 +1770,19 @@ class FlowExecutor:
 
         self._assert_async_lane_supported(flow)
 
-        if isinstance(flow, DAGFlow):
-            return await self._execute_dag_flow_async(
+        previous_dynamic_params = self._local.dynamic_params
+        if dynamic_params is not None:
+            self._local.dynamic_params = {**previous_dynamic_params, **dynamic_params}
+        try:
+            if isinstance(flow, DAGFlow):
+                return await self._execute_dag_flow_async(
+                    flow, initial_input, deadline=deadline, cancel_token=cancel_token
+                )
+            return await self._execute_linear_flow_async(
                 flow, initial_input, deadline=deadline, cancel_token=cancel_token
             )
-        return await self._execute_linear_flow_async(
-            flow, initial_input, deadline=deadline, cancel_token=cancel_token
-        )
+        finally:
+            self._local.dynamic_params = previous_dynamic_params
 
     @staticmethod
     def _assert_async_lane_supported(flow: Any) -> None:
@@ -1800,7 +1875,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
         for idx, step in enumerate(flow.steps):
             # Cooperative cancellation at the step boundary (issue #142).
@@ -1840,6 +1918,7 @@ class FlowExecutor:
                 step_index=idx,
                 step_name=step.display_name,
                 logger=_logger,
+                output_mapping=step.output_mapping,
             )
 
         if flow.output_schema is not None:
@@ -1927,7 +2006,10 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        context: dict[str, Any] = dict(initial_input)
+        # Seed the context from the validated initial input, then layer any
+        # dynamic params (#316) on top — server-supplied values win over an
+        # LLM-provided key of the same name and are never in input_schema.
+        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
         log: list[StepRecord] = []
         flat_index = 0
         levels = self._compute_dag_levels(flow)
@@ -2011,7 +2093,16 @@ class FlowExecutor:
                         initial_input=initial_input,
                     )
                 assert record.outputs is not None
-                for key, value in record.outputs.items():
+                # Project each step's outputs through its output_mapping (#386)
+                # before sibling-collision detection and the level merge, so
+                # collisions are judged on the keys that actually reach context.
+                mapped_outputs = apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=record.step_index,
+                )
+                for key, value in mapped_outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
                             step.display_name,
@@ -2984,7 +3075,14 @@ class FlowExecutor:
                 )
 
             assert record.outputs is not None  # success guarantees outputs
-            context.update(record.outputs)
+            context.update(
+                apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
 
             self._save_linear_snapshot(
                 trace_id=trace_id,
@@ -3154,6 +3252,11 @@ class FlowExecutor:
 
         If *input_mapping* is empty the full *context* is returned as-is.
 
+        String mapping values are resolved against *context*: a plain key is a
+        top-level lookup, while a string starting with ``/`` is an RFC-6901 JSON
+        pointer resolved against the nested context (issue #387).  Non-string
+        values are literal constants.
+
         Args:
             step: The flow step whose inputs need to be resolved.
             context: The accumulated context built from the initial input and
@@ -3164,8 +3267,8 @@ class FlowExecutor:
             A dictionary ready to be passed to the tool.
 
         Raises:
-            InputMappingError: When a string mapping value is not present in
-                *context*.
+            InputMappingError: When a plain key is absent from *context* or a
+                JSON pointer cannot be resolved against it.
         """
         if not step.input_mapping:
             return dict(context)
@@ -3174,9 +3277,15 @@ class FlowExecutor:
         step_label = step.display_name or step.flow_name or "<step>"
         for target_key, source in step.input_mapping.items():
             if isinstance(source, str):
-                if source not in context:
+                if is_pointer(source):
+                    try:
+                        resolved[target_key] = resolve_pointer(context, source)
+                    except PointerResolutionError as exc:
+                        raise InputMappingError(step_label, step_index, exc.failed_at) from exc
+                elif source not in context:
                     raise InputMappingError(step_label, step_index, source)
-                resolved[target_key] = context[source]
+                else:
+                    resolved[target_key] = context[source]
             else:
                 # Literal constant — use the value directly.
                 resolved[target_key] = source
@@ -4325,7 +4434,8 @@ class FlowExecutor:
             log = list(resume.execution_log)
             flat_index = len(log)
         else:
-            context = dict(initial_input)
+            # Layer dynamic params (#316) over the validated initial input.
+            context = {**initial_input, **self._local.dynamic_params}
             log = []
             flat_index = 0
         levels = self._compute_dag_levels(flow)
@@ -4449,7 +4559,13 @@ class FlowExecutor:
                             initial_input=initial_input,
                         )
                     assert record.outputs is not None
-                    for key, value in record.outputs.items():
+                    mapped_outputs = apply_output_mapping(
+                        record.outputs,
+                        step.output_mapping,
+                        tool_name=step.display_name,
+                        step_index=record.step_index,
+                    )
+                    for key, value in mapped_outputs.items():
                         if key in level_outputs:
                             conflict_err = FlowExecutionError(
                                 step.display_name,
@@ -4555,8 +4671,17 @@ class FlowExecutor:
                     )
 
                 assert record.outputs is not None  # success guarantees outputs
+                # Project through output_mapping (#386) before sibling-conflict
+                # detection, the level merge, and branch evaluation, so every
+                # downstream check sees the keys that actually reach context.
+                mapped_outputs = apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=record.step_index,
+                )
                 # Detect sibling key conflicts to preserve determinism.
-                for key, value in record.outputs.items():
+                for key, value in mapped_outputs.items():
                     if key in level_outputs:
                         conflict_err = FlowExecutionError(
                             step.display_name,
@@ -4604,7 +4729,7 @@ class FlowExecutor:
                         step=step,
                         context=context,
                         level_outputs=level_outputs,
-                        step_outputs=record.outputs,
+                        step_outputs=mapped_outputs,
                     )
                     if isinstance(branch_outcome, PredicateSyntaxError):
                         err_type, err_msg = _exc_to_strings(branch_outcome)

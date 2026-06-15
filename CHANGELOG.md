@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`FlowStep.output_mapping`** (#386): an optional `{context_key: output_key}`
+  mapping that renames and prunes a tool's validated outputs before they merge
+  into the accumulated context. Absent (the default) merges every key verbatim;
+  when set, only the listed output keys merge, each renamed to its context key,
+  and a mapped key the tool did not produce raises the new `OutputMappingError`
+  (`CW-E041`). The raw outputs stay on `StepRecord.outputs` — the mapping
+  affects only the context merge. Honoured across the linear and DAG lanes
+  (sync and async), resume/replay, the `FlowBuilder.step(..., output_mapping=)`
+  helper, serialization, the published JSON Schema, and `compile_flow` static
+  validation.
+- **JSON-pointer `input_mapping` lookups** (#387): an `input_mapping` string
+  that starts with `/` is now resolved as an RFC-6901 JSON pointer against the
+  nested context (e.g. `"/user/address/city"`, `"/items/0/id"`), replacing the
+  need for a `json_pluck` step per nested field. Plain keys are unchanged; a
+  miss raises `InputMappingError` naming the pointer. Pointer resolution is
+  shared with contrib's `json_pluck` via a new dependency-free
+  `chainweaver._pointer` module so core never imports the optional `contrib`
+  extra. **Behaviour change:** a pre-existing flat key whose value literally
+  started with `/` now means a pointer — address such a key with the `~1`
+  escape (`"/raw"` → `"/~1raw"`).
+- **Runtime dynamic-parameter injection** (#316): `execute_flow` /
+  `execute_flow_async` accept a `dynamic_params={...}` keyword whose values are
+  merged into the running context *after* `input_schema` validation, so they
+  reach every step's `input_mapping` and the final output without ever
+  appearing in the LLM-visible `input_schema` — for per-request secrets (auth
+  tokens, account numbers) a model must never see or hallucinate. A declarative
+  `Flow.dynamic_params` / `DAGFlow.dynamic_params` tuple records which params a
+  flow expects for hosts and export adapters. Composed sub-flows inherit the
+  injected params.
+
 ## [0.13.0] - 2026-06-15
 
 ### Added

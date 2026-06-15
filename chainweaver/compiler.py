@@ -14,6 +14,7 @@ from typing import Union, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
+from chainweaver._pointer import is_pointer
 from chainweaver.flow import Flow
 from chainweaver.tools import Tool
 
@@ -203,7 +204,27 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                         )
                     )
 
-                if isinstance(source, str):
+                if isinstance(source, str) and is_pointer(source):
+                    # A JSON pointer (#387) addresses nested structure: only its
+                    # first token is a context key, and the nested value's type
+                    # cannot be resolved statically, so validate that the root
+                    # token exists and skip the type-compatibility check.
+                    root_token = source[1:].split("/")[0].replace("~1", "/").replace("~0", "~")
+                    if root_token not in context_fields:
+                        errors.append(
+                            CompilationError(
+                                step_index=idx,
+                                tool_name=step.tool_name,
+                                field_name=source,
+                                issue_type="missing_mapping_key",
+                                detail=(
+                                    f"Step {idx} ('{step.tool_name}'): pointer '{source}' root "
+                                    f"key '{root_token}' not in upstream outputs "
+                                    f"{set(context_fields.keys())}."
+                                ),
+                            )
+                        )
+                elif isinstance(source, str):
                     if source not in context_fields:
                         errors.append(
                             CompilationError(
@@ -281,13 +302,41 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                 )
             )
 
+        # Resolve the keys this step actually contributes to the context.  An
+        # output_mapping (#386) renames/prunes the tool's outputs before the
+        # merge, so the contribution is keyed by the mapping's *context* keys; a
+        # mapped output_key that the tool does not declare is a static error.
+        tool_output_fields = _get_model_fields(tool.output_schema)
+        if step.output_mapping is None:
+            context_contribution: dict[str, type | None] = {
+                name: _get_field_type(finfo) for name, finfo in tool_output_fields.items()
+            }
+        else:
+            context_contribution = {}
+            for context_key, output_key in step.output_mapping.items():
+                if output_key not in tool_output_fields:
+                    errors.append(
+                        CompilationError(
+                            step_index=idx,
+                            tool_name=step.tool_name,
+                            field_name=output_key,
+                            issue_type="unknown_output_key",
+                            detail=(
+                                f"Step {idx} ('{step.tool_name}'): output_mapping references "
+                                f"output key '{output_key}' not declared by the tool "
+                                f"{set(tool_output_fields.keys())}."
+                            ),
+                        )
+                    )
+                    continue
+                context_contribution[context_key] = _get_field_type(tool_output_fields[output_key])
+
         # Statically detectable context-key collision (issue #337): this step's
-        # output fields overwrite keys already in the accumulated context.
+        # contributed keys overwrite keys already in the accumulated context.
         # Suppressed when the flow opts into overwrite-on-collision, which is
         # the documented escape hatch for intentional refine-in-place pipelines.
-        tool_output_fields = _get_model_fields(tool.output_schema)
         if flow.on_context_collision != "overwrite":
-            for name in tool_output_fields:
+            for name in context_contribution:
                 if name in context_fields:
                     warnings.append(
                         CompilationWarning(
@@ -310,9 +359,8 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                         )
                     )
 
-        # Update context with this tool's output fields.
-        for name, finfo in tool_output_fields.items():
-            context_fields[name] = _get_field_type(finfo)
+        # Update context with this step's contributed (possibly remapped) keys.
+        context_fields.update(context_contribution)
 
     # 4. Output coverage.
     if flow.output_schema is not None:

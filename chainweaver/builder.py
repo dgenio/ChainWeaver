@@ -72,22 +72,40 @@ class FlowBuilder:
     # Step accumulation
     # ------------------------------------------------------------------
 
-    def step(self, tool_name: str, **mapping: Any) -> FlowBuilder:
+    def step(
+        self,
+        tool_name: str,
+        *,
+        output_mapping: dict[str, str] | None = None,
+        **mapping: Any,
+    ) -> FlowBuilder:
         """Add a step that invokes *tool_name* with the given *mapping*.
 
         Keyword arguments become the ``input_mapping`` for the step.  String
-        values are treated as context-key lookups; non-string values are used
-        as literal constants.  Omitting keyword arguments produces an empty
-        mapping (full-context passthrough).
+        values are treated as context lookups — a plain key is a top-level
+        lookup and a string starting with ``/`` is an RFC-6901 JSON pointer into
+        the nested context (issue #387); non-string values are literal
+        constants.  Omitting keyword arguments produces an empty mapping
+        (full-context passthrough).
 
         Args:
             tool_name: Name of the tool to invoke.
+            output_mapping: Optional ``{context_key: output_key}`` projection
+                applied to the tool's outputs before they merge into the context
+                (issue #386); ``None`` (the default) merges every output key
+                verbatim.
             **mapping: Keyword arguments that form the ``input_mapping`` dict.
 
         Returns:
             ``self`` — supports method chaining.
         """
-        self._steps.append(FlowStep(tool_name=tool_name, input_mapping=dict(mapping)))
+        self._steps.append(
+            FlowStep(
+                tool_name=tool_name,
+                input_mapping=dict(mapping),
+                output_mapping=output_mapping,
+            )
+        )
         return self
 
     def step_from(self, flow_step: FlowStep) -> FlowBuilder:

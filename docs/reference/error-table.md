@@ -58,6 +58,7 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E038` | `FuzzConfigError` | A fuzzing run could not be configured (no properties, `runs < 1`, no input source). |
 | `CW-E039` | `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field. |
 | `CW-E040` | `FixtureStaleError` | A `record_then_replay` invocation could not be matched to a recording. |
+| `CW-E041` | `OutputMappingError` | A step's `output_mapping` references an output key the tool did not produce. |
 
 ## Catching strategy
 

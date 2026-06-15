@@ -63,6 +63,7 @@ graph = DAGFlow(
 |---|---|
 | `tool_name` | Name of the tool to invoke at this step. |
 | `input_mapping` | `dict[str, Any]` — see below. |
+| `output_mapping` | Optional `{context_key: output_key}` to rename/prune outputs before merge (#386). |
 | `retry_policy` | Optional `RetryPolicy` (delegated to `tenacity`). |
 | `on_error` | Optional fallback strategy (`skip`, `fallback_tool`). |
 
@@ -70,12 +71,29 @@ graph = DAGFlow(
 
 | Value type | Behavior |
 |---|---|
-| `str` | Looked up as a key in the accumulated execution context. |
+| `str` (plain key) | Looked up as a top-level key in the accumulated execution context. |
+| `str` starting with `/` | RFC-6901 JSON pointer into the nested context — e.g. `"/user/address/city"` (#387). |
 | Non-string (`int`, `float`, `bool`, …) | Used as a literal constant. |
 | Empty `{}` (default) | The tool receives the full current context (use sparingly). |
 
 The accumulated context starts as the `initial_input` dict and grows as each step's
 validated outputs are merged in.
+
+### `output_mapping` semantics
+
+`output_mapping` is an optional `{context_key: output_key}` dict applied to a
+tool's validated outputs *before* they merge into the context: only the listed
+output keys merge, each renamed to its context key. Absent (the default) merges
+every output key verbatim. A mapped `output_key` the tool did not produce raises
+`OutputMappingError`. The raw outputs are still recorded on `StepRecord.outputs`.
+
+### Dynamic parameters (`dynamic_params`)
+
+Pass `execute_flow(..., dynamic_params={...})` to inject values into the context
+*after* `input_schema` validation. They are available to every step's
+`input_mapping` and flow through to the final output, but are never part of the
+LLM-visible `input_schema` — the place for per-request secrets such as auth
+tokens or account numbers (#316).
 
 ## `FlowRegistry` and `FlowExecutor`
 
