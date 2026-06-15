@@ -99,7 +99,7 @@ chainweaver/
 ├── viz.py             ASCII + Mermaid + DOT renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli/               typer-based CLI command package (#333): inspect/viz (ascii/dot/mermaid + --result overlay, #392), explain (deterministic LLM-free review render, #420), init (project scaffolder, #441), validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor (--check-drift / --preflight / --profile first-run, #442), fuzz, service
+├── cli/               typer-based CLI command package (#333): inspect/viz (ascii/dot/mermaid + --result overlay, #392), explain (deterministic LLM-free review render, #420), init (project scaffolder, #441), validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor group (`doctor flow` --check-drift / --preflight / --profile first-run #442; `doctor vscode|claude|opencode` read-only coding-agent workspace inspectors #264/#270/#275), fuzz, service
 │   ├── __init__.py    Wires the command submodules, defines the ``main`` entry point, re-exports the stable surface (``app``, ``set_default_registry`` …)
 │   ├── _shared.py     Typer ``app`` / sub-apps, registry state, shared flow/result loading, error→exit-code handling, ``--format json`` envelope, and flow-resolution/discovery (#381, #440)
 │   └── <command>.py   One module per command group; each registers on the shared ``app`` at import time

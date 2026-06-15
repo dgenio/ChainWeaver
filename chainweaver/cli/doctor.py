@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 from enum import Enum
@@ -29,6 +31,20 @@ from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, Flow
 from chainweaver.registry import FlowRegistry
 from chainweaver.tools import Tool
+
+# ``doctor`` is a command *group*: ``doctor flow`` runs flow diagnostics
+# (drift / preflight / first-run readiness) and ``doctor {vscode,claude,opencode}``
+# inspect a workspace's coding-agent integration (issues #264 / #270 / #275).
+doctor_app = typer.Typer(
+    name="doctor",
+    help=(
+        "Diagnose flows and inspect coding-agent setup. "
+        "Use 'doctor flow' for flow drift/preflight/readiness checks and "
+        "'doctor vscode|claude|opencode' to inspect a workspace's MCP / observe setup."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(doctor_app, name="doctor")
 
 
 def _doctor_check_drift(
@@ -358,6 +374,474 @@ def _run_first_run_profile(fmt: OutputFormat) -> None:
         raise typer.Exit(code=1)
 
 
+# ---------------------------------------------------------------------------
+# Coding-agent workspace inspectors (issues #264 / #270 / #275)
+#
+# These commands are *read-only*: they inspect a workspace and report what is
+# configured for the observe → suggest → compile workflow. They never modify
+# files. ``--fix-dry-run`` prints the config that *would* be written (so the
+# actual config-writing helpers, issues #269 / #271 / #277, stay separate).
+# ---------------------------------------------------------------------------
+
+# A configured MCP server is treated as a ChainWeaver FlowServer when its key
+# or its (serialised) spec mentions this token — a deliberately loose heuristic
+# since users name the server freely.
+_FLOWSERVER_HINT = "chainweaver"
+
+_VSCODE_FLOWSERVER_SNIPPET = """{
+  "servers": {
+    "chainweaver": {
+      "command": "chainweaver",
+      "args": ["serve", "<flow-file-or-dir>", "--tools", "<your.tools.module>"]
+    }
+  }
+}"""
+
+_CLAUDE_FLOWSERVER_SNIPPET = """{
+  "mcpServers": {
+    "chainweaver": {
+      "command": "chainweaver",
+      "args": ["serve", "<flow-file-or-dir>", "--tools", "<your.tools.module>"]
+    }
+  }
+}"""
+
+_OPENCODE_FLOWSERVER_SNIPPET = """{
+  "mcp": {
+    "chainweaver": {
+      "command": "chainweaver",
+      "args": ["serve", "<flow-file-or-dir>", "--tools", "<your.tools.module>"]
+    }
+  }
+}"""
+
+
+def _strip_jsonc_comments(text: str) -> str:
+    """Strip ``//`` line and ``/* */`` block comments from JSONC text.
+
+    Deliberately simple — good enough for editor config files, which do not, in
+    practice, embed comment markers inside string literals.
+    """
+    no_block = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return re.sub(r"(?m)//.*$", "", no_block)
+
+
+def _load_json_config(path: Path) -> tuple[bool, dict[str, Any] | None, str | None]:
+    """Read a JSON / JSONC config file.
+
+    Returns ``(present, parsed_or_None, parse_error_or_None)``.  A JSONC file
+    (``//`` or ``/* */`` comments, used by some editors) is retried after a
+    best-effort comment strip so it still parses.
+    """
+    if not path.is_file():
+        return False, None, None
+    text = path.read_text(encoding="utf-8")
+    try:
+        return True, json.loads(text), None
+    except json.JSONDecodeError:
+        try:
+            return True, json.loads(_strip_jsonc_comments(text)), None
+        except json.JSONDecodeError as exc:
+            return True, None, exc.msg
+
+
+def _find_flowserver(servers: dict[str, Any]) -> str | None:
+    """Return the name of the first MCP server that looks like a FlowServer."""
+    for name, spec in servers.items():
+        if _FLOWSERVER_HINT in name.lower():
+            return name
+        if isinstance(spec, dict) and _FLOWSERVER_HINT in json.dumps(spec).lower():
+            return name
+    return None
+
+
+def _flowserver_check(servers: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Build the 'ChainWeaver FlowServer' check (and recommendation if missing)."""
+    name = _find_flowserver(servers)
+    if name is not None:
+        return (
+            {
+                "name": "ChainWeaver FlowServer",
+                "status": "ok",
+                "detail": f"server '{name}' looks like a ChainWeaver FlowServer",
+            },
+            [],
+        )
+    return (
+        {
+            "name": "ChainWeaver FlowServer",
+            "status": "missing",
+            "detail": "no ChainWeaver FlowServer among the configured MCP servers",
+        },
+        ["Expose reviewed macro-flows by adding a ChainWeaver FlowServer MCP server."],
+    )
+
+
+def _mcp_config_checks(
+    label: str,
+    config_path: Path,
+    *,
+    servers_key: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Inspect one MCP config file: presence, server count, FlowServer presence.
+
+    *servers_key* is the editor-specific key holding the server map
+    (``servers`` for VS Code, ``mcpServers`` for Claude Code, ``mcp`` for
+    OpenCode).
+    """
+    present, data, parse_error = _load_json_config(config_path)
+    if not present:
+        return (
+            [{"name": f"{label} MCP config", "status": "missing", "detail": f"no {config_path}"}],
+            [f"Create {config_path} with a ChainWeaver FlowServer MCP server entry."],
+        )
+    if parse_error is not None:
+        return (
+            [
+                {
+                    "name": f"{label} MCP config",
+                    "status": "missing",
+                    "detail": f"{config_path} is not valid JSON: {parse_error}",
+                }
+            ],
+            [],
+        )
+    raw = data.get(servers_key) if isinstance(data, dict) else None
+    servers = raw if isinstance(raw, dict) else {}
+    checks = [
+        {
+            "name": f"{label} MCP config",
+            "status": "ok",
+            "detail": f"{config_path} configures {len(servers)} MCP server(s)",
+        }
+    ]
+    flowserver_check, recs = _flowserver_check(servers)
+    checks.append(flowserver_check)
+    return checks, recs
+
+
+def _trace_dir_check(workspace: Path) -> dict[str, Any]:
+    """Report whether ``.chainweaver/traces/`` exists and holds trace files."""
+    trace_dir = workspace / ".chainweaver" / "traces"
+    if not trace_dir.is_dir():
+        return {
+            "name": "trace capture",
+            "status": "missing",
+            "detail": f"no trace directory at {trace_dir}",
+        }
+    files = [p for p in trace_dir.rglob("*") if p.is_file()]
+    return {
+        "name": "trace capture",
+        "status": "ok" if files else "info",
+        "detail": (
+            f"{len(files)} trace file(s) under {trace_dir}"
+            if files
+            else f"{trace_dir} exists but holds no trace files yet"
+        ),
+    }
+
+
+def _active_flows_check(workspace: Path) -> dict[str, Any]:
+    """Report how many flow files are discoverable to expose as macro-tools."""
+    flow_files = _iter_flow_files(workspace)
+    return {
+        "name": "macro-flows",
+        "status": "ok" if flow_files else "missing",
+        "detail": (
+            f"{len(flow_files)} flow file(s) discovered"
+            if flow_files
+            else "no .flow.{yaml,yml,json} files found to expose as macro-tools"
+        ),
+    }
+
+
+def _editor_report(
+    editor: str,
+    workspace: Path,
+    *,
+    checks: list[dict[str, Any]],
+    recommendations: list[str],
+    fix_dry_run: bool,
+    snippet: str,
+    snippet_path: Path,
+) -> dict[str, Any]:
+    """Assemble the common editor-report envelope shared by every inspector."""
+    proposed: list[dict[str, Any]] = []
+    if fix_dry_run:
+        proposed.append(
+            {"path": str(snippet_path), "action": "add ChainWeaver FlowServer", "snippet": snippet}
+        )
+    return {
+        "editor": editor,
+        "workspace": str(workspace),
+        "ok": True,
+        "checks": checks,
+        "recommendations": recommendations,
+        "proposed_changes": proposed,
+    }
+
+
+def _vscode_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
+    """Inspect a VS Code / GitHub Copilot workspace (issue #264)."""
+    mcp_path = workspace / ".vscode" / "mcp.json"
+    checks, recommendations = _mcp_config_checks("VS Code", mcp_path, servers_key="servers")
+    checks.append(_trace_dir_check(workspace))
+    checks.append(_active_flows_check(workspace))
+    return _editor_report(
+        "vscode",
+        workspace,
+        checks=checks,
+        recommendations=recommendations,
+        fix_dry_run=fix_dry_run,
+        snippet=_VSCODE_FLOWSERVER_SNIPPET,
+        snippet_path=mcp_path,
+    )
+
+
+def _claude_hooks_check(workspace: Path) -> dict[str, Any]:
+    """Report whether a PostToolUse observe hook is configured for Claude Code."""
+    for rel in (".claude/settings.json", ".claude/settings.local.json"):
+        present, data, _ = _load_json_config(workspace / rel)
+        if (
+            present
+            and isinstance(data, dict)
+            and "hooks" in data
+            and "posttooluse" in json.dumps(data.get("hooks")).lower()
+        ):
+            return {
+                "name": "observe hooks",
+                "status": "ok",
+                "detail": f"PostToolUse hook configured in {rel}",
+            }
+    return {
+        "name": "observe hooks",
+        "status": "missing",
+        "detail": "no PostToolUse hook in .claude/settings*.json for passive trace capture",
+    }
+
+
+def _claude_scope_check(workspace: Path) -> dict[str, Any]:
+    """Summarise which Claude Code config scopes exist in the workspace."""
+    present = [
+        rel
+        for rel in (".mcp.json", ".claude/settings.json", ".claude/settings.local.json")
+        if (workspace / rel).is_file()
+    ]
+    return {
+        "name": "config scope",
+        "status": "ok" if present else "info",
+        "detail": ("present: " + ", ".join(present))
+        if present
+        else "no project (.mcp.json) or local (.claude/settings*.json) config found",
+    }
+
+
+def _claude_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
+    """Inspect a Claude Code workspace (issue #270)."""
+    mcp_path = workspace / ".mcp.json"
+    checks, recommendations = _mcp_config_checks("Claude Code", mcp_path, servers_key="mcpServers")
+    checks.append(_claude_scope_check(workspace))
+    hooks_check = _claude_hooks_check(workspace)
+    checks.append(hooks_check)
+    if hooks_check["status"] == "missing":
+        recommendations.append(
+            "Add a PostToolUse hook in .claude/settings.json to passively capture tool traces."
+        )
+    checks.append(_trace_dir_check(workspace))
+    checks.append(_active_flows_check(workspace))
+    return _editor_report(
+        "claude",
+        workspace,
+        checks=checks,
+        recommendations=recommendations,
+        fix_dry_run=fix_dry_run,
+        snippet=_CLAUDE_FLOWSERVER_SNIPPET,
+        snippet_path=mcp_path,
+    )
+
+
+_OPENCODE_CONFIG_NAMES = ("opencode.json", "opencode.jsonc", ".opencode.json")
+
+
+def _opencode_config_path(workspace: Path) -> Path:
+    """Return the first existing OpenCode config path, else the canonical default."""
+    for name in _OPENCODE_CONFIG_NAMES:
+        candidate = workspace / name
+        if candidate.is_file():
+            return candidate
+    return workspace / _OPENCODE_CONFIG_NAMES[0]
+
+
+def _opencode_plugin_check(workspace: Path, config: dict[str, Any] | None) -> dict[str, Any]:
+    """Report whether an OpenCode ChainWeaver plugin is configured."""
+    plugin_dir = workspace / ".opencode" / "plugin"
+    if plugin_dir.is_dir() and any(plugin_dir.iterdir()):
+        return {
+            "name": "OpenCode plugin",
+            "status": "ok",
+            "detail": f"plugin files present under {plugin_dir}",
+        }
+    if isinstance(config, dict) and config.get("plugin"):
+        return {
+            "name": "OpenCode plugin",
+            "status": "ok",
+            "detail": "a 'plugin' entry is declared in the OpenCode config",
+        }
+    return {
+        "name": "OpenCode plugin",
+        "status": "missing",
+        "detail": "no ChainWeaver OpenCode plugin (.opencode/plugin/) or config 'plugin' entry",
+    }
+
+
+def _opencode_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
+    """Inspect an OpenCode workspace (issue #275)."""
+    config_path = _opencode_config_path(workspace)
+    _, config, _ = _load_json_config(config_path)
+    checks, recommendations = _mcp_config_checks("OpenCode", config_path, servers_key="mcp")
+    plugin_check = _opencode_plugin_check(workspace, config)
+    checks.append(plugin_check)
+    if plugin_check["status"] == "missing":
+        recommendations.append(
+            "Add a ChainWeaver OpenCode plugin to normalise tool-execution events into traces."
+        )
+    flow_files = _iter_flow_files(workspace)
+    checks.append(_active_flows_check(workspace))
+    if flow_files:
+        checks.append(
+            {
+                "name": "tool-name collisions",
+                "status": "info",
+                "detail": (
+                    "verify generated macro-tool names do not collide with built-in/custom "
+                    "OpenCode tool names before exposing them"
+                ),
+            }
+        )
+    checks.append(_trace_dir_check(workspace))
+    return _editor_report(
+        "opencode",
+        workspace,
+        checks=checks,
+        recommendations=recommendations,
+        fix_dry_run=fix_dry_run,
+        snippet=_OPENCODE_FLOWSERVER_SNIPPET,
+        snippet_path=config_path,
+    )
+
+
+def _format_editor_table(report: dict[str, Any]) -> str:
+    """Render an editor inspection report as a human-readable table."""
+    marks = {"ok": "OK  ", "missing": "MISS", "info": "INFO"}
+    lines = [
+        f"ChainWeaver doctor — {report['editor']} ({report['workspace']})",
+        "─" * 70,
+    ]
+    for check in report["checks"]:
+        lines.append(f" [{marks.get(check['status'], '?   ')}] {check['name']}: {check['detail']}")
+    if report["recommendations"]:
+        lines.append("")
+        lines.append("Recommendations:")
+        lines.extend(f"  • {rec}" for rec in report["recommendations"])
+    if report["proposed_changes"]:
+        lines.append("")
+        lines.append("Proposed changes (dry run — no files were modified):")
+        for change in report["proposed_changes"]:
+            lines.append(f"  ~ {change['action']} → {change['path']}")
+            lines.extend(f"      {line}" for line in change["snippet"].splitlines())
+    return "\n".join(lines)
+
+
+def _run_editor_doctor(report: dict[str, Any], fmt: OutputFormat) -> None:
+    """Emit an editor inspection *report* in the requested format."""
+    if fmt is OutputFormat.JSON:
+        _emit_json(report)
+    else:
+        typer.echo(_format_editor_table(report))
+
+
+def _validate_workspace(workspace: Path) -> None:
+    """Exit with code 2 if *workspace* is missing or not a directory."""
+    if not workspace.exists():
+        typer.echo(f"chainweaver: workspace not found: {workspace}", err=True)
+        raise typer.Exit(code=2)
+    if not workspace.is_dir():
+        typer.echo(f"chainweaver: not a directory: {workspace}", err=True)
+        raise typer.Exit(code=2)
+
+
+_WORKSPACE_OPTION = typer.Option(
+    Path("."),
+    "--workspace",
+    "-w",
+    help="Workspace directory to inspect (default: current directory).",
+)
+_EDITOR_FORMAT_OPTION = typer.Option(
+    OutputFormat.TABLE,
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Output format: 'table' (human-readable) or 'json'.",
+)
+_FIX_DRY_RUN_OPTION = typer.Option(
+    False,
+    "--fix-dry-run",
+    help="Also print the config that would fix detected gaps, without modifying any files.",
+)
+
+
+@doctor_app.command("vscode")
+def doctor_vscode(
+    workspace: Path = _WORKSPACE_OPTION,
+    output_format: OutputFormat = _EDITOR_FORMAT_OPTION,
+    fix_dry_run: bool = _FIX_DRY_RUN_OPTION,
+) -> None:
+    """Inspect a VS Code / GitHub Copilot workspace for observe/compile readiness (issue #264).
+
+    Read-only: detects ``.vscode/mcp.json``, counts configured MCP servers,
+    flags whether a ChainWeaver FlowServer is exposed, and checks for a trace
+    directory and discoverable macro-flows. Exit code is ``0`` when the
+    workspace is inspectable (missing config is reported, not an error) and
+    ``2`` when *workspace* does not exist or is not a directory.
+    """
+    _validate_workspace(workspace)
+    _run_editor_doctor(_vscode_report(workspace, fix_dry_run=fix_dry_run), output_format)
+
+
+@doctor_app.command("claude")
+def doctor_claude(
+    workspace: Path = _WORKSPACE_OPTION,
+    output_format: OutputFormat = _EDITOR_FORMAT_OPTION,
+    fix_dry_run: bool = _FIX_DRY_RUN_OPTION,
+) -> None:
+    """Inspect a Claude Code workspace's MCP and hook setup (issue #270).
+
+    Read-only: detects ``.mcp.json`` servers and a ChainWeaver FlowServer,
+    summarises project/local config scope, checks for a PostToolUse observe
+    hook in ``.claude/settings*.json``, and reports trace capture and
+    discoverable macro-flows. Same exit-code contract as ``doctor vscode``.
+    """
+    _validate_workspace(workspace)
+    _run_editor_doctor(_claude_report(workspace, fix_dry_run=fix_dry_run), output_format)
+
+
+@doctor_app.command("opencode")
+def doctor_opencode(
+    workspace: Path = _WORKSPACE_OPTION,
+    output_format: OutputFormat = _EDITOR_FORMAT_OPTION,
+    fix_dry_run: bool = _FIX_DRY_RUN_OPTION,
+) -> None:
+    """Inspect an OpenCode workspace's MCP, plugin, and custom-tool setup (issue #275).
+
+    Read-only: detects the OpenCode config (``opencode.json`` / ``.jsonc``) and
+    its MCP servers, flags a ChainWeaver FlowServer and a ChainWeaver plugin,
+    reports discoverable macro-flows (with a tool-name-collision reminder), and
+    checks trace capture. Same exit-code contract as ``doctor vscode``.
+    """
+    _validate_workspace(workspace)
+    _run_editor_doctor(_opencode_report(workspace, fix_dry_run=fix_dry_run), output_format)
+
+
 _DOCTOR_PATH_ARG = typer.Argument(
     None,
     help="Path to a .flow.* file or a directory of flow files (not required with --profile).",
@@ -397,7 +881,7 @@ _DOCTOR_FORMAT_OPTION = typer.Option(
 )
 
 
-@app.command("doctor")
+@doctor_app.command("flow")
 def doctor_command(
     path: Path | None = _DOCTOR_PATH_ARG,
     check_drift: bool = _DOCTOR_CHECK_DRIFT_OPTION,
@@ -446,7 +930,7 @@ def doctor_command(
 
     if not check_drift and not preflight:
         typer.echo(
-            "chainweaver: 'doctor' requires --check-drift, --preflight, or --profile.",
+            "chainweaver: 'doctor flow' requires --check-drift, --preflight, or --profile.",
             err=True,
         )
         raise typer.Exit(code=1)

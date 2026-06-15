@@ -241,12 +241,12 @@ class TestDoctorPreflight:
     def test_requires_a_mode(self, tmp_path: Path) -> None:
         flow_file = tmp_path / "f.flow.yaml"
         _write_flow(flow_file, Flow(name="f", description="d", steps=[FlowStep(tool_name="a")]))
-        assert cli.main(["doctor", str(flow_file)]) == 1
+        assert cli.main(["doctor", "flow", str(flow_file)]) == 1
 
     def test_both_modes_exit_2(self, tmp_path: Path) -> None:
         flow_file = tmp_path / "f.flow.yaml"
         _write_flow(flow_file, Flow(name="f", description="d", steps=[FlowStep(tool_name="a")]))
-        assert cli.main(["doctor", str(flow_file), "--check-drift", "--preflight"]) == 2
+        assert cli.main(["doctor", "flow", str(flow_file), "--check-drift", "--preflight"]) == 2
 
     def test_valid_flow_is_ok(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], _tools_module: str
@@ -263,7 +263,9 @@ class TestDoctorPreflight:
                 ],
             ),
         )
-        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        exit_code = cli.main(
+            ["doctor", "flow", str(flow_file), "--preflight", "--tools", _tools_module]
+        )
         captured = capsys.readouterr()
         assert exit_code == 0
         assert "all 1 flow(s) ok" in captured.out
@@ -276,7 +278,9 @@ class TestDoctorPreflight:
             flow_file,
             Flow(name="bad", description="d", steps=[FlowStep(tool_name="ghost")]),
         )
-        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        exit_code = cli.main(
+            ["doctor", "flow", str(flow_file), "--preflight", "--tools", _tools_module]
+        )
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "missing_tool" in captured.out
@@ -296,7 +300,9 @@ class TestDoctorPreflight:
                 ],
             ),
         )
-        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        exit_code = cli.main(
+            ["doctor", "flow", str(flow_file), "--preflight", "--tools", _tools_module]
+        )
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "unresolved_mapping" in captured.out
@@ -310,7 +316,16 @@ class TestDoctorPreflight:
             Flow(name="ok", description="d", steps=[FlowStep(tool_name="fs.search")]),
         )
         cli.main(
-            ["doctor", str(flow_file), "--preflight", "--tools", _tools_module, "--format", "json"]
+            [
+                "doctor",
+                "flow",
+                str(flow_file),
+                "--preflight",
+                "--tools",
+                _tools_module,
+                "--format",
+                "json",
+            ]
         )
         payload = json.loads(capsys.readouterr().out)
         assert payload["flow_count"] == 1
@@ -331,7 +346,9 @@ class TestDoctorPreflight:
                 steps=[FlowStep(tool_name="fs.search", input_mapping={"q": "bogus"})],
             ),
         )
-        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        exit_code = cli.main(
+            ["doctor", "flow", str(flow_file), "--preflight", "--tools", _tools_module]
+        )
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "unresolved_mapping" in captured.out
@@ -349,5 +366,7 @@ class TestDoctorPreflight:
                 steps=[FlowStep(tool_name="fs.search", input_mapping={"q": "q"})],
             ),
         )
-        exit_code = cli.main(["doctor", str(flow_file), "--preflight", "--tools", _tools_module])
+        exit_code = cli.main(
+            ["doctor", "flow", str(flow_file), "--preflight", "--tools", _tools_module]
+        )
         assert exit_code == 0
