@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `active_flow_version` and injected `dynamic_params` (often per-request
   secrets) across an `await`. Sub-flow recursion still inherits the parent's
   values via the scoped copy.
+- **Fallback input-schema validation and attribution** (#338): sync and async
+  fallback tools continue to validate the primary step's resolved inputs
+  against their own input schemas, but validation failures now name the
+  fallback tool instead of the primary. `StepRecord` keeps the stable primary
+  `tool_name` and adds `fallback_tool_name`; the additive trace shape bumps
+  `TRACE_SCHEMA_VERSION` to `"1.1"`. `compile_flow()` now rejects missing
+  fallback tools and incompatible fallback mappings, required fields, or
+  types before execution.
 
 ## [0.13.0] - 2026-06-15
 

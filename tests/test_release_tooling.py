@@ -77,10 +77,10 @@ def test_prepare_release_updates_all_governed_references(
 
     changelog = (release_tree / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [Unreleased]\n\n## [{target}] - 2026-06-09" in changelog
-    compare_link = (
+    assert (
         f"[{target}]: https://github.com/dgenio/ChainWeaver/compare/v{current}...v{target}"
+        in changelog
     )
-    assert compare_link in changelog
 
 
 @pytest.mark.parametrize("target", ["0.12.1", "0.12.0", "v0.12.2", "0.12"])

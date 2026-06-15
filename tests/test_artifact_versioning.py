@@ -42,7 +42,7 @@ from chainweaver.tools import Tool
 def test_version_constants_are_pinned() -> None:
     """The current artifact versions are pinned so a bump is a deliberate edit."""
     assert FLOW_FORMAT_VERSION == "1"
-    assert TRACE_SCHEMA_VERSION == "1"
+    assert TRACE_SCHEMA_VERSION == "1.1"
     assert SNAPSHOT_VERSION == "1"
 
 

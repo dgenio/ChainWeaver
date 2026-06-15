@@ -1291,6 +1291,7 @@
         "error_code": "str | NoneType",
         "error_message": "str | NoneType",
         "error_type": "str | NoneType",
+        "fallback_tool_name": "str | NoneType",
         "fallback_used": "bool",
         "flow_name": "str | NoneType",
         "inputs": "dict[str, Any]",
