@@ -9,7 +9,7 @@
 
 - [ ] Linting passes (`ruff check chainweaver/ tests/ examples/`)
 - [ ] Formatting check passes (`ruff format --check chainweaver/ tests/ examples/`)
-- [ ] Type checking passes (`python -m mypy chainweaver/`)
+- [ ] Type checking passes (`python -m mypy chainweaver/ tests/`)
 - [ ] All existing tests pass (`python -m pytest tests/ -v`)
 - [ ] New tests added for new functionality
 
