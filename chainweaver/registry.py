@@ -297,8 +297,6 @@ class FlowRegistry:
         Returns:
             The first matching flow, or ``None``.
 
-        # TODO (Phase 2): Replace with embedding-based semantic similarity so
-        #   agents can discover flows from natural-language descriptions.
         """
         intent_lower = intent.lower()
         for name, version in self._store.list_keys():
