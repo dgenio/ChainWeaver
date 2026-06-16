@@ -9,7 +9,7 @@
 
 - [ ] `ruff check chainweaver/ tests/ examples/` passes.
 - [ ] `ruff format --check chainweaver/ tests/ examples/` passes.
-- [ ] `python -m mypy chainweaver/` passes.
+- [ ] `python -m mypy chainweaver/ tests/` passes.
 - [ ] `python -m pytest tests/ -v` passes.
 - [ ] Commands match the authoritative sequence exactly (see [workflows.md](workflows.md#validation-commands)).
 
@@ -41,7 +41,9 @@
 - [ ] New public symbols added to `chainweaver/__init__.py` `__all__`.
 - [ ] Intentional public API changes regenerate `tests/fixtures/public_api.json` with `python tests/scripts/regen_public_api.py`.
 - [ ] New exceptions: `__init__.py` + `__all__` + README error table — all updated.
-- [ ] `StepRecord` / `ExecutionResult` remain as dataclasses (not converted to Pydantic).
+- [ ] `StepRecord` / `ExecutionResult` remain Pydantic models with
+      serializable `error_type` / `error_message` fields, not live
+      `Exception` fields.
 - [ ] If the public API surface changed (symbols added/removed, signatures
       changed, Pydantic fields added), the snapshot fixture is regenerated:
       `python tests/scripts/regen_public_api.py` — and the resulting

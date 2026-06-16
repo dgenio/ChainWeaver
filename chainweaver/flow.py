@@ -772,13 +772,6 @@ class Flow(BaseModel):
         return result
 
 
-# TODO (Phase 2): Add conditional branching — a step that inspects
-# context values and selects the next step(s) at runtime.
-
-# TODO (Phase 2): Add determinism scoring so that partially
-# deterministic flows can be marked and handled appropriately.
-
-
 @dataclass
 class DriftInfo:
     """Describes a schema drift between a flow's stored hash and a tool's current hash.
