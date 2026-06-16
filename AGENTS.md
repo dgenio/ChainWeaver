@@ -44,6 +44,7 @@ chainweaver/
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
 ├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8)
+├── step_index.py      Named sentinels for flow input/output validation records (#339)
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)

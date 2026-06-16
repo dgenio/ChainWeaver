@@ -7,7 +7,8 @@ from typing import Protocol
 
 
 class _FlowLike(Protocol):
-    steps: Sized
+    @property
+    def steps(self) -> Sized: ...
 
 
 # Synthetic record emitted when flow input validation fails before step 0.
