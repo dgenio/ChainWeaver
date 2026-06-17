@@ -1,0 +1,28 @@
+name: log_pipeline
+tools:
+- name: read_log
+  description: Read a log file.
+  inputs:
+  - path
+  outputs:
+  - lines
+- name: filter_log
+  description: Filter log lines by level.
+  inputs:
+  - lines
+  outputs:
+  - filtered
+- name: aggregate_log
+  description: Aggregate filtered log lines into counts.
+  inputs:
+  - filtered
+  outputs:
+  - counts
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - read_log
+    - filter_log
+    - aggregate_log
+  max_hallucinated_tool_rate: 0.0

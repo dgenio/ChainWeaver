@@ -208,6 +208,13 @@ from chainweaver.proposals import (
     StructuredLLMFn,
 )
 from chainweaver.registry import FlowRegistry
+from chainweaver.routing import (
+    RoutingCase,
+    RoutingEvalResult,
+    ToolSelector,
+    evaluate_routing,
+    mine_routing_cases,
+)
 from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
     flow_from_dict,
@@ -386,6 +393,8 @@ __all__ = [
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "RoutingCase",
+    "RoutingEvalResult",
     "SafetyCeilingError",
     "SafetyLevel",
     "SchemaValidationError",
@@ -411,6 +420,7 @@ __all__ = [
     "ToolNotFoundError",
     "ToolOutputSizeError",
     "ToolSafetyContract",
+    "ToolSelector",
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
@@ -428,6 +438,7 @@ __all__ = [
     "discover_tools",
     "draft_flow_from_candidate",
     "evaluate_predicate",
+    "evaluate_routing",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -443,6 +454,7 @@ __all__ = [
     "load_agent_trace",
     "lookup_price",
     "merge_safety",
+    "mine_routing_cases",
     "minimize_failure",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",

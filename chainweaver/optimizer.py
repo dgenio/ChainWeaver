@@ -28,6 +28,7 @@ Parsing YAML requires ``pyyaml`` (the ``chainweaver[yaml]`` extra).
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -51,6 +52,7 @@ from chainweaver.proposals import (
     build_provenance,
     run_with_repair,
 )
+from chainweaver.routing import RoutingCase, ToolSelector, evaluate_routing
 from chainweaver.tools import Tool
 
 __all__ = [
@@ -188,6 +190,8 @@ def optimize_tool_descriptions(
     max_repair_attempts: int = 1,
     prompt_budget: PromptBudget | None = None,
     token_counter: Callable[[str], int] | None = None,
+    eval_cases: list[RoutingCase] | None = None,
+    routing_selector: ToolSelector | None = None,
 ) -> list[ToolDescriptionProposal]:
     """Rewrite tool descriptions for ecosystem-wide discriminability.
 
@@ -202,6 +206,11 @@ def optimize_tool_descriptions(
         max_repair_attempts: Bounded follow-up calls on malformed output (#363).
         prompt_budget: Optional token budget + overflow strategy (issue #367).
         token_counter: Optional provider-accurate token counter for the budget.
+        eval_cases: Optional routing cases (issue #374).  When supplied with
+            *routing_selector*, each proposal is annotated with the per-tool
+            selection accuracy *before* and *after* applying its rewrite.
+        routing_selector: A ``(task, candidate_tools) -> tool_name`` selector used
+            to measure routing accuracy; required to populate the accuracy fields.
 
     Returns:
         A list of :class:`ToolDescriptionProposal` objects, one per rewrite,
@@ -266,7 +275,34 @@ def optimize_tool_descriptions(
     )
     for proposal in proposals:
         proposal.provenance = provenance
+
+    if eval_cases is not None and routing_selector is not None and proposals:
+        _annotate_routing_accuracy(proposals, tools_list, eval_cases, routing_selector)
     return proposals
+
+
+def _annotate_routing_accuracy(
+    proposals: list[ToolDescriptionProposal],
+    tools: list[Tool],
+    eval_cases: list[RoutingCase],
+    selector: ToolSelector,
+) -> None:
+    """Measure per-tool routing accuracy before/after each rewrite (issue #374)."""
+    original = {tool.name: tool for tool in tools}
+    proposed = dict(original)
+    for proposal in proposals:
+        base = original.get(proposal.tool_name)
+        if base is not None:
+            # Tool is a plain class (not a Pydantic model); shallow-copy and swap
+            # the description rather than re-running the validating constructor.
+            variant = copy.copy(base)
+            variant.description = proposal.proposed_description
+            proposed[proposal.tool_name] = variant
+    before = evaluate_routing(eval_cases, original, selector=selector)
+    after = evaluate_routing(eval_cases, proposed, selector=selector)
+    for proposal in proposals:
+        proposal.routing_accuracy_before = before.per_tool_accuracy.get(proposal.tool_name)
+        proposal.routing_accuracy_after = after.per_tool_accuracy.get(proposal.tool_name)
 
 
 def optimize_new_tool_description(

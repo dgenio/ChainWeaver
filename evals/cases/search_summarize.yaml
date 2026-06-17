@@ -1,0 +1,21 @@
+name: search_summarize
+tools:
+- name: search
+  description: Search the public web for a query.
+  inputs:
+  - query
+  outputs:
+  - results
+- name: summarize
+  description: Summarize a block of text.
+  inputs:
+  - results
+  outputs:
+  - summary
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - search
+    - summarize
+  max_hallucinated_tool_rate: 0.0

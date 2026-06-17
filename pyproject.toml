@@ -167,7 +167,7 @@ python_functions = ["test_*"]
 # Bare-name imports inside tests/ (e.g. `from helpers import ...`,
 # `from strategies import ...`) resolve because pytest prepends these
 # directories to `sys.path` before collection.
-pythonpath = ["tests", "tests/property"]
+pythonpath = ["tests", "tests/property", "."]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
 markers = [

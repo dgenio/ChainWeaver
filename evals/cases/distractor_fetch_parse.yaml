@@ -1,0 +1,27 @@
+name: distractor_fetch_parse
+tools:
+- name: fetch_url
+  description: Fetch the raw bytes at a URL.
+  inputs:
+  - url
+  outputs:
+  - body
+- name: parse_json
+  description: Parse a JSON body into a record.
+  inputs:
+  - body
+  outputs:
+  - record
+- name: send_email
+  description: Send an email (unrelated distractor).
+  inputs:
+  - to
+  outputs:
+  - message_id
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - fetch_url
+    - parse_json
+  max_hallucinated_tool_rate: 0.0

@@ -120,6 +120,8 @@
     "ReplayMode",
     "ReplayResult",
     "RetryPolicy",
+    "RoutingCase",
+    "RoutingEvalResult",
     "SafetyCeilingError",
     "SafetyLevel",
     "SchemaValidationError",
@@ -145,6 +147,7 @@
     "ToolNotFoundError",
     "ToolOutputSizeError",
     "ToolSafetyContract",
+    "ToolSelector",
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
@@ -162,6 +165,7 @@
     "discover_tools",
     "draft_flow_from_candidate",
     "evaluate_predicate",
+    "evaluate_routing",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -177,6 +181,7 @@
     "load_agent_trace",
     "lookup_price",
     "merge_safety",
+    "mine_routing_cases",
     "minimize_failure",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
@@ -1219,6 +1224,29 @@
       "module": "chainweaver.flow",
       "qualname": "RetryPolicy"
     },
+    "RoutingCase": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "candidate_tools": "tuple[str, Ellipsis]",
+        "expected_tool": "str",
+        "source": "str",
+        "task": "str"
+      },
+      "module": "chainweaver.routing",
+      "qualname": "RoutingCase"
+    },
+    "RoutingEvalResult": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "accuracy": "float",
+        "confusions": "dict[str, int]",
+        "correct": "int",
+        "per_tool_accuracy": "dict[str, float]",
+        "total": "int"
+      },
+      "module": "chainweaver.routing",
+      "qualname": "RoutingEvalResult"
+    },
     "SafetyCeilingError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1457,6 +1485,11 @@
       "module": "chainweaver.contracts",
       "qualname": "ToolSafetyContract"
     },
+    "ToolSelector": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
+    },
     "ToolTimeoutError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1557,6 +1590,12 @@
       "qualname": "evaluate_predicate",
       "signature": "(predicate: str, context: dict[str, Any]) -> bool"
     },
+    "evaluate_routing": {
+      "kind": "function",
+      "module": "chainweaver.routing",
+      "qualname": "evaluate_routing",
+      "signature": "(cases: Iterable[RoutingCase], tools: Mapping[str, Tool], *, selector: ToolSelector) -> RoutingEvalResult"
+    },
     "flow_from_dict": {
       "kind": "function",
       "module": "chainweaver.serialization",
@@ -1647,6 +1686,12 @@
       "qualname": "merge_safety",
       "signature": "(contracts: Iterable[ToolSafetyContract], *, default: ToolSafetyContract | None = None) -> ToolSafetyContract"
     },
+    "mine_routing_cases": {
+      "kind": "function",
+      "module": "chainweaver.routing",
+      "qualname": "mine_routing_cases",
+      "signature": "(events: Sequence[AgentTraceEvent], *, max_task_chars: int = 280) -> list[RoutingCase]"
+    },
     "minimize_failure": {
       "kind": "function",
       "module": "chainweaver.fuzz",
@@ -1663,7 +1708,7 @@
       "kind": "function",
       "module": "chainweaver.optimizer",
       "qualname": "optimize_tool_descriptions",
-      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn | StructuredLLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE, model_info: ModelInfo | None = None, parameters: dict[str, Any] | None = None, max_repair_attempts: int = 1, prompt_budget: PromptBudget | None = None, token_counter: Callable[[str], int] | None = None) -> list[ToolDescriptionProposal]"
+      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn | StructuredLLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE, model_info: ModelInfo | None = None, parameters: dict[str, Any] | None = None, max_repair_attempts: int = 1, prompt_budget: PromptBudget | None = None, token_counter: Callable[[str], int] | None = None, eval_cases: list[RoutingCase] | None = None, routing_selector: ToolSelector | None = None) -> list[ToolDescriptionProposal]"
     },
     "parse_agent_trace": {
       "kind": "function",

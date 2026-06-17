@@ -62,7 +62,7 @@ class FakeAnthropicClient:
     def messages(self) -> FakeAnthropicClient:
         return self
 
-    def create(self, **kwargs: Any) -> _AnthropicResp:
+    def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         item = self._script.pop(0)
         if isinstance(item, Exception):
@@ -90,7 +90,7 @@ class FakeOpenAIClient:
     def completions(self) -> FakeOpenAIClient:
         return self
 
-    def create(self, **kwargs: Any) -> _OpenAIResp:
+    def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         item = self._script.pop(0)
         if isinstance(item, Exception):

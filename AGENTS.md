@@ -37,9 +37,11 @@ chainweaver/
 ├── builder.py         FlowBuilder: fluent API for constructing Flow objects
 ├── compat.py          schema_fingerprint() + check_flow_compatibility() + CompatibilityIssue
 ├── compiler.py        compile_flow(): static schema flow validation (CompilationResult)
-├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal + llm_propose_flows() + write_proposals() (#28); banned from executor.py
-├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() (#100); banned from executor.py
-├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml() + render_tool_catalogue() (#28, #100)
+├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal (+ provenance) + llm_propose_flows() + write_proposals()/read_provenance() + flow_proposal_schema() (#28, #363, #364); banned from executor.py
+├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() + description_proposal_schema() + routing-accuracy annotation (#100, #374); banned from executor.py
+├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml()/parse_llm_payload() + render_tool_catalogue() with inline metadata sanitisation (#28, #100, #363, #366)
+├── proposals.py       Shared proposer primitives: ModelInfo/ProposalProvenance (#364), StructuredLLMFn + run_with_repair() (#363), PromptBudget + apply_budget() (#367); banned from executor.py
+├── routing.py         Routing-accuracy evaluation: RoutingCase + evaluate_routing() + mine_routing_cases() (#374); banned from executor.py
 ├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + side_effect_exceeds() (#356) + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
 ├── approvals.py       ApprovalCallback Protocol + ApprovalContext/ApprovalDecision/ApprovalRecord + coerce_approval_callback — execution-time ToolSafetyContract enforcement seam (#356); mirrors decisions.py
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
@@ -66,7 +68,10 @@ chainweaver/
 │   ├── llamaindex.py  from_/to_llamaindex_tool (#82); requires chainweaver[llamaindex]
 │   ├── weaver_spec.py    Re-exports weaver-contracts types + flow_to_selectable_item + routing resolvers; needs [weaver-stack] extra (#91, #107, #233)
 │   ├── contextweaver.py  RoutingDecisionAdapter (DecisionCallback impl) + ContextweaverClient Protocol (#106)
-│   └── agent_kernel.py   KernelBackedExecutor + KernelProtocol + InMemoryKernel (#89)
+│   ├── agent_kernel.py   KernelBackedExecutor + KernelProtocol + InMemoryKernel (#89)
+│   ├── _llm_common.py    Provider-adapter base: ProviderAdapter + LLMFnOptions + LLMUsage — retry/timeout/spend-ceiling/usage around proposer LLM calls (#368)
+│   ├── llm_anthropic.py  anthropic_llm_fn() → Anthropic-backed LLMFn/StructuredLLMFn (#368); requires chainweaver[llm-anthropic]
+│   └── llm_openai.py     openai_llm_fn() → OpenAI / OpenAI-compatible LLMFn/StructuredLLMFn (#368); requires chainweaver[llm-openai]
 ├── mcp/               MCP integration (issues #70, #72, #150); requires chainweaver[mcp]
 │   ├── __init__.py    Public surface: MCPToolAdapter, FlowServer, jsonschema_to_pydantic
 │   ├── _schema.py     JSON Schema ↔ Pydantic bridge

@@ -1,0 +1,69 @@
+name: Evals
+
+# Opt-in offline-proposer eval harness (issues #365, #374).
+#
+# The harness code itself is exercised on every PR by the normal test suite
+# (tests/test_evals_harness.py) against a deterministic stub model — no API keys
+# required.  This workflow runs the *real-model* suite against a provider using
+# repository secrets, and is intentionally NOT a PR merge gate: it runs only on
+# manual dispatch and on a weekly schedule, so prompt revisions and model bumps
+# can be measured without blocking development.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider adapter to evaluate against"
+        type: choice
+        options: [anthropic, openai]
+        default: anthropic
+      model:
+        description: "Model id (blank = adapter default)"
+        type: string
+        default: ""
+  schedule:
+    # Weekly proposer-quality canary — Mondays 07:00 UTC.
+    - cron: "0 7 * * 1"
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    name: proposer evals (${{ github.event.inputs.provider || 'anthropic' }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install with the provider extra
+        run: |
+          provider="${{ github.event.inputs.provider || 'anthropic' }}"
+          pip install -e ".[dev,yaml,llm-${provider}]"
+
+      - name: Run proposer evals against the real provider
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          provider="${{ github.event.inputs.provider || 'anthropic' }}"
+          model="${{ github.event.inputs.model }}"
+          args=(--provider "${provider}")
+          if [ -n "${model}" ]; then args+=(--model "${model}"); fi
+          python -m evals.run_evals "${args[@]}"
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: evals/results/latest.*
+          if-no-files-found: ignore

@@ -306,6 +306,7 @@ def test_budget_truncate_records_dropped_tools() -> None:
     prov = proposals[0].provenance
     assert prov is not None
     assert prov.catalogue_tools_total == 8
+    assert prov.catalogue_tools_rendered is not None
     assert prov.catalogue_tools_rendered < 8  # some tools dropped to fit
 
 

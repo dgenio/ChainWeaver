@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Offline LLM proposer hardening** (#363, #364, #366, #367, #368, #374): the
+  build-time proposers (`llm_propose_flows`, `optimize_tool_descriptions`) gain
+  a coherent production-grade layer, all opt-in and back-compatible with the
+  bare `LLMFn` seam:
+  - *Structured output + repair* (#363): a `StructuredLLMFn` protocol receives a
+    published JSON-Schema envelope (`schemas/proposal-{flows,descriptions}.schema.json`);
+    completions are parsed JSON-first with a YAML fallback, and a bounded
+    `max_repair_attempts` follow-up call (default 1) carries the validation error
+    back to the model before failing with `OfflineLLMError`.
+  - *Provenance* (#364): every proposal carries a `ProposalProvenance` (prompt
+    name/version/SHA-256, caller-asserted `ModelInfo`, parameters, repair usage,
+    catalogue stats); `write_proposals` persists it and `read_provenance` reads
+    it back. Prompt templates are pinned by `PROMPT_VERSION` + a hash-guard test.
+  - *Adversarial metadata hardening* (#366): `render_tool_catalogue` flattens
+    control characters / Unicode separators and caps description length so
+    hostile tool metadata cannot break the one-entry-per-tool prompt structure.
+  - *Token budgeting* (#367): `PromptBudget` with `error`/`truncate`/`batch`/`select`
+    overflow strategies, a chars/4 estimator plus pluggable `token_counter`, and
+    a typed `PromptBudgetExceededError` (`CW-E042`) raised before any LLM call.
+  - *Provider adapters* (#368): optional `chainweaver.integrations.llm_anthropic`
+    / `llm_openai` adapters (`chainweaver[llm-anthropic]` / `[llm-openai]`,
+    the latter also covering OpenAI-compatible/local endpoints) with retry,
+    timeout, `max_calls`/`max_cost_usd` ceilings (`LLMProviderError` `CW-E043`,
+    `LLMBudgetExceededError` `CW-E044`), and a live `.usage` tally. The base
+    package still imports no provider SDK.
+  - *Routing-accuracy evaluation* (#374): `RoutingCase`, `evaluate_routing`,
+    and `mine_routing_cases`; `optimize_tool_descriptions(..., eval_cases=...,
+    routing_selector=...)` annotates each proposal with before/after per-tool
+    selection accuracy.
+  - *Eval harnesses* (#365, #374): an `evals/` tree (golden proposer cases +
+    routing cases, scorer, runner) with an opt-in `evals.yml` workflow; the
+    harness runs against a deterministic stub in normal CI.
 - **`FlowStep.output_mapping`** (#386): an optional `{context_key: output_key}`
   mapping that renames and prunes a tool's validated outputs before they merge
   into the accumulated context. Absent (the default) merges every key verbatim;
