@@ -1121,7 +1121,10 @@ chainweaver inspect my_flow --discover-dir flows/ --format json
 chainweaver flows list --discover-dir flows/
 
 # Check that your environment is ready before running anything.
-chainweaver doctor --profile first-run
+chainweaver doctor flow --profile first-run
+
+# Inspect a coding-agent workspace's MCP / observe setup (read-only).
+chainweaver doctor vscode --workspace .
 
 # Install tab-completion for your shell (bash/zsh/fish).
 chainweaver --install-completion
@@ -1148,7 +1151,7 @@ chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to a
 chainweaver service --tools my_pkg.tools --trace trace.jsonl
 
 # Check saved flows for tool schema drift against the live registry.
-chainweaver doctor flows/ --check-drift --tools my_pkg.tools
+chainweaver doctor flow flows/ --check-drift --tools my_pkg.tools
 
 # Property-based fuzzing: generate cases, check invariants, save/minimize failures.
 chainweaver fuzz flows/etl.flow.yaml --tools my_pkg.tools \

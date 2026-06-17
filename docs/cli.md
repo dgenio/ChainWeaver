@@ -417,12 +417,34 @@ chainweaver profile trace.json --format json
 
 ### `doctor`
 
+`doctor` is a command **group**. `doctor flow` runs flow diagnostics against the currently registered tools; `doctor vscode` / `doctor claude` / `doctor opencode` inspect a workspace's coding-agent setup for the observe → suggest → compile workflow.
+
+#### `doctor flow`
+
 Diagnose ChainWeaver flows against the currently registered tools. With `--check-drift`, walks every flow file under *path* (single file or recursive directory), imports tools from the modules passed via `--tools`, and reports per-flow `missing_tool` / `schema_mismatch` issues. With `--preflight`, runs structural validation (tool existence and resolvable input mappings). With `--profile first-run`, skips flow analysis and checks **environment readiness** instead — Python version, optional-extra availability (with the exact install command), writable paths, and core import health — for a "is my install ready?" first check (no *path* required).
 
 ```
-chainweaver doctor <path> --check-drift [--tools MODULE...] [--format table|json]
-chainweaver doctor --profile first-run [--format table|json]
+chainweaver doctor flow <path> --check-drift [--tools MODULE...] [--format table|json]
+chainweaver doctor flow --profile first-run [--format table|json]
 ```
+
+#### `doctor vscode` / `doctor claude` / `doctor opencode`
+
+Read-only inspectors that report what a workspace has configured for the observe → suggest → compile workflow and what is missing. They **never modify files**; `--fix-dry-run` prints the config that *would* be written. Each detects the editor's MCP config and whether a ChainWeaver FlowServer is exposed, plus a trace directory (`.chainweaver/traces/`) and discoverable macro-flows. `doctor claude` additionally checks config scope (`.mcp.json` / `.claude/settings*.json`) and a PostToolUse observe hook; `doctor opencode` additionally checks for a ChainWeaver plugin and reminds about tool-name collisions.
+
+```
+chainweaver doctor vscode   [--workspace DIR] [--format table|json] [--fix-dry-run]
+chainweaver doctor claude   [--workspace DIR] [--format table|json] [--fix-dry-run]
+chainweaver doctor opencode [--workspace DIR] [--format table|json] [--fix-dry-run]
+```
+
+| Editor flag | Default | Description |
+|------|---------|-------------|
+| `--workspace` / `-w` | `.` | Workspace directory to inspect. |
+| `--format` / `-f` | `table` | Output format: human-readable table or structured JSON. |
+| `--fix-dry-run` | — | Also print the config that would fix detected gaps, without modifying any files. |
+
+Editor-inspector **exit codes**: `0` when the workspace is inspectable (a missing config is reported as a *finding*, not an error), `2` when `--workspace` is missing or is not a directory.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -486,8 +508,8 @@ copy-paste `install` command.
 **Example**:
 
 ```bash
-chainweaver doctor flows/etl.flow.yaml --check-drift --tools my_pkg.tools
-chainweaver doctor flows/ --check-drift --tools my_pkg.tools --format json
+chainweaver doctor flow flows/etl.flow.yaml --check-drift --tools my_pkg.tools
+chainweaver doctor flow flows/ --check-drift --tools my_pkg.tools --format json
 ```
 
 ---
