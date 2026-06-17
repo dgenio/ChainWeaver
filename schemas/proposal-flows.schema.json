@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "_FlowProposalItem": {
+      "description": "One entry of the published flow-proposal envelope schema (issue #363).",
+      "properties": {
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "flow": {
+          "additionalProperties": true,
+          "title": "Flow",
+          "type": "object"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "flow",
+        "confidence"
+      ],
+      "title": "_FlowProposalItem",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/dgenio/ChainWeaver/main/schemas/proposal-flows.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "JSON Schema contract for :func:`llm_propose_flows` completions (issue #363).\n\nThe published schema (``schemas/proposal-flows.schema.json``) lets a\n:class:`~chainweaver.proposals.StructuredLLMFn` request schema-constrained\nJSON and lets external tools validate proposal files without importing\nChainWeaver.",
+  "properties": {
+    "proposals": {
+      "items": {
+        "$ref": "#/$defs/_FlowProposalItem"
+      },
+      "title": "Proposals",
+      "type": "array"
+    }
+  },
+  "required": [
+    "proposals"
+  ],
+  "title": "FlowProposalEnvelope",
+  "type": "object"
+}

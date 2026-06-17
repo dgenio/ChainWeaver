@@ -67,7 +67,13 @@ from chainweaver.compiler import (
     CompilationWarning,
     compile_flow,
 )
-from chainweaver.compiler_llm import LLMProposal, llm_propose_flows, write_proposals
+from chainweaver.compiler_llm import (
+    LLMProposal,
+    flow_proposal_schema,
+    llm_propose_flows,
+    read_provenance,
+    write_proposals,
+)
 from chainweaver.contracts import (
     DeterminismLevel,
     SideEffectLevel,
@@ -117,6 +123,8 @@ from chainweaver.exceptions import (
     InputMappingError,
     InvalidFlowVersionError,
     KernelInvocationError,
+    LLMBudgetExceededError,
+    LLMProviderError,
     MCPError,
     MCPMetadataError,
     MCPSchemaConversionError,
@@ -126,6 +134,7 @@ from chainweaver.exceptions import (
     OutputMappingError,
     PluginDiscoveryError,
     PredicateSyntaxError,
+    PromptBudgetExceededError,
     SafetyCeilingError,
     SchemaValidationError,
     ToolDefinitionError,
@@ -187,10 +196,17 @@ from chainweaver.observer import ChainObserver, FlowSuggestion
 from chainweaver.optimizer import (
     OptimizationStrategy,
     ToolDescriptionProposal,
+    description_proposal_schema,
     optimize_new_tool_description,
     optimize_tool_descriptions,
 )
 from chainweaver.plugins import discover_flows, discover_tools
+from chainweaver.proposals import (
+    ModelInfo,
+    PromptBudget,
+    ProposalProvenance,
+    StructuredLLMFn,
+)
 from chainweaver.registry import FlowRegistry
 from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
@@ -340,7 +356,9 @@ __all__ = [
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
+    "LLMBudgetExceededError",
     "LLMProposal",
+    "LLMProviderError",
     "LessonCandidate",
     "LessonEvidenceStep",
     "LessonReview",
@@ -349,6 +367,7 @@ __all__ = [
     "MCPSchemaConversionError",
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
+    "ModelInfo",
     "ObservedStep",
     "ObservedTrace",
     "OfflineLLMError",
@@ -357,6 +376,9 @@ __all__ = [
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
+    "PromptBudget",
+    "PromptBudgetExceededError",
+    "ProposalProvenance",
     "ProposalStatus",
     "Recommendation",
     "RedactionPolicy",
@@ -380,6 +402,7 @@ __all__ = [
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
@@ -400,6 +423,7 @@ __all__ = [
     "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
+    "description_proposal_schema",
     "discover_flows",
     "discover_tools",
     "draft_flow_from_candidate",
@@ -407,6 +431,7 @@ __all__ = [
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_proposal_schema",
     "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
@@ -422,6 +447,7 @@ __all__ = [
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
     "parse_agent_trace",
+    "read_provenance",
     "render_candidate_report",
     "result_to_mermaid",
     "schema_fingerprint",

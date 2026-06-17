@@ -1,0 +1,52 @@
+{
+  "$defs": {
+    "_DescriptionProposalItem": {
+      "description": "One entry of the published description-proposal envelope schema (issue #363).",
+      "properties": {
+        "proposed_description": {
+          "title": "Proposed Description",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "similarity_group": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Similarity Group",
+          "type": "array"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "proposed_description"
+      ],
+      "title": "_DescriptionProposalItem",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/dgenio/ChainWeaver/main/schemas/proposal-descriptions.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "JSON Schema contract for description-optimizer completions (issue #363).\n\nPublished as ``schemas/proposal-descriptions.schema.json`` so a\n:class:`~chainweaver.proposals.StructuredLLMFn` can request schema-constrained\nJSON and external tools can validate proposal files without importing\nChainWeaver.",
+  "properties": {
+    "proposals": {
+      "items": {
+        "$ref": "#/$defs/_DescriptionProposalItem"
+      },
+      "title": "Proposals",
+      "type": "array"
+    }
+  },
+  "required": [
+    "proposals"
+  ],
+  "title": "DescriptionProposalEnvelope",
+  "type": "object"
+}

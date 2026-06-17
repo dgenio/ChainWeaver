@@ -89,7 +89,9 @@
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
+    "LLMBudgetExceededError",
     "LLMProposal",
+    "LLMProviderError",
     "LessonCandidate",
     "LessonEvidenceStep",
     "LessonReview",
@@ -98,6 +100,7 @@
     "MCPSchemaConversionError",
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
+    "ModelInfo",
     "ObservedStep",
     "ObservedTrace",
     "OfflineLLMError",
@@ -107,6 +110,9 @@
     "PluginDiscoveryError",
     "PredicateSyntaxError",
     "PriceSnap",
+    "PromptBudget",
+    "PromptBudgetExceededError",
+    "ProposalProvenance",
     "ProposalStatus",
     "Recommendation",
     "RedactionPolicy",
@@ -130,6 +136,7 @@
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
@@ -150,6 +157,7 @@
     "coerce_approval_callback",
     "coerce_decision_callback",
     "compile_flow",
+    "description_proposal_schema",
     "discover_flows",
     "discover_tools",
     "draft_flow_from_candidate",
@@ -157,6 +165,7 @@
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_proposal_schema",
     "flow_schema_json",
     "flow_to_ascii",
     "flow_to_dict",
@@ -172,6 +181,7 @@
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
     "parse_agent_trace",
+    "read_provenance",
     "render_candidate_report",
     "result_to_mermaid",
     "schema_fingerprint",
@@ -185,7 +195,7 @@
   ],
   "python_version": [
     3,
-    11
+    12
   ],
   "symbols": {
     "AgentTraceEvent": {
@@ -957,11 +967,23 @@
       "qualname": "KernelInvocationError",
       "signature": "(capability_id: str, step_index: int, detail: str) -> None"
     },
+    "LLMBudgetExceededError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "LLMBudgetExceededError",
+      "signature": "(provider: str, limit: str) -> None"
+    },
     "LLMProposal": {
       "kind": "class",
       "module": "chainweaver.compiler_llm",
       "qualname": "LLMProposal",
-      "signature": "(proposed_flow: Flow, rationale: str, confidence: float, source: str = 'llm-compiler') -> None"
+      "signature": "(proposed_flow: Flow, rationale: str, confidence: float, source: str = 'llm-compiler', provenance: ProposalProvenance | None = None) -> None"
+    },
+    "LLMProviderError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "LLMProviderError",
+      "signature": "(provider: str, detail: str) -> None"
     },
     "LessonCandidate": {
       "kind": "pydantic-model",
@@ -1028,6 +1050,15 @@
       "module": "chainweaver.exceptions",
       "qualname": "MCPToolInvocationError",
       "signature": "(tool_name: str, detail: str) -> None"
+    },
+    "ModelInfo": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "model": "str | NoneType",
+        "provider": "str | NoneType"
+      },
+      "module": "chainweaver.proposals",
+      "qualname": "ModelInfo"
     },
     "ObservedStep": {
       "kind": "pydantic-model",
@@ -1096,6 +1127,41 @@
       },
       "module": "chainweaver.cost",
       "qualname": "PriceSnap"
+    },
+    "PromptBudget": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "max_description_chars": "int | NoneType",
+        "max_tokens": "int",
+        "overflow": "str",
+        "selector": "collections.abc.Callable[[list[chainweaver.tools.Tool]], list[chainweaver.tools.Tool]] | NoneType"
+      },
+      "module": "chainweaver.proposals",
+      "qualname": "PromptBudget"
+    },
+    "PromptBudgetExceededError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "PromptBudgetExceededError",
+      "signature": "(estimated_tokens: int, max_tokens: int) -> None"
+    },
+    "ProposalProvenance": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "catalogue_tools_rendered": "int | NoneType",
+        "catalogue_tools_total": "int | NoneType",
+        "chainweaver_version": "str",
+        "estimated_prompt_tokens": "int | NoneType",
+        "generated_at": "str",
+        "model": "chainweaver.proposals.ModelInfo | NoneType",
+        "parameters": "dict[str, Any] | NoneType",
+        "prompt_name": "str",
+        "prompt_sha256": "str",
+        "prompt_version": "str",
+        "repair_attempts_used": "int"
+      },
+      "module": "chainweaver.proposals",
+      "qualname": "ProposalProvenance"
     },
     "ProposalStatus": {
       "kind": "enum",
@@ -1321,6 +1387,12 @@
       "module": "chainweaver.middleware",
       "qualname": "StepStartContext"
     },
+    "StructuredLLMFn": {
+      "kind": "class",
+      "module": "chainweaver.proposals",
+      "qualname": "StructuredLLMFn",
+      "signature": "(*args, **kwargs)"
+    },
     "Suggestion": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -1354,7 +1426,7 @@
       "kind": "class",
       "module": "chainweaver.optimizer",
       "qualname": "ToolDescriptionProposal",
-      "signature": "(tool_name: str, original_description: str, proposed_description: str, rationale: str, similarity_group: list[str] = <factory>, token_delta: int = 0, source: str = 'description-optimizer') -> None"
+      "signature": "(tool_name: str, original_description: str, proposed_description: str, rationale: str, similarity_group: list[str] = <factory>, token_delta: int = 0, source: str = 'description-optimizer', provenance: ProposalProvenance | None = None, routing_accuracy_before: float | None = None, routing_accuracy_after: float | None = None) -> None"
     },
     "ToolNotFoundError": {
       "kind": "class",
@@ -1455,6 +1527,12 @@
       "qualname": "compile_flow",
       "signature": "(flow: Flow, tools: dict[str, Tool]) -> CompilationResult"
     },
+    "description_proposal_schema": {
+      "kind": "function",
+      "module": "chainweaver.optimizer",
+      "qualname": "description_proposal_schema",
+      "signature": "() -> dict[str, Any]"
+    },
     "discover_flows": {
       "kind": "function",
       "module": "chainweaver.plugins",
@@ -1496,6 +1574,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_from_yaml",
       "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
+    },
+    "flow_proposal_schema": {
+      "kind": "function",
+      "module": "chainweaver.compiler_llm",
+      "qualname": "flow_proposal_schema",
+      "signature": "() -> dict[str, Any]"
     },
     "flow_schema_json": {
       "kind": "function",
@@ -1543,7 +1627,7 @@
       "kind": "function",
       "module": "chainweaver.compiler_llm",
       "qualname": "llm_propose_flows",
-      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, max_proposals: int = 5, static_candidates: Iterable[Flow] | None = None) -> list[LLMProposal]"
+      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn | StructuredLLMFn, max_proposals: int = 5, static_candidates: Iterable[Flow] | None = None, model_info: ModelInfo | None = None, parameters: dict[str, Any] | None = None, max_repair_attempts: int = 1, prompt_budget: PromptBudget | None = None, token_counter: Callable[[str], int] | None = None) -> list[LLMProposal]"
     },
     "load_agent_trace": {
       "kind": "function",
@@ -1573,19 +1657,25 @@
       "kind": "function",
       "module": "chainweaver.optimizer",
       "qualname": "optimize_new_tool_description",
-      "signature": "(new_tool: Tool, existing_tools: Iterable[Tool], *, llm_fn: LLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE) -> list[ToolDescriptionProposal]"
+      "signature": "(new_tool: Tool, existing_tools: Iterable[Tool], *, llm_fn: LLMFn | StructuredLLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE, model_info: ModelInfo | None = None, parameters: dict[str, Any] | None = None, max_repair_attempts: int = 1) -> list[ToolDescriptionProposal]"
     },
     "optimize_tool_descriptions": {
       "kind": "function",
       "module": "chainweaver.optimizer",
       "qualname": "optimize_tool_descriptions",
-      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE) -> list[ToolDescriptionProposal]"
+      "signature": "(tools: Iterable[Tool], *, llm_fn: LLMFn | StructuredLLMFn, strategy: OptimizationStrategy = chainweaver.optimizer.OptimizationStrategy.DISCRIMINATIVE, model_info: ModelInfo | None = None, parameters: dict[str, Any] | None = None, max_repair_attempts: int = 1, prompt_budget: PromptBudget | None = None, token_counter: Callable[[str], int] | None = None) -> list[ToolDescriptionProposal]"
     },
     "parse_agent_trace": {
       "kind": "function",
       "module": "chainweaver.traces",
       "qualname": "parse_agent_trace",
       "signature": "(text: str, *, source: str | None = None) -> list[AgentTraceEvent]"
+    },
+    "read_provenance": {
+      "kind": "function",
+      "module": "chainweaver.compiler_llm",
+      "qualname": "read_provenance",
+      "signature": "(flow_path: str | Path) -> ProposalProvenance | None"
     },
     "render_candidate_report": {
       "kind": "function",
