@@ -549,9 +549,12 @@ def _trace_dir_check(workspace: Path) -> dict[str, Any]:
     }
 
 
-def _active_flows_check(workspace: Path) -> dict[str, Any]:
-    """Report how many flow files are discoverable to expose as macro-tools."""
-    flow_files = _iter_flow_files(workspace)
+def _active_flows_check(flow_files: list[Path]) -> dict[str, Any]:
+    """Report how many flow files are discoverable to expose as macro-tools.
+
+    Takes the already-discovered *flow_files* so a caller scans the workspace
+    once and reuses the result across checks, rather than re-walking it.
+    """
     return {
         "name": "macro-flows",
         "status": "ok" if flow_files else "missing",
@@ -594,7 +597,7 @@ def _vscode_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
     mcp_path = workspace / ".vscode" / "mcp.json"
     checks, recommendations = _mcp_config_checks("VS Code", mcp_path, servers_key="servers")
     checks.append(_trace_dir_check(workspace))
-    checks.append(_active_flows_check(workspace))
+    checks.append(_active_flows_check(_iter_flow_files(workspace)))
     return _editor_report(
         "vscode",
         workspace,
@@ -657,7 +660,7 @@ def _claude_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
             "version control) to passively capture tool traces."
         )
     checks.append(_trace_dir_check(workspace))
-    checks.append(_active_flows_check(workspace))
+    checks.append(_active_flows_check(_iter_flow_files(workspace)))
     return _editor_report(
         "claude",
         workspace,
@@ -724,7 +727,7 @@ def _opencode_report(workspace: Path, *, fix_dry_run: bool) -> dict[str, Any]:
             "Add a ChainWeaver OpenCode plugin to normalise tool-execution events into traces."
         )
     flow_files = _iter_flow_files(workspace)
-    checks.append(_active_flows_check(workspace))
+    checks.append(_active_flows_check(flow_files))
     if flow_files:
         checks.append(
             {
