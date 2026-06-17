@@ -138,7 +138,7 @@ def test_stub_run_completes_and_writes_reports(tmp_path: Any) -> None:
 
     json_path, md_path = write_reports(report, tmp_path)
     assert json_path.exists() and md_path.exists()
-    assert "pass rate" in md_path.read_text().lower()
+    assert "pass rate" in md_path.read_text(encoding="utf-8").lower()
 
 
 # ---------------------------------------------------------------------------
