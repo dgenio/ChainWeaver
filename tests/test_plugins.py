@@ -143,9 +143,9 @@ class TestDiscoverTools:
         with caplog.at_level(logging.WARNING, logger="chainweaver.plugins"):
             tools = discover_tools()
         assert [t.name for t in tools] == ["plugin_double", "plugin_add_ten"]
-        assert any(
-            "bad" in rec.message and "RuntimeError" in rec.message for rec in caplog.records
-        )
+        record = next(rec for rec in caplog.records if "bad" in rec.message)
+        assert "RuntimeError" in record.message
+        assert record.exc_info is not None
 
     def test_skips_loader_returning_wrong_type(
         self, patch_entry_points: Any, caplog: pytest.LogCaptureFixture
@@ -186,6 +186,7 @@ class TestDiscoverTools:
             discover_tools(strict=True)
         assert exc_info.value.entry_point.endswith(":bad")
         assert "RuntimeError" in exc_info.value.detail
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 # ---------------------------------------------------------------------------

@@ -40,17 +40,22 @@ chainweaver/
 ├── compiler_llm.py    Offline build-time LLM flow compiler: LLMProposal + llm_propose_flows() + write_proposals() (#28); banned from executor.py
 ├── optimizer.py       Offline build-time tool-description optimizer: OptimizationStrategy + ToolDescriptionProposal + optimize_tool_descriptions()/optimize_new_tool_description() (#100); banned from executor.py
 ├── _offline_llm.py    Private shared internals for the offline LLM proposers: LLMFn type + parse_llm_yaml() + render_tool_catalogue() (#28, #100)
-├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
+├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + side_effect_exceeds() (#356) + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
+├── approvals.py       ApprovalCallback Protocol + ApprovalContext/ApprovalDecision/ApprovalRecord + coerce_approval_callback — execution-time ToolSafetyContract enforcement seam (#356); mirrors decisions.py
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
-├── flow.py            FlowStep + Flow + DAGFlow + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8)
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19) + metadata provenance (#358/#359/#371) + dry_run_fn/run_dry (#357); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
+├── flow.py            FlowStep (+ output_mapping #386) + Flow + DAGFlow (+ dynamic_params #316) + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8) + ContextCollisionPolicy / on_context_collision (#337)
 ├── step_index.py      Named sentinels for flow input/output validation records (#339)
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed)
+├── _pointer.py        Dependency-free RFC-6901 JSON pointer resolver shared by executor input_mapping (#387) and contrib json_pluck
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow (main entry point)
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) (main entry point)
+├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
+│   ├── __init__.py    Re-exports merge_step_outputs + apply_output_mapping
+│   └── context.py     merge_step_outputs + apply_output_mapping: single context-merge honouring on_context_collision (#337) and output_mapping (#386)
 ├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
 ├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
 ├── cache.py           StepCache Protocol + InMemoryStepCache + FileStepCache + StepCacheKey (#127)
@@ -66,7 +71,7 @@ chainweaver/
 ├── mcp/               MCP integration (issues #70, #72, #150); requires chainweaver[mcp]
 │   ├── __init__.py    Public surface: MCPToolAdapter, FlowServer, jsonschema_to_pydantic
 │   ├── _schema.py     JSON Schema ↔ Pydantic bridge
-│   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150)
+│   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150) + untrusted-metadata trust controls — annotation_trust→ToolSafetyContract (#371), MetadataPolicy name/description sanitisation (#359), schema-hash pinning + on_drift (#358), build_pin_file/load_pins
 │   └── server.py      FlowServer: safely expose governed flows as MCP tools via FastMCP (#72, #259, #294)
 ├── contrib/           Curated deterministic stdlib tools (#145); pip install 'chainweaver[contrib]'
 │   ├── __init__.py    Re-exports the public tool set
@@ -92,10 +97,13 @@ chainweaver/
 ├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py
 ├── lessons.py         trace_to_lesson_candidate() + LessonCandidate/LessonEvidenceStep/LessonReview: normalise an ExecutionResult into a reviewable, workflow-scoped lesson candidate for lessonweaver (#210); no hard dep on lessonweaver; banned from executor.py
 ├── service.py         ChainWeaverService: continuous analyze→observe→propose→govern loop tying analyzer + observer + a proposal gate (#101); banned from executor.py
-├── viz.py             ASCII + Mermaid renderers for Flow/ExecutionResult
+├── viz.py             ASCII + Mermaid + DOT renderers for Flow/ExecutionResult
 ├── serialization.py   YAML + JSON encode/decode for Flow and DAGFlow
 ├── schemas.py         JSON Schema export for .flow.json / .flow.yaml files (#135, #139)
-├── cli.py             typer-based CLI: inspect, validate, check, viz, run, profile, diff, attest, suggest, record, flows promote/ignore, traces mine/draft-flows/backtest, doctor (--check-drift / --preflight), dump-schema, service
+├── cli/               typer-based CLI command package (#333): inspect/viz (ascii/dot/mermaid + --result overlay, #392), explain (deterministic LLM-free review render, #420), init (project scaffolder, #441), validate/check/dump-schema, run/serve, profile, diff, attest, suggest, record, flows (promote/ignore/list), traces (mine/draft-flows/backtest), doctor group (`doctor flow` --check-drift / --preflight / --profile first-run #442; `doctor vscode|claude|opencode` read-only coding-agent workspace inspectors #264/#270/#275), fuzz, service
+│   ├── __init__.py    Wires the command submodules, defines the ``main`` entry point, re-exports the stable surface (``app``, ``set_default_registry`` …)
+│   ├── _shared.py     Typer ``app`` / sub-apps, registry state, shared flow/result loading, error→exit-code handling, ``--format json`` envelope, and flow-resolution/discovery (#381, #440)
+│   └── <command>.py   One module per command group; each registers on the shared ``app`` at import time
 └── py.typed           PEP 561 marker
 tests/
 ├── conftest.py        Pytest fixtures (import schemas/functions from helpers.py)
@@ -208,6 +216,53 @@ see the `DAGFlowStep` subsection below).
 | `capability_id` | `str \| None` | `None` | Optional Weaver Stack capability identifier (#90); when set, the flow is routable as a `SelectableItem` via `flow_to_selectable_item`. See [docs/agent-context/flow-as-capability.md](docs/agent-context/flow-as-capability.md). |
 | `governance` | `FlowGovernance` | active defaults | Review lifecycle, owner, replacement-tool list, savings estimates, and review notes (#259, #268). Separate from `FlowStatus`. |
 | `safety` | `ToolSafetyContract \| None` | `None` | Explicit flow-level side-effect, retry, dry-run, idempotency, and approval metadata (#293). `None` means unknown, not safe. |
+| `on_context_collision` | `Literal["overwrite", "warn", "error"]` | `"warn"` | Policy when a step output overwrites an existing context key (#337). `"overwrite"` = silent last-write-wins; `"warn"` = log at WARNING then overwrite; `"error"` = abort with `ContextKeyCollisionError`. Applied by the single shared merge helper (`chainweaver._execution.merge_step_outputs`) on both linear and DAG, sync and async. DAG *sibling* collisions within one level remain an unconditional error regardless. |
+| `dynamic_params` | `tuple[str, ...]` | `()` | Declarative names of params injected at execute-time via `execute_flow(..., dynamic_params={...})` rather than `initial_input` (#316). Merged into the running context *after* `input_schema` validation, so they reach every step's `input_mapping` and the final output yet stay out of the LLM-visible `input_schema` — for per-request secrets a model must never see. Metadata only; the executor accepts any `dynamic_params` keys whether or not they are declared here. |
+
+### Context-collision semantics (#337)
+
+The accumulated context is the data plane of every flow. A step output that
+overwrites an existing key (including an `initial_input` key) is governed by
+`Flow.on_context_collision` and enforced in exactly one place —
+`chainweaver._execution.merge_step_outputs` — for both flow kinds and both
+lanes. `compile_flow` additionally emits a `context_collision` warning for
+statically detectable overwrites (suppressed under `"overwrite"`). See
+[docs/data-integrity.md](docs/data-integrity.md#context-key-collisions-337).
+
+### Concurrency contract (#336)
+
+A single `FlowExecutor` instance supports **concurrent** `execute_flow` /
+`execute_flow_async` / `stream_flow` calls: run-scoped state (the stream event
+collector, `active_flow_version`, replay/resume markers, injected
+`dynamic_params`) lives in a per-instance `contextvars.ContextVar` and each
+entry point binds a fresh per-scope copy, so the isolation holds across both OS
+threads **and** concurrent `execute_flow_async` tasks sharing one event-loop
+thread (a `threading.local` would not isolate the latter). The bundled
+`InMemoryStepCache` / `InMemoryCheckpointer` are internally locked. The one
+rule: **mutating operations (`register_tool`, `add_middleware`,
+`accept_drift`) must not run concurrently with executions** — do them at setup.
+
+### Async lane support matrix (#332)
+
+`execute_flow_async` raises `AsyncLaneUnsupportedError` (before any step runs)
+for features it does not yet honour, rather than diverging silently:
+
+| Feature | `execute_flow` (sync) | `execute_flow_async` |
+|---------|:---------------------:|:--------------------:|
+| Linear flows | ✅ | ✅ |
+| DAG flows (no branching) | ✅ | ✅ |
+| Opt-in DAG-level concurrency (#344) | sequential | ✅ (`max_step_concurrency`) |
+| Conditional branches / `default_next` (#9) | ✅ | ❌ rejected |
+| `decision_candidates` (#102) | ✅ | ❌ rejected |
+| Composed sub-flow (`flow_name`, #75) | ✅ | ❌ rejected |
+| Step cache / checkpoint resume | ✅ | bypassed |
+
+### State transitions (#335)
+
+`accept_drift` and `set_flow_status` never mutate a registry-held `Flow` in
+place — they go through `FlowRegistry.update_flow_state`, which performs a
+`model_copy(update=...)`, persists the new object, and returns it. Callers
+needing the new state must re-fetch via `get_flow`.
 
 **Read-only properties (not fields):** `input_schema`, `output_schema`, and
 `context_schema` resolve their `*_schema_ref` counterparts to a
@@ -248,9 +303,25 @@ counts the tool invocations a composed step actually drove (recursively), so
 
 | Value type | Behavior |
 |------------|----------|
-| `str` | Looked up as a key in the accumulated execution context. |
+| `str` (plain key) | Looked up as a top-level key in the accumulated execution context. |
+| `str` starting with `/` | An RFC-6901 JSON pointer (#387) resolved against the nested context — e.g. `"/user/address/city"` or `"/items/0/id"`. A miss raises `InputMappingError` naming the pointer. A top-level key that literally starts with `/` is addressed with the `~1` escape (the key `"/raw"` is the pointer `"/~1raw"`). |
 | Non-string (`int`, `float`, `bool`, …) | Used as a literal constant. |
 | Empty `{}` (default) | The tool receives the full current context. |
+
+Pointer resolution is shared with the contrib `json_pluck` tool via the
+dependency-free `chainweaver._pointer` module, so core never imports the
+optional `contrib` extra.
+
+### `FlowStep.output_mapping` (issue #386)
+
+Optional `dict[str, str] | None` (default `None`), shaped `{context_key:
+output_key}`. Applied to a tool's *validated* outputs before they merge into
+the context: only the listed output keys merge, each renamed to its context
+key; unlisted keys are pruned. `None` merges every output key verbatim (the
+historical behaviour). A mapped `output_key` the tool did not produce raises
+`OutputMappingError` (`CW-E041`). The raw outputs are still recorded on
+`StepRecord.outputs` — the mapping affects only the context merge. `compile_flow`
+understands the remapped keys and statically flags an unknown `output_key`.
 
 ### `FlowStep.decision_candidates` (issue #102)
 
@@ -268,6 +339,7 @@ integration.
 
 | Field | Type | Meaning |
 |-------|------|---------|
+| `trace_schema_version` | `str` | Library-stamped version of the trace *shape* (#393), currently `"1.1"`. Lets long-lived trace consumers detect shape evolution; distinct from `flow_version`. See [docs/versioning-policy.md](docs/versioning-policy.md#artifact-schema-versions). |
 | `flow_name` | `str` | Name of the executed flow. |
 | `success` | `bool` | `True` when all steps completed without error. |
 | `final_output` | `dict \| None` | Merged execution context, or `None` on failure. |
@@ -276,21 +348,26 @@ integration.
 | `started_at` | `datetime` | UTC timestamp when execution began. |
 | `ended_at` | `datetime` | UTC timestamp when execution finished. |
 | `total_duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
+| `dry_run` | `bool` | `True` when produced by `execute_flow(dry_run=True)` (#357); a rehearsal trace, never a real run. |
 
 ### `StepRecord` (Pydantic `BaseModel`)
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `step_index` | `int` | Zero-based position (`FLOW_INPUT_STEP_INDEX` = flow-input validation, `flow_output_step_index(flow)` = flow-output/context validation). |
-| `tool_name` | `str` | Tool invoked (or flow name for validation records). |
+| `tool_name` | `str` | Configured primary tool for the step (or flow name for validation records). Remains the primary name when a fallback runs so step identity is stable across traces. |
 | `inputs` | `dict` | Validated inputs passed to the tool. |
 | `outputs` | `dict \| None` | Validated outputs, or `None` on failure. |
 | `error_type` | `str \| None` | Exception class name (e.g. `"FlowExecutionError"`) when the step failed; `None` on success. |
+| `error_code` | `str \| None` | Stable diagnostic code (#390, e.g. `"CW-E006"`) auto-derived from `error_type` for typed `ChainWeaverError`s; `None` on success or a foreign exception. |
 | `error_message` | `str \| None` | Human-readable error text when the step failed; `None` on success. |
 | `success` | `bool` | `True` when the step completed without error. |
 | `started_at` | `datetime` | UTC timestamp when the step began. |
 | `ended_at` | `datetime` | UTC timestamp when the step finished. |
 | `duration_ms` | `float` | Wall-clock duration in ms (via `time.perf_counter`). |
+| `fallback_used` | `bool` | `True` when `on_error="fallback:<tool_name>"` attempted recovery, including missing or failing fallbacks. |
+| `fallback_tool_name` | `str \| None` | The configured fallback target when `fallback_used=True`; `None` otherwise. |
+| `approval` | `ApprovalRecord \| None` | The decision for a step gated by an execution-time approval callback (#356); `None` when no approval was required. |
 
 > **Serialization:** `ExecutionResult` and `StepRecord` are Pydantic models;
 > `result.model_dump_json()` and `ExecutionResult.model_validate_json(...)`

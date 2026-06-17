@@ -44,6 +44,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -115,34 +116,39 @@ class InMemoryStepCache:
     Use this for batch executions, tests, and any workload where the
     cache only needs to live for the lifetime of a process.
 
-    **Concurrency**: this class wraps a plain ``dict`` and offers no
-    internal synchronization.  It is safe to use from a single thread
-    of execution per :class:`FlowExecutor` instance (which is the
-    documented executor contract).  Sharing a single
-    ``InMemoryStepCache`` across threads requires the caller to wrap
-    accesses in an external :class:`threading.Lock`, or to use
-    :class:`FileStepCache` (which delegates atomicity to the
-    filesystem) instead.
+    **Concurrency** (issue #336): every accessor is guarded by an
+    internal :class:`threading.Lock`, so a single ``InMemoryStepCache``
+    is safe to share across the concurrent runs of one
+    :class:`FlowExecutor`.  The lock is held only for the dict
+    operation itself (a get/set/clear), never across a tool
+    invocation, so contention is negligible.  ``get`` returns a
+    defensive copy, so a reader can never observe a half-written entry.
     """
 
     def __init__(self) -> None:
         self._store: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def get(self, key: StepCacheKey) -> dict[str, Any] | None:
-        cached = self._store.get(key.digest)
-        if cached is None:
-            return None
-        # Return a defensive copy so callers can't mutate the cache.
-        return dict(cached)
+        with self._lock:
+            cached = self._store.get(key.digest)
+            if cached is None:
+                return None
+            # Return a defensive copy so callers can't mutate the cache.
+            return dict(cached)
 
     def set(self, key: StepCacheKey, output: dict[str, Any]) -> None:
-        self._store[key.digest] = dict(output)
+        snapshot = dict(output)
+        with self._lock:
+            self._store[key.digest] = snapshot
 
     def clear(self) -> None:
-        self._store.clear()
+        with self._lock:
+            self._store.clear()
 
     def __len__(self) -> int:
-        return len(self._store)
+        with self._lock:
+            return len(self._store)
 
 
 class FileStepCache:

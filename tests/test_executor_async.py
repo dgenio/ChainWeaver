@@ -18,7 +18,7 @@ from chainweaver import (
     FlowStep,
     Tool,
 )
-from chainweaver.exceptions import FlowExecutionError
+from chainweaver.exceptions import AsyncLaneUnsupportedError
 
 
 class _Inp(BaseModel):
@@ -201,7 +201,13 @@ class TestExecuteFlowAsyncDAG:
 
 class TestExecuteFlowAsyncUnsupportedFeatures:
     """The async lane (v0.1) must fail fast — not silently diverge — on
-    execution features it does not yet honour (issues #9, #102)."""
+    execution features it does not yet honour (issues #9, #75, #102).
+
+    Rejection raises a typed :class:`AsyncLaneUnsupportedError` before any step
+    runs and lists every unsupported construct found in the flow (issue #332).
+    ``AsyncLaneUnsupportedError`` is a :class:`ChainWeaverError`, so callers can
+    still catch the whole family with one ``except``.
+    """
 
     async def test_decision_candidates_rejected(self) -> None:
         registry = FlowRegistry()
@@ -219,7 +225,7 @@ class TestExecuteFlowAsyncUnsupportedFeatures:
         )
         registry.register_flow(flow)
         executor = FlowExecutor(registry=registry)
-        with pytest.raises(FlowExecutionError, match="decision_candidates"):
+        with pytest.raises(AsyncLaneUnsupportedError, match="decision_candidates"):
             await executor.execute_flow_async("decide", {"n": 1})
 
     async def test_conditional_branches_rejected(self) -> None:
@@ -245,8 +251,89 @@ class TestExecuteFlowAsyncUnsupportedFeatures:
         )
         registry.register_flow(dag)
         executor = FlowExecutor(registry=registry)
-        with pytest.raises(FlowExecutionError, match="conditional branches"):
+        with pytest.raises(AsyncLaneUnsupportedError, match="conditional branches"):
             await executor.execute_flow_async("branchy", {"n": 1})
+
+    async def test_default_next_rejected(self) -> None:
+        registry = FlowRegistry()
+        dag = DAGFlow(
+            name="routed",
+            version="1.0.0",
+            description="",
+            steps=[
+                DAGFlowStep(
+                    step_id="a",
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    # default_next is only valid alongside branches (it is the
+                    # no-branch-matched fallback), so both appear on this step.
+                    branches=[ConditionalEdge(target_step_id="b", predicate="n > 0")],
+                    default_next="b",
+                ),
+                DAGFlowStep(
+                    step_id="b",
+                    tool_name="async_double_value",
+                    input_mapping={"value": "value"},
+                    depends_on=["a"],
+                ),
+            ],
+        )
+        registry.register_flow(dag)
+        executor = FlowExecutor(registry=registry)
+        with pytest.raises(AsyncLaneUnsupportedError, match="default_next"):
+            await executor.execute_flow_async("routed", {"n": 1})
+
+    async def test_subflow_step_rejected(self) -> None:
+        registry = FlowRegistry()
+        leaf = Flow(
+            name="leaf",
+            version="1.0.0",
+            description="",
+            steps=[FlowStep(tool_name="async_increment", input_mapping={"n": "n"})],
+        )
+        parent = Flow(
+            name="parent",
+            version="1.0.0",
+            description="",
+            steps=[FlowStep(flow_name="leaf", input_mapping={"n": "n"})],
+        )
+        registry.register_flow(leaf)
+        registry.register_flow(parent)
+        executor = FlowExecutor(registry=registry)
+        with pytest.raises(AsyncLaneUnsupportedError, match="sub-flow"):
+            await executor.execute_flow_async("parent", {"n": 1})
+
+    async def test_error_lists_all_unsupported_constructs(self) -> None:
+        registry = FlowRegistry()
+        flow = Flow(
+            name="multi",
+            version="1.0.0",
+            description="",
+            steps=[
+                FlowStep(
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    decision_candidates=["async_increment", "async_double_value"],
+                ),
+                FlowStep(flow_name="leaf", input_mapping={"n": "n"}),
+            ],
+        )
+        leaf = Flow(
+            name="leaf",
+            version="1.0.0",
+            description="",
+            steps=[FlowStep(tool_name="async_increment", input_mapping={"n": "n"})],
+        )
+        registry.register_flow(leaf)
+        registry.register_flow(flow)
+        executor = FlowExecutor(registry=registry)
+        with pytest.raises(AsyncLaneUnsupportedError) as exc_info:
+            await executor.execute_flow_async("multi", {"n": 1})
+        # Both unsupported constructs are reported in one error, before any step.
+        assert len(exc_info.value.unsupported) == 2
+        message = str(exc_info.value)
+        assert "decision_candidates" in message
+        assert "sub-flow" in message
 
 
 class TestExecuteFlowAsyncFallback:
@@ -296,7 +383,68 @@ class TestExecuteFlowAsyncFallback:
         assert result.final_output["value"] == 8  # backup: 7 + 1
         assert len(result.execution_log) == 1
         assert result.execution_log[0].fallback_used is True
+        assert result.execution_log[0].fallback_tool_name == "backup"
         assert result.execution_log[0].success is True
+
+    async def test_fallback_input_validation_names_fallback_tool(self) -> None:
+        class _BackupInput(BaseModel):
+            text: str
+
+        called = False
+
+        async def _fail(inp: _Inp) -> dict[str, Any]:
+            raise RuntimeError("primary down")
+
+        async def _backup(inp: _BackupInput) -> dict[str, Any]:
+            nonlocal called
+            called = True
+            return {"value": len(inp.text)}
+
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="fb_invalid",
+                version="1.0.0",
+                description="",
+                steps=[
+                    FlowStep(
+                        tool_name="primary",
+                        input_mapping={"n": "n"},
+                        on_error="fallback:backup",
+                    ),
+                ],
+            )
+        )
+        executor = FlowExecutor(registry=registry)
+        executor.register_tool(
+            Tool(
+                name="primary",
+                description="",
+                input_schema=_Inp,
+                output_schema=_Out,
+                fn=_fail,
+            )
+        )
+        executor.register_tool(
+            Tool(
+                name="backup",
+                description="",
+                input_schema=_BackupInput,
+                output_schema=_Out,
+                fn=_backup,
+            )
+        )
+
+        result = await executor.execute_flow_async("fb_invalid", {"n": 7})
+
+        assert result.success is False
+        record = result.execution_log[0]
+        assert called is False
+        assert record.tool_name == "primary"
+        assert record.fallback_tool_name == "backup"
+        assert record.error_type == "SchemaValidationError"
+        assert record.error_message is not None
+        assert "tool 'backup'" in record.error_message
 
 
 class TestExecuteFlowAsyncEventLoopUnblocked:

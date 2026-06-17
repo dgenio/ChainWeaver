@@ -132,7 +132,7 @@ class TestDoctorSurface:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        exit_code = cli.main(["doctor", str(tmp_path)])
+        exit_code = cli.main(["doctor", "flow", str(tmp_path)])
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "requires --check-drift" in captured.err
@@ -142,7 +142,7 @@ class TestDoctorSurface:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        exit_code = cli.main(["doctor", "--check-drift", str(tmp_path / "nope")])
+        exit_code = cli.main(["doctor", "flow", "--check-drift", str(tmp_path / "nope")])
         captured = capsys.readouterr()
         assert exit_code == 2
         assert "path not found" in captured.err
@@ -156,6 +156,7 @@ class TestDoctorSurface:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(tmp_path / "doctor.flow.yaml"),
                 "--tools",
@@ -184,6 +185,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(flow_path),
                 "--tools",
@@ -219,6 +221,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(flow_path),
                 "--tools",
@@ -254,6 +257,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(flow_path),
                 "--tools",
@@ -284,6 +288,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(flow_path),
                 "--tools",
@@ -320,6 +325,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(flows_dir),
                 "--tools",
@@ -348,7 +354,9 @@ class TestDoctorCheckDrift:
             flow_path,
             tool_schema_hashes={"double": "deadbeef" * 2},
         )
-        exit_code = cli.main(["doctor", "--check-drift", str(flow_path), "--tools", module])
+        exit_code = cli.main(
+            ["doctor", "flow", "--check-drift", str(flow_path), "--tools", module]
+        )
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "DRIFT" in captured.out
@@ -367,6 +375,7 @@ class TestDoctorCheckDrift:
         exit_code = cli.main(
             [
                 "doctor",
+                "flow",
                 "--check-drift",
                 str(bad_path),
                 "--tools",
@@ -394,3 +403,87 @@ class TestDoctorCheckDrift:
         mod = importlib.import_module(module)
         assert mod.double.input_schema_hash == schema_fingerprint(mod.double.input_schema)
         assert mod.double.output_schema_hash == schema_fingerprint(mod.double.output_schema)
+
+
+# ---------------------------------------------------------------------------
+# First-run profile (issue #442)
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorFirstRunProfile:
+    def test_first_run_table_ready(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = cli.main(["doctor", "flow", "--profile", "first-run"])
+        captured = capsys.readouterr()
+        # The running interpreter satisfies the floor, cwd/tempdir are writable,
+        # and chainweaver imports — so the profile reports ready.
+        assert exit_code == 0
+        assert "first-run readiness" in captured.out
+        assert "READY" in captured.out
+
+    def test_first_run_json_shape(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = cli.main(["doctor", "flow", "--profile", "first-run", "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        payload = json.loads(captured.out)
+        assert payload["ok"] is True
+        assert payload["python"]["ok"] is True
+        assert payload["import_health"]["core_importable"] is True
+        extras = {row["extra"] for row in payload["extras"]}
+        assert "yaml" in extras and "mcp" in extras
+        # Each extra carries a copy-paste install command.
+        for row in payload["extras"]:
+            assert row["install"].startswith("pip install 'chainweaver[")
+
+    def test_first_run_needs_no_path(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # --profile bypasses the path requirement entirely.
+        exit_code = cli.main(["doctor", "flow", "--profile", "first-run"])
+        capsys.readouterr()
+        assert exit_code == 0
+
+    def test_no_path_no_mode_exits_two(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = cli.main(["doctor", "flow", "--check-drift"])
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "flow path is required" in captured.err
+
+    def test_first_run_not_ready_table_exits_one(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Force a critical-check failure (a non-writable path) so the profile
+        # reports NOT READY and exits 1 — the failure branch the CI env, which
+        # is always ready, can never reach on its own.
+        monkeypatch.setattr("chainweaver.cli.doctor._check_writable", lambda _path: False)
+        exit_code = cli.main(["doctor", "flow", "--profile", "first-run"])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "NOT READY" in captured.out
+
+    def test_first_run_not_ready_json_exits_one(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Same failure, JSON surface: ``ok`` is False and the unwritable cwd
+        # is reflected in the structured payload.
+        monkeypatch.setattr("chainweaver.cli.doctor._check_writable", lambda _path: False)
+        exit_code = cli.main(["doctor", "flow", "--profile", "first-run", "--format", "json"])
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        payload = json.loads(captured.out)
+        assert payload["ok"] is False
+        assert payload["writable_paths"]["cwd"]["writable"] is False
+        assert payload["writable_paths"]["tempdir"]["writable"] is False

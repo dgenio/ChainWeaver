@@ -35,6 +35,30 @@ def schema_fingerprint(model: type[BaseModel]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
+def schema_dict_fingerprint(raw_schema: dict[str, object]) -> str:
+    """Compute a deterministic fingerprint of a *raw* JSON Schema dict (issue #358).
+
+    Counterpart to :func:`schema_fingerprint`, which fingerprints a Pydantic
+    model.  This variant fingerprints a JSON Schema *mapping* directly — used by
+    :class:`~chainweaver.mcp.adapter.MCPToolAdapter` to pin the schemas a remote
+    MCP server advertises *before* they are projected to Pydantic, so a server
+    silently changing a tool's ``inputSchema`` / ``outputSchema`` between sessions
+    is detectable.
+
+    The canonicalisation (sorted keys, compact separators) makes the fingerprint
+    insensitive to JSON key ordering, so a server reordering schema keys without
+    changing their meaning does not register as drift.
+
+    Args:
+        raw_schema: A JSON-Schema mapping (e.g. an MCP tool's ``inputSchema``).
+
+    Returns:
+        A 16-character hex digest string, matching :func:`schema_fingerprint`.
+    """
+    canonical = json.dumps(raw_schema, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
 @dataclass
 class CompatibilityIssue:
     """A single compatibility problem detected between a flow and its tools.

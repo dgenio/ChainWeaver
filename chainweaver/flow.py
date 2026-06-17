@@ -57,6 +57,17 @@ class FlowLifecycle(str, Enum):
     ARCHIVED = "archived"
 
 
+# Context key-collision policy (issue #337).  Governs what happens when a step
+# produces an output key that already exists in the accumulated execution
+# context (including the initial input).  ``"overwrite"`` keeps the historical
+# silent last-write-wins behaviour; ``"warn"`` (the default) logs at WARNING
+# before overwriting; ``"error"`` aborts the run with a typed
+# ``ContextKeyCollisionError`` naming the step and colliding keys.  DAG
+# *sibling* collisions within one level remain an unconditional error
+# regardless of this policy — they are genuinely ambiguous.
+ContextCollisionPolicy = Literal["overwrite", "warn", "error"]
+
+
 _LIFECYCLE_TRANSITIONS: dict[FlowLifecycle, frozenset[FlowLifecycle]] = {
     FlowLifecycle.OBSERVED: frozenset({FlowLifecycle.SUGGESTED, FlowLifecycle.IGNORED}),
     FlowLifecycle.SUGGESTED: frozenset({FlowLifecycle.DRAFT, FlowLifecycle.IGNORED}),
@@ -307,12 +318,28 @@ class FlowStep(BaseModel):
             present in the accumulated execution context (initial input merged
             with all previous step outputs).
 
-            If a value is a string it is treated as a key lookup in the context.
-            If a value is any other type (int, float, bool, …) it is used as a
-            literal constant.
+            If a value is a string it is treated as a lookup in the context.
+            A plain key (e.g. ``"value"``) is a top-level lookup; a string that
+            starts with ``/`` is an RFC-6901 JSON pointer (issue #387) resolved
+            against the nested context (e.g. ``"/user/address/city"`` or
+            ``"/items/0/id"``).  A top-level key that literally starts with
+            ``/`` is addressed with the ``~1`` escape (the key ``"/raw"`` is the
+            pointer ``"/~1raw"``).  If a value is any other type (int, float,
+            bool, …) it is used as a literal constant.
 
             An empty mapping (the default) means the tool receives the full
             current context as-is.
+        output_mapping: Optional ``{context_key: output_key}`` mapping applied
+            to the tool's *validated* outputs before they merge into the
+            accumulated context (issue #386).  When ``None`` (the default) every
+            output key merges verbatim — the historical behaviour.  When set,
+            only the listed output keys merge, each renamed to its context key;
+            an unlisted output key is dropped, and a listed ``output_key`` the
+            tool did not produce raises
+            :class:`~chainweaver.exceptions.OutputMappingError`.  The raw,
+            unmapped outputs are still recorded on the step's
+            :class:`~chainweaver.executor.StepRecord`; the mapping affects only
+            the context merge.
         decision_candidates: Optional list of tool names that an external
             :class:`~chainweaver.decisions.DecisionCallback` may pick from
             at execution time (issue #102).  When ``None`` (the default)
@@ -376,6 +403,7 @@ class FlowStep(BaseModel):
     tool_name: str | None = None
     flow_name: str | None = None
     input_mapping: dict[str, Any] = Field(default_factory=dict)
+    output_mapping: dict[str, str] | None = None
     retry: RetryPolicy | None = None
     on_error: str = "fail"
     decision_candidates: list[str] | None = None
@@ -540,6 +568,18 @@ class Flow(BaseModel):
             mypy + IDE autocomplete + a single source of truth for
             context keys; runtime validation at the flow boundary is a
             secondary safety net.
+        dynamic_params: Names of parameters injected at execution time via
+            ``execute_flow(..., dynamic_params={...})`` rather than supplied in
+            the LLM-visible ``initial_input`` (issue #316).  Dynamic params are
+            merged into the running context *after* ``input_schema`` validation,
+            so they are available to every step's ``input_mapping`` and flow
+            through to the final output, yet are intentionally **not** part of
+            ``input_schema`` — keeping per-request secrets (auth tokens, account
+            numbers) out of any schema advertised to a model.  This field is
+            declarative metadata for hosts and export adapters that want to know
+            which params a flow expects out-of-band; the executor accepts any
+            ``dynamic_params`` keys regardless of whether they are declared
+            here.
 
     Example::
 
@@ -572,6 +612,8 @@ class Flow(BaseModel):
     capability_id: str | None = None
     governance: FlowGovernance = Field(default_factory=FlowGovernance)
     safety: ToolSafetyContract | None = None
+    on_context_collision: ContextCollisionPolicy = "warn"
+    dynamic_params: tuple[str, ...] = ()
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -690,7 +732,7 @@ class Flow(BaseModel):
         return flow_to_yaml(self)
 
     @classmethod
-    def from_json(cls, data: str) -> Flow:
+    def from_json(cls, data: str, *, source: str | None = None) -> Flow:
         """Deserialize a :class:`Flow` from a JSON string (issue #14).
 
         Raises:
@@ -700,15 +742,16 @@ class Flow(BaseModel):
         """
         from chainweaver.serialization import flow_from_json
 
-        result = flow_from_json(data)
+        result = flow_from_json(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a Flow payload but got {type(result).__name__}"
+                f"Expected a Flow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
     @classmethod
-    def from_yaml(cls, data: str) -> Flow:
+    def from_yaml(cls, data: str, *, source: str | None = None) -> Flow:
         """Deserialize a :class:`Flow` from a YAML string (issue #14).
 
         Requires ``pyyaml`` to be installed (``pip install chainweaver[yaml]``).
@@ -720,19 +763,13 @@ class Flow(BaseModel):
         """
         from chainweaver.serialization import flow_from_yaml
 
-        result = flow_from_yaml(data)
+        result = flow_from_yaml(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a Flow payload but got {type(result).__name__}"
+                f"Expected a Flow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
-
-
-# TODO (Phase 2): Add conditional branching — a step that inspects
-# context values and selects the next step(s) at runtime.
-
-# TODO (Phase 2): Add determinism scoring so that partially
-# deterministic flows can be marked and handled appropriately.
 
 
 @dataclass
@@ -897,6 +934,10 @@ class DAGFlow(BaseModel):
             when an earlier step aborts the flow).  Mirrors the
             :class:`Flow` field of the same name; see there for the
             DX motivation.
+        dynamic_params: Names of parameters injected at execution time via
+            ``execute_flow(..., dynamic_params={...})`` rather than supplied in
+            ``initial_input`` (issue #316).  Mirrors the :class:`Flow` field of
+            the same name; see there for full semantics.
 
     Raises:
         DAGDefinitionError: If topology is invalid (cycle, duplicate
@@ -933,6 +974,8 @@ class DAGFlow(BaseModel):
     capability_id: str | None = None
     governance: FlowGovernance = Field(default_factory=FlowGovernance)
     safety: ToolSafetyContract | None = None
+    on_context_collision: ContextCollisionPolicy = "warn"
+    dynamic_params: tuple[str, ...] = ()
 
     @staticmethod
     def schema_ref_from(cls: type[BaseModel]) -> str:
@@ -1019,7 +1062,7 @@ class DAGFlow(BaseModel):
         return flow_to_yaml(self)
 
     @classmethod
-    def from_json(cls, data: str) -> DAGFlow:
+    def from_json(cls, data: str, *, source: str | None = None) -> DAGFlow:
         """Deserialize a :class:`DAGFlow` from a JSON string (issue #14).
 
         Raises:
@@ -1029,15 +1072,16 @@ class DAGFlow(BaseModel):
         """
         from chainweaver.serialization import flow_from_json
 
-        result = flow_from_json(data)
+        result = flow_from_json(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a DAGFlow payload but got {type(result).__name__}"
+                f"Expected a DAGFlow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 
     @classmethod
-    def from_yaml(cls, data: str) -> DAGFlow:
+    def from_yaml(cls, data: str, *, source: str | None = None) -> DAGFlow:
         """Deserialize a :class:`DAGFlow` from a YAML string (issue #14).
 
         Raises:
@@ -1046,10 +1090,11 @@ class DAGFlow(BaseModel):
         """
         from chainweaver.serialization import flow_from_yaml
 
-        result = flow_from_yaml(data)
+        result = flow_from_yaml(data, source=source)
         if not isinstance(result, cls):
             raise FlowSerializationError(
-                f"Expected a DAGFlow payload but got {type(result).__name__}"
+                f"Expected a DAGFlow payload but got {type(result).__name__}",
+                source=source,
             )
         return result
 

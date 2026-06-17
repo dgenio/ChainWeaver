@@ -10,6 +10,152 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FlowStep.output_mapping`** (#386): an optional `{context_key: output_key}`
+  mapping that renames and prunes a tool's validated outputs before they merge
+  into the accumulated context. Absent (the default) merges every key verbatim;
+  when set, only the listed output keys merge, each renamed to its context key,
+  and a mapped key the tool did not produce raises the new `OutputMappingError`
+  (`CW-E041`). The raw outputs stay on `StepRecord.outputs` — the mapping
+  affects only the context merge. Honoured across the linear and DAG lanes
+  (sync and async), resume/replay, the `FlowBuilder.step(..., output_mapping=)`
+  helper, serialization, the published JSON Schema, and `compile_flow` static
+  validation.
+- **JSON-pointer `input_mapping` lookups** (#387): an `input_mapping` string
+  that starts with `/` is now resolved as an RFC-6901 JSON pointer against the
+  nested context (e.g. `"/user/address/city"`, `"/items/0/id"`), replacing the
+  need for a `json_pluck` step per nested field. Plain keys are unchanged; a
+  miss raises `InputMappingError` naming the pointer. Pointer resolution is
+  shared with contrib's `json_pluck` via a new dependency-free
+  `chainweaver._pointer` module so core never imports the optional `contrib`
+  extra. **Behaviour change:** a pre-existing flat key whose value literally
+  started with `/` now means a pointer — address such a key with the `~1`
+  escape (`"/raw"` → `"/~1raw"`).
+- **Runtime dynamic-parameter injection** (#316): `execute_flow` /
+  `execute_flow_async` accept a `dynamic_params={...}` keyword whose values are
+  merged into the running context *after* `input_schema` validation, so they
+  reach every step's `input_mapping` and the final output without ever
+  appearing in the LLM-visible `input_schema` — for per-request secrets (auth
+  tokens, account numbers) a model must never see or hallucinate. A declarative
+  `Flow.dynamic_params` / `DAGFlow.dynamic_params` tuple records which params a
+  flow expects for hosts and export adapters. Composed sub-flows inherit the
+  injected params.
+
+### Fixed
+
+- **Run-scoped state is now isolated per asyncio task** (#336): the executor's
+  run-scoped markers (injected `dynamic_params`, `active_flow_version`, the
+  replay/resume flags, and the `stream_flow` event collector) moved from a
+  `threading.local` slot to a per-instance `contextvars.ContextVar` bound to a
+  fresh copy at each entry point. A `threading.local` does not isolate state
+  between concurrent `execute_flow_async` tasks sharing one event-loop thread,
+  so previously two concurrent async runs could clobber each other's
+  `active_flow_version` and injected `dynamic_params` (often per-request
+  secrets) across an `await`. Sub-flow recursion still inherits the parent's
+  values via the scoped copy.
+- **Fallback input-schema validation and attribution** (#338): sync and async
+  fallback tools continue to validate the primary step's resolved inputs
+  against their own input schemas, but validation failures now name the
+  fallback tool instead of the primary. `StepRecord` keeps the stable primary
+  `tool_name` and adds `fallback_tool_name`; the additive trace shape bumps
+  `TRACE_SCHEMA_VERSION` to `"1.1"`. `compile_flow()` now rejects missing
+  fallback tools and incompatible fallback mappings, required fields, or
+  types before execution.
+
+## [0.13.0] - 2026-06-15
+
+### Added
+
+- **`chainweaver init` project scaffolder** (#441): generate a runnable first
+  flow project — tool definitions, a `.flow.yaml`, and a `run.py` — in one
+  command, with `linear`, `dag`, and `mcp` templates, an optional `--with-tests`
+  passing pytest module, and printed next commands. Refuses to overwrite
+  existing files unless `--force` is given.
+- **`chainweaver explain`** (#420): a deterministic, LLM-free flow explanation
+  (steps, input/output mappings, branching conditions, governance/safety, and an
+  embedded Mermaid diagram) in Markdown (`--format md`, default) or `text`,
+  suitable for pasting into a PR. `--result trace.json` overlays actual step
+  outcomes. Output is stable across runs and works file-first without a
+  programmatic registry.
+- **Mermaid output and result overlays for `chainweaver viz`** (#392): `viz`
+  gains `--format mermaid` and a `--result trace.json` mode that renders an
+  `ExecutionResult` as a status/timing Mermaid overlay (file-only — no registry
+  or flow name required).
+- **First-run doctor profile** (#442): `chainweaver doctor --profile first-run`
+  checks environment readiness — Python version, optional-extra availability
+  (with the exact `pip install 'chainweaver[...]'` command), writable paths, and
+  core import health — and emits machine-readable JSON with `--format json`. No
+  flow *path* is required in this mode.
+- **CLI flow discovery for `inspect` / `viz`** (#381): both commands gain
+  `--file`, `--discover-dir`, and `--discover-entry-points` so a flow can be
+  resolved without a programmatic `set_default_registry` call. Resolution
+  precedence is file → directory → entry points → the default registry, and a
+  no-match error names the source consulted and the flows it found. Adds a
+  companion `chainweaver flows list` command (table + JSON) to preview what is
+  discoverable.
+- **Structured `--format json` envelope** (#440): `inspect`, `validate`,
+  `check`, `profile`, `diff`, `attest`, and `flows list` now wrap their JSON
+  output in a documented, versioned envelope —
+  `{"schema_version", "status", "data", "errors"}` — so automation and CI can
+  branch on `status` / stable error `code`s (#390) instead of scraping text.
+  Trace-bearing commands (`profile`, `diff`) carry the source
+  `trace_schema_version` (#393). The new `CLI_SCHEMA_VERSION` constant versions
+  the envelope itself. **Behaviour change:** the JSON shape of those commands
+  changed — the previous payload now lives under `data`; `run` and
+  `dump-schema` are unchanged.
+- **Shell completion** (#436): documented and tested tab-completion for
+  bash/zsh/fish via `chainweaver --install-completion` / `--show-completion`.
+
+- **Explicit schema versions for serialized artifacts** (#393, #394, #395): the
+  three durable artifacts now carry a library-stamped version so consumers can
+  detect shape evolution instead of sniffing fields. A shared
+  `chainweaver._versions` module centralises the "accept same MAJOR, reject
+  incompatible MAJOR, tolerate absent (legacy)" policy.
+  - Serialized flow files (`.flow.yaml` / `.flow.json`) gain a `format_version`
+    key; `flow_from_dict` rejects an incompatible MAJOR with
+    `FlowSerializationError` and tolerates legacy files with no key (#394). The
+    emitted `schemas/flow.schema.json` documents the key.
+  - `ExecutionResult` gains `trace_schema_version`; legacy traces without it
+    load unchanged (#393).
+  - `ExecutionSnapshot` gains `snapshot_version`; `FlowExecutor.resume_flow`
+    refuses an incompatible MAJOR with the new `CheckpointVersionError` rather
+    than failing opaquely mid-recovery (#395).
+- **Stable diagnostic codes on the exception hierarchy** (#390): every
+  `ChainWeaverError` subclass carries an append-only `code` class attribute
+  (e.g. `CW-E006`). The CLI prefixes it on error output
+  (`chainweaver: [CW-E006] …`), failing `StepRecord`s expose it as the new
+  `error_code` field (auto-derived from `error_type`), and every code is
+  documented in `docs/reference/error-table.md`. A consistency test enforces
+  uniqueness, completeness, and documentation. The code is intentionally not
+  injected into `str(exc)`, preserving existing message contracts.
+
+- **FlowExecutor execution-core hardening** (#330, #331, #332, #335, #336,
+  #337, #344): a cluster of architecture/reliability improvements to the
+  executor core.
+  - A new internal `chainweaver._execution` package holds the transport-agnostic,
+    no-I/O building blocks shared by both lanes (#330, #331), starting with
+    `merge_step_outputs` — a single context-merge implementation used by linear
+    and DAG, sync and async.
+  - `Flow` / `DAGFlow` gain `on_context_collision` (`"overwrite"` / `"warn"`
+    (default) / `"error"`) governing what happens when a step output overwrites
+    an existing context key; `compile_flow` emits a `context_collision` warning
+    for statically detectable overwrites; new `ContextKeyCollisionError` (#337).
+  - Opt-in concurrent execution of independent DAG-level steps in the async lane
+    via `FlowExecutor(max_step_concurrency=N)` (default `1` = sequential,
+    bit-identical); results stay deterministic regardless of the setting (#344).
+  - `FlowExecutor` now documents and supports a real concurrency contract:
+    `stream_flow` registers its event collector as per-thread run-scoped
+    middleware (no more shared-list mutation), and `InMemoryStepCache` /
+    `InMemoryCheckpointer` are internally locked (#336).
+  - `execute_flow_async` rejects unsupported constructs (branching,
+    `decision_candidates`, composed sub-flows) up front with the new typed
+    `AsyncLaneUnsupportedError`, listing every offending construct (#332).
+  - `FlowRegistry.update_flow_state` performs copy-on-write state transitions;
+    `accept_drift` / `set_flow_status` no longer mutate registry-shared `Flow`
+    objects in place (#335).
+  - The executor determinism invariants (no LLM / no network / no randomness)
+    are now mechanically enforced by an AST import-contract test over
+    `executor.py` and `_execution/` (#354).
+
 - **Coding-agent macro-flow compilation loop** (#254, #256, #257, #260,
   #261, #262, #263, #266, #267, #312, #313, #314): a new `chainweaver.traces`
   module makes the *observe → mine → score → draft → backtest* loop
@@ -50,10 +196,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   safety was explicitly declared, and MCP annotations are derived from the
   effective contract.
 
+### Changed
+
+- **CLI restructured into a command package** (#333): the single 3,284-line
+  `chainweaver/cli.py` is now a `chainweaver/cli/` package — shared Typer
+  app/loading/error/output helpers in `_shared.py`, one module per command
+  group, and a thin `__init__.py` that wires them while keeping the
+  `chainweaver.cli:main` entry point and re-exported surface stable. Behaviour
+  is unchanged; private helpers moved to their owning submodule
+  (e.g. `chainweaver.cli.run._build_flow_server`).
+
 ### Deprecated
 
 - `ToolSafetyContract.requires_review` is retained as a deprecated alias for
   `requires_approval`; legacy serialized contracts are migrated on load.
+
+### Fixed
+
+- **Source-attributed loading errors** (#343): JSON/YAML flow loaders now carry
+  optional source context through `FlowSerializationError`, CLI/file-store
+  callers pass flow paths into deserialization, and skipped plugin entry-point
+  warnings include tracebacks for the underlying loader failure.
 
 ## [0.12.1] - 2026-06-08
 
@@ -1028,7 +1191,8 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/dgenio/ChainWeaver/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/dgenio/ChainWeaver/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/dgenio/ChainWeaver/compare/v0.10.0...v0.11.0

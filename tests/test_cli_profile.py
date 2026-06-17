@@ -122,7 +122,7 @@ class TestProfileSingle:
         exit_code = cli.main(["profile", str(trace), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["trace_count"] == 1
         assert payload["flow_name"] == "etl"
         assert payload["trace_id"] == "abc123"
@@ -228,7 +228,7 @@ class TestProfileMulti:
         exit_code = cli.main(["profile", *[str(p) for p in paths], "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["trace_count"] == 3
         assert payload["flow_name"] == "etl"
         assert payload["step_count"] == 2
@@ -378,7 +378,7 @@ class TestProfileReliabilitySingle:
         exit_code = cli.main(["profile", str(trace), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         # Every step row now carries the reliability projection.
         by_tool = {s["tool_name"]: s for s in payload["steps"]}
         assert by_tool["fetch"]["retry_count"] == 2
@@ -408,7 +408,7 @@ class TestProfileReliabilitySingle:
         exit_code = cli.main(["profile", str(trace), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         agg = payload["aggregates"]
         assert agg["retry_count"] == 0
         assert agg["skip_count"] == 0
@@ -517,7 +517,7 @@ class TestProfileReliabilityMulti:
         exit_code = cli.main(["profile", str(path_a), str(path_b), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         # Per-step entries carry counts summed across traces at that index.
         by_step = {s["tool_name"]: s for s in payload["steps"]}
         assert by_step["fetch"]["retry_count"] == 3

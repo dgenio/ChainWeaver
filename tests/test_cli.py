@@ -81,7 +81,7 @@ class TestInspectJson:
         exit_code = cli.main(["inspect", "double_flow", "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["name"] == "double_flow"
         assert payload["type"] == "Flow"
         assert payload["step_count"] == 1
@@ -91,7 +91,7 @@ class TestInspectJson:
         cli.set_default_registry(_make_dag_registry())
         assert cli.main(["inspect", "dag_flow", "--format", "json"]) == 0
         captured = capsys.readouterr()
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["type"] == "DAGFlow"
         ids = {s["step_id"] for s in payload["steps"]}
         assert ids == {"A", "B"}
@@ -149,7 +149,7 @@ class TestMainEntryPoint:
         cli.set_default_registry(registry)
         exit_code = cli.main(["inspect", "double_flow", "--format", "json"])
         captured = capsys.readouterr()
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert exit_code == 0
         assert payload["steps"][0]["tool_name"] == "double"
 
@@ -242,6 +242,7 @@ class TestValidateCommand:
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "INVALID" in captured.err
+        assert str(bad) in captured.err
 
     def test_missing_file_returns_two(
         self,
@@ -285,7 +286,7 @@ class TestValidateCommand:
         exit_code = cli.main(["validate", str(flow_path), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["valid"] is True
         assert payload["name"] == "from_file_json"
         assert payload["type"] == "Flow"
@@ -300,7 +301,7 @@ class TestValidateCommand:
         exit_code = cli.main(["validate", str(bad), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 1
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["valid"] is False
         assert "error" in payload
 
@@ -395,7 +396,7 @@ class TestCheckCommand:
         exit_code = cli.main(["check", str(tmp_path), "--format", "json"])
         captured = capsys.readouterr()
         assert exit_code == 1
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["valid_count"] == 1
         assert payload["invalid_count"] == 1
         assert len(payload["results"]) == 2

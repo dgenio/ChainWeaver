@@ -343,7 +343,7 @@ class TestAttestCLI:
         )
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["flow_name"] == "cli_double"
         assert payload["observed_deterministic"] is True
         assert payload["n"] == 5
@@ -403,7 +403,7 @@ class TestAttestCLI:
         )
         captured = capsys.readouterr()
         assert exit_code == 0
-        payload = json.loads(captured.out)
+        payload = json.loads(captured.out)["data"]
         assert payload["n"] == 2
         assert payload["seed"] == -1
 

@@ -37,11 +37,14 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from chainweaver._versions import SNAPSHOT_VERSION
 
 if TYPE_CHECKING:  # pragma: no cover — import-cycle guard
     from chainweaver.executor import StepRecord
@@ -59,6 +62,15 @@ class ExecutionSnapshot(BaseModel):
     convention as :class:`~chainweaver.executor.ExecutionResult`.
 
     Attributes:
+        snapshot_version: Library-stamped version of the snapshot *shape*
+            (issue #395), e.g. ``"1"``.  On resume the executor accepts a
+            snapshot whose MAJOR matches and raises
+            :class:`~chainweaver.exceptions.CheckpointVersionError` for an
+            incompatible MAJOR, so a library upgrade between write and resume
+            fails loudly instead of surfacing an opaque validation error
+            mid-recovery.  Snapshots written before versioning carry no stamp
+            and load with the current default version (back-filled by Pydantic),
+            so they remain resumable.
         trace_id: Original trace id of the in-flight execution.  Used
             as the lookup key for :meth:`Checkpointer.load`.
         flow_name: Name of the flow being executed.
@@ -85,6 +97,7 @@ class ExecutionSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
+    snapshot_version: str = SNAPSHOT_VERSION
     trace_id: str
     flow_name: str
     flow_version: str
@@ -127,31 +140,38 @@ class InMemoryCheckpointer:
     Use this for unit tests and any scenario where the checkpoint
     only needs to live for the lifetime of a process.
 
-    **Concurrency**: this class wraps a plain ``dict`` and offers no
-    internal synchronization.  It is safe to use from a single thread
-    of execution per :class:`FlowExecutor` (which is the documented
-    executor contract).  For cross-process or cross-thread
-    crash-resume, use :class:`FileCheckpointer` (which delegates
-    atomicity to the filesystem) instead.
+    **Concurrency** (issue #336): every accessor is guarded by an
+    internal :class:`threading.Lock`, so a single ``InMemoryCheckpointer``
+    is safe to share across the concurrent runs of one
+    :class:`FlowExecutor`.  The lock is held only for the dict
+    operation itself, never across a tool invocation.  For
+    cross-process crash-resume, use :class:`FileCheckpointer` (which
+    delegates atomicity to the filesystem) instead.
     """
 
     def __init__(self) -> None:
         self._store: dict[str, ExecutionSnapshot] = {}
+        self._lock = threading.Lock()
 
     def save(self, snapshot: ExecutionSnapshot) -> None:
-        self._store[snapshot.trace_id] = snapshot
+        with self._lock:
+            self._store[snapshot.trace_id] = snapshot
 
     def load(self, trace_id: str) -> ExecutionSnapshot | None:
-        return self._store.get(trace_id)
+        with self._lock:
+            return self._store.get(trace_id)
 
     def delete(self, trace_id: str) -> None:
-        self._store.pop(trace_id, None)
+        with self._lock:
+            self._store.pop(trace_id, None)
 
     def list_trace_ids(self) -> list[str]:
-        return list(self._store.keys())
+        with self._lock:
+            return list(self._store.keys())
 
     def __len__(self) -> int:
-        return len(self._store)
+        with self._lock:
+            return len(self._store)
 
 
 class FileCheckpointer:

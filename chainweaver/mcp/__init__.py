@@ -27,13 +27,25 @@ clear ``ImportError`` instead of a generic ``ModuleNotFoundError``.
 from __future__ import annotations
 
 from chainweaver.mcp._schema import jsonschema_to_pydantic, pydantic_to_jsonschema
-from chainweaver.mcp.adapter import MCPToolAdapter
+from chainweaver.mcp.adapter import (
+    AnnotationTrust,
+    DriftPolicy,
+    MCPToolAdapter,
+    MetadataPolicy,
+    build_pin_file,
+    load_pins,
+)
 from chainweaver.mcp.server import FlowServer, TransportName
 
 __all__ = [
+    "AnnotationTrust",
+    "DriftPolicy",
     "FlowServer",
     "MCPToolAdapter",
+    "MetadataPolicy",
     "TransportName",
+    "build_pin_file",
     "jsonschema_to_pydantic",
+    "load_pins",
     "pydantic_to_jsonschema",
 ]

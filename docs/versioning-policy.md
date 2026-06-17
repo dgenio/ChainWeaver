@@ -100,6 +100,46 @@ uses `importlib.import_module` + `getattr`, so classes defined inside
 function bodies (`<locals>`) cannot be referenced.  Schemas referenced
 by serialized flows **must** live at module top level.
 
+## Artifact schema versions
+
+Three durable, serialized artifacts carry their own explicit, library-stamped
+**schema version** so long-lived consumers can detect and react to shape
+evolution instead of inferring it from field presence. These version the
+*serialization shape*, and are distinct from both the package SemVer above and
+from `Flow.version` (which versions a flow *definition*).
+
+| Constant | Artifact | Field written | Issue |
+|----------|----------|---------------|-------|
+| `FLOW_FORMAT_VERSION` | `.flow.yaml` / `.flow.json` files | `format_version` | #394 |
+| `TRACE_SCHEMA_VERSION` | `ExecutionResult` traces | `trace_schema_version` | #393 |
+| `SNAPSHOT_VERSION` | `ExecutionSnapshot` checkpoints | `snapshot_version` | #395 |
+| `CLI_SCHEMA_VERSION` | CLI `--format json` envelope | `schema_version` | #440 |
+
+The `CLI_SCHEMA_VERSION` envelope (`chainweaver/cli/_shared.py`) wraps the
+`--format json` output of the result-producing commands —
+`{"schema_version", "status", "data", "errors"}`. Bump its MAJOR when the
+envelope's own shape changes incompatibly; it is independent of the three
+serialized-artifact versions above. See
+[docs/cli.md](cli.md#machine-readable-output---format-json).
+
+All three share one compatibility rule, centralised in `chainweaver/_versions.py`:
+
+- **MAJOR** (`"1"` → `"2"`): a breaking shape change — a removed, renamed, or
+  retyped field. A reader **rejects** an artifact whose MAJOR differs from the
+  version it writes, with a typed error (`FlowSerializationError` for flow
+  files, `CheckpointVersionError` for snapshots) rather than an opaque
+  validation failure.
+- **MINOR** (`"1"` → `"1.1"`): a purely additive change (a new optional field)
+  that older readers can ignore. Same-MAJOR artifacts always load.
+- **Absent**: an artifact written before versioning is treated as the current
+  MAJOR and loads unchanged, so existing files/traces/snapshots keep working.
+
+When you change the shape of one of these artifacts, bump the matching constant
+(MAJOR for breaking, MINOR for additive) in the same PR, and note it in the
+changelog. The `ExecutionResult` / `ExecutionSnapshot` field sets are already
+guarded by the public-API snapshot test below, which fails on an un-regenerated
+shape change.
+
 ## Tracking changes
 
 Every release adds a section to [CHANGELOG.md](https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md) following

@@ -2,14 +2,48 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from chainweaver.executor import ExecutionResult
 
 
+# Bumped whenever a ChainWeaverError subclass is defined (including in sibling
+# modules, on import).  error_code_registry() reads it to cache its result and
+# rebuild only when the live subclass tree actually changes.
+_ERROR_CODE_GENERATION = 0
+
+
 class ChainWeaverError(Exception):
-    """Base exception for all ChainWeaver errors."""
+    """Base exception for all ChainWeaver errors.
+
+    Every subclass carries a stable diagnostic ``code`` (issue #390) — e.g.
+    ``"CW-E007"``.  Most codes are assigned from the append-only registry at the
+    bottom of this module; subclasses that live in sibling modules to avoid
+    import cycles (``FlowBuilderError``, ``FuzzConfigError``,
+    ``AttestationInputError``, ``FixtureStaleError``) declare their ``code`` in
+    place instead.  When adding a new exception, register its code in whichever
+    of those two places matches where the class is defined.  Codes are
+    searchable in logs, issues, and docs, let coding agents
+    map a failure to a documented remediation deterministically, and let
+    ``--format json`` consumers branch on a code instead of string-matching
+    messages.  The code is exposed as a class attribute (and surfaced in CLI
+    error output and on :attr:`~chainweaver.executor.StepRecord.error_code`); it
+    is deliberately *not* injected into ``str(exc)`` so existing message
+    contracts are preserved.  Each code maps to an anchored section in
+    ``docs/reference/error-table.md``.
+    """
+
+    #: Stable diagnostic code; overridden per subclass via the registry below.
+    code: ClassVar[str] = "CW-E000"
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        # Bump the generation counter so error_code_registry() knows the live
+        # subclass tree has grown and rebuilds its cache (subclasses defined in
+        # sibling modules register here on import).
+        super().__init_subclass__(**kwargs)
+        global _ERROR_CODE_GENERATION
+        _ERROR_CODE_GENERATION += 1
 
 
 class ToolNotFoundError(ChainWeaverError):
@@ -69,6 +103,27 @@ class InputMappingError(ChainWeaverError):
         self.key = key
         super().__init__(
             f"Input mapping key '{key}' not found for tool '{tool_name}' at step {step_index}."
+        )
+
+
+class OutputMappingError(ChainWeaverError):
+    """Raised when a step's ``output_mapping`` references a missing output key.
+
+    The mapping renames/prunes a tool's validated outputs before they merge into
+    the execution context (issue #386); this fires when a mapped ``output_key``
+    is not among the keys the tool actually produced.
+    """
+
+    def __init__(
+        self, tool_name: str, step_index: int, output_key: str, available: list[str]
+    ) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.output_key = output_key
+        self.available = available
+        super().__init__(
+            f"Output mapping references key '{output_key}' not produced by tool "
+            f"'{tool_name}' at step {step_index}. Available output keys: {sorted(available)}."
         )
 
 
@@ -202,6 +257,69 @@ class FlowCancelledError(ChainWeaverError):
         super().__init__(f"Flow '{flow_name}' cancelled before step {step_index} ({reason}).")
 
 
+class ContextKeyCollisionError(ChainWeaverError):
+    """Raised when a step output collides with an existing context key under the
+    ``on_context_collision="error"`` policy (issue #337).
+
+    The accumulated execution context is a flow's data plane.  By default a step
+    that emits a key already present in the context (including the initial
+    input) overwrites it — silently before #337, at ``WARNING`` since.  A flow
+    that sets ``on_context_collision="error"`` opts into hard failure instead:
+    rather than letting a reordering or an added step drop earlier data
+    unnoticed, the run aborts with this typed error naming the offending step
+    and the colliding keys.
+
+    Attributes:
+        flow_name: Name of the flow whose context collided.
+        step_index: Zero-based index of the step that produced the collision.
+        step_name: Display name of the offending step.
+        keys: The output keys that collided with existing context keys.
+    """
+
+    def __init__(self, flow_name: str, step_index: int, step_name: str, keys: list[str]) -> None:
+        self.flow_name = flow_name
+        self.step_index = step_index
+        self.step_name = step_name
+        self.keys = list(keys)
+        joined = ", ".join(repr(key) for key in keys)
+        super().__init__(
+            f"Flow '{flow_name}' step {step_index} ('{step_name}') would overwrite "
+            f"existing context key(s) {joined}; on_context_collision='error' aborts "
+            f"rather than dropping earlier data."
+        )
+
+
+class AsyncLaneUnsupportedError(ChainWeaverError):
+    """Raised when :meth:`FlowExecutor.execute_flow_async` is given a flow that
+    uses execution features the async lane does not yet support (issue #332).
+
+    The async lane (issue #80) does not implement conditional branching
+    (``branches`` / ``default_next``, #9), guided decision callbacks
+    (``decision_candidates``, #102), or composed sub-flow steps (``flow_name``,
+    #75).  Rather than executing such a flow with those directives **silently
+    dropped** — which would yield a different result than the synchronous
+    :meth:`execute_flow` and undermine the determinism promise — the executor
+    fails fast, before the first step runs, listing every unsupported construct
+    it found.  Route the flow through :meth:`execute_flow` until async parity
+    lands.
+
+    Attributes:
+        flow_name: Name of the flow that could not run on the async lane.
+        unsupported: Human-readable descriptions of each unsupported construct
+            found, one per offending step/feature.
+    """
+
+    def __init__(self, flow_name: str, unsupported: list[str]) -> None:
+        self.flow_name = flow_name
+        self.unsupported = list(unsupported)
+        joined = "; ".join(unsupported)
+        super().__init__(
+            f"Flow '{flow_name}' uses features unsupported by execute_flow_async: "
+            f"{joined}. Run it via the synchronous execute_flow until the async "
+            f"lane reaches parity."
+        )
+
+
 class FlowCompositionError(ChainWeaverError):
     """Raised when a composed flow's sub-flow references are invalid (issue #75).
 
@@ -312,6 +430,44 @@ class CheckpointNotFoundError(ChainWeaverError):
         super().__init__(f"No snapshot found for trace_id '{trace_id}'.")
 
 
+class CheckpointVersionError(ChainWeaverError):
+    """Raised when a snapshot's format version is incompatible with this library (issue #395).
+
+    Crash-resume (issue #128) persists :class:`~chainweaver.checkpoint.ExecutionSnapshot`
+    JSON designed to outlive the process — the very scenario where a library
+    upgrade between write and resume is most likely.  Each snapshot carries a
+    ``snapshot_version`` stamp; :meth:`~chainweaver.executor.FlowExecutor.resume_flow`
+    accepts a snapshot whose MAJOR component matches the version this library
+    writes and raises this typed error for an incompatible MAJOR, rather than
+    surfacing an opaque Pydantic validation error mid-recovery.  Remediation:
+    re-run the flow from the start, or resume with the matching library version.
+
+    Attributes:
+        trace_id: Trace id of the snapshot that could not be safely resumed.
+        flow_name: Name of the flow recorded in the snapshot.
+        snapshot_version: The ``snapshot_version`` read from the snapshot.
+        expected_version: The snapshot version this library writes.
+    """
+
+    def __init__(
+        self,
+        trace_id: str,
+        flow_name: str,
+        snapshot_version: str,
+        expected_version: str,
+    ) -> None:
+        self.trace_id = trace_id
+        self.flow_name = flow_name
+        self.snapshot_version = snapshot_version
+        self.expected_version = expected_version
+        super().__init__(
+            f"Cannot resume trace '{trace_id}' for flow '{flow_name}': snapshot_version "
+            f"'{snapshot_version}' is incompatible with this ChainWeaver "
+            f"(writes '{expected_version}'). Re-run from the start or resume with the "
+            f"matching library version."
+        )
+
+
 class PluginDiscoveryError(ChainWeaverError):
     """Raised when an entry-point plugin loader fails irrecoverably.
 
@@ -391,6 +547,109 @@ class MCPToolInvocationError(MCPError):
         self.tool_name = tool_name
         self.detail = detail
         super().__init__(f"MCP tool '{tool_name}' invocation failed: {detail}.")
+
+
+class ApprovalDeniedError(ChainWeaverError):
+    """Raised when an :class:`~chainweaver.approvals.ApprovalCallback` denies a step (issue #356).
+
+    Execution-time enforcement of :class:`~chainweaver.contracts.ToolSafetyContract`
+    is opt-in: when a step's effective contract has ``requires_approval=True`` and
+    a callback is registered on the executor, the callback is asked to approve the
+    step *before* the tool function runs.  A ``DENY`` decision (or a callback that
+    raises, or a missing callback under ``strict_safety=True``) aborts the step
+    with this typed error rather than running the side-effecting tool unattended.
+
+    Attributes:
+        tool_name: Name of the tool whose invocation was denied.
+        step_index: Zero-based position of the step inside the flow.
+        detail: Human-readable description of why approval was denied.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, detail: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.detail = detail
+        # Normalise so the message ends with exactly one period (repo convention,
+        # AGENTS.md §6) regardless of whether *detail* already carried one.
+        normalised = detail.rstrip(".")
+        super().__init__(
+            f"Approval denied for tool '{tool_name}' at step {step_index}: {normalised}."
+        )
+
+
+class SafetyCeilingError(ChainWeaverError):
+    """Raised when a step's side-effect level exceeds the executor ceiling (issue #356).
+
+    When :class:`~chainweaver.executor.FlowExecutor` is configured with
+    ``max_side_effect_level=...``, a step whose effective
+    :class:`~chainweaver.contracts.ToolSafetyContract` declares a
+    :class:`~chainweaver.contracts.SideEffectLevel` above that ceiling is refused
+    before it runs, rather than silently executing a higher-risk operation than
+    the host opted into.
+
+    Attributes:
+        tool_name: Name of the tool that exceeded the ceiling.
+        step_index: Zero-based position of the step inside the flow.
+        level: The step's declared side-effect level (value string).
+        ceiling: The configured maximum side-effect level (value string).
+    """
+
+    def __init__(self, tool_name: str, step_index: int, level: str, ceiling: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.level = level
+        self.ceiling = ceiling
+        super().__init__(
+            f"Tool '{tool_name}' at step {step_index} has side-effect level "
+            f"'{level}' which exceeds the configured ceiling '{ceiling}'."
+        )
+
+
+class MCPMetadataError(MCPError):
+    """Raised when server-provided MCP tool metadata violates the metadata policy (issue #359).
+
+    Tool names and descriptions wrapped from an MCP server are untrusted input:
+    they become ChainWeaver :attr:`Tool.description` / :attr:`Tool.name` values and
+    can be re-exported to LLM clients or rendered into proposer prompts.  When a
+    server advertises a tool name that fails the configured validation pattern (and
+    the policy is not in sanitising mode), :class:`MCPToolAdapter` refuses it with
+    this error instead of adopting a look-alike or control-character-laden name.
+
+    Attributes:
+        tool_name: The offending server-provided tool name (server-prefixed when a
+            prefix was supplied).
+        detail: Human-readable explanation of which rule was violated.
+    """
+
+    def __init__(self, tool_name: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"MCP tool metadata for '{tool_name}' rejected: {detail}.")
+
+
+class MCPSchemaDriftError(MCPError):
+    """Raised when a discovered MCP tool schema no longer matches its pin (issue #358).
+
+    Tools wrapped from remote MCP servers get the same schema-drift discipline as
+    locally registered tools: :class:`MCPToolAdapter` fingerprints each tool's raw
+    JSON Schema at discovery and, when a pin is supplied, verifies it.  Under the
+    ``on_drift="error"`` policy a mismatch raises this exception naming the tool and
+    both fingerprints, rather than transparently rebuilding models around a silently
+    changed remote schema.
+
+    Attributes:
+        tool_name: Name of the MCP tool whose schema drifted (server-side name).
+        expected: The pinned fingerprint.
+        actual: The fingerprint computed from the freshly discovered schema.
+    """
+
+    def __init__(self, tool_name: str, expected: str, actual: str) -> None:
+        self.tool_name = tool_name
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"MCP tool '{tool_name}' schema drifted: pinned '{expected}', discovered '{actual}'."
+        )
 
 
 class DecisionCallbackError(ChainWeaverError):
@@ -529,3 +788,116 @@ class PredicateSyntaxError(ChainWeaverError):
         self.predicate = predicate
         self.detail = detail
         super().__init__(f"Invalid predicate '{predicate}': {detail}")
+
+
+# ---------------------------------------------------------------------------
+# Stable diagnostic codes (issue #390)
+# ---------------------------------------------------------------------------
+#
+# Append-only registry mapping each exception class to its stable ``CW-Exxx``
+# code.  **Codes are forever**: once released, never renumber or reuse one — add
+# new codes at the end with the next free number.  A consistency test
+# (tests/test_error_codes.py) enforces uniqueness, that every public exception
+# has a code, and that each code is documented in docs/reference/error-table.md.
+#
+# Exceptions defined in sibling modules (FlowBuilderError, FuzzConfigError,
+# AttestationInputError, FixtureStaleError) declare their own ``code`` in place
+# to avoid import cycles; they are validated by the same consistency test.
+_ERROR_CODES: dict[type[ChainWeaverError], str] = {
+    ChainWeaverError: "CW-E000",
+    ToolNotFoundError: "CW-E001",
+    FlowNotFoundError: "CW-E002",
+    FlowAlreadyExistsError: "CW-E003",
+    SchemaValidationError: "CW-E004",
+    InputMappingError: "CW-E005",
+    FlowExecutionError: "CW-E006",
+    ToolDefinitionError: "CW-E007",
+    ToolTimeoutError: "CW-E008",
+    ToolOutputSizeError: "CW-E009",
+    DAGDefinitionError: "CW-E010",
+    FlowStatusError: "CW-E011",
+    FlowCancelledError: "CW-E012",
+    ContextKeyCollisionError: "CW-E013",
+    AsyncLaneUnsupportedError: "CW-E014",
+    FlowCompositionError: "CW-E015",
+    InvalidFlowVersionError: "CW-E016",
+    FlowSerializationError: "CW-E017",
+    CheckpointDriftError: "CW-E018",
+    CheckpointerNotConfiguredError: "CW-E019",
+    CheckpointNotFoundError: "CW-E020",
+    CheckpointVersionError: "CW-E021",
+    PluginDiscoveryError: "CW-E022",
+    ContribError: "CW-E023",
+    MCPError: "CW-E024",
+    MCPSchemaConversionError: "CW-E025",
+    MCPToolInvocationError: "CW-E026",
+    MCPMetadataError: "CW-E027",
+    MCPSchemaDriftError: "CW-E028",
+    ApprovalDeniedError: "CW-E029",
+    SafetyCeilingError: "CW-E030",
+    DecisionCallbackError: "CW-E031",
+    KernelInvocationError: "CW-E032",
+    CostProfileError: "CW-E033",
+    OfflineLLMError: "CW-E034",
+    AgentTraceImportError: "CW-E035",
+    PredicateSyntaxError: "CW-E036",
+    OutputMappingError: "CW-E041",
+}
+
+for _exc_cls, _exc_code in _ERROR_CODES.items():
+    _exc_cls.code = _exc_code
+del _exc_cls, _exc_code
+
+
+def _iter_error_classes(
+    root: type[ChainWeaverError] = ChainWeaverError,
+) -> list[type[ChainWeaverError]]:
+    """Return *root* and every (transitive) :class:`ChainWeaverError` subclass.
+
+    Walks the live subclass tree so exceptions defined in sibling modules are
+    included once those modules have been imported.
+    """
+    seen: list[type[ChainWeaverError]] = [root]
+    for sub in root.__subclasses__():
+        seen.extend(_iter_error_classes(sub))
+    return seen
+
+
+_CODE_MAP_CACHE: dict[str, str] = {}
+_CODE_MAP_GENERATION = -1
+
+
+def _error_code_map() -> dict[str, str]:
+    """Return the cached ``{class name: code}`` map, shared across callers.
+
+    The map is rebuilt only when the live :class:`ChainWeaverError` subclass
+    tree has grown since the last build (tracked by ``_ERROR_CODE_GENERATION``).
+    Failing :class:`~chainweaver.executor.StepRecord`s look up their code on
+    every validation, so caching here avoids re-walking the subclass tree per
+    record while still picking up exceptions defined in sibling modules once
+    they are imported.
+    """
+    global _CODE_MAP_GENERATION
+    if _CODE_MAP_GENERATION != _ERROR_CODE_GENERATION:
+        _CODE_MAP_CACHE.clear()
+        _CODE_MAP_CACHE.update((cls.__name__, cls.code) for cls in _iter_error_classes())
+        _CODE_MAP_GENERATION = _ERROR_CODE_GENERATION
+    return _CODE_MAP_CACHE
+
+
+def error_code_registry() -> dict[str, str]:
+    """Return a ``{exception class name: code}`` map over all loaded error types."""
+    return dict(_error_code_map())
+
+
+def error_code_for(name: str | None) -> str | None:
+    """Return the stable code for an exception class *name*, or ``None``.
+
+    *name* is an exception's ``__class__.__name__`` (as stored in
+    :attr:`~chainweaver.executor.StepRecord.error_type`).  Returns ``None`` for
+    foreign (non-:class:`ChainWeaverError`) exception names so trace records
+    from arbitrary tool failures simply carry no code.
+    """
+    if name is None:
+        return None
+    return _error_code_map().get(name)

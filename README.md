@@ -587,13 +587,36 @@ input/output validation.
 ```python
 FlowStep(
     tool_name="my_tool",
-    input_mapping={"key_for_tool": "key_from_context"},
+    input_mapping={
+        "key_for_tool": "key_from_context",   # flat top-level lookup
+        "city": "/user/address/city",         # RFC-6901 pointer into nested context
+        "limit": 10,                          # non-string -> literal constant
+    },
+    output_mapping={"renamed": "value"},      # rename/prune outputs before merge
 )
 ```
 
-Maps keys from the accumulated execution context into the tool's input schema.
-String values are looked up in the context; non-string values are treated as
-literal constants.
+`input_mapping` maps keys from the accumulated execution context into the
+tool's input schema. String values are looked up in the context — a plain key
+is a top-level lookup, and a string starting with `/` is an RFC-6901 JSON
+pointer into the nested context (#387) — while non-string values are literal
+constants.
+
+`output_mapping` (#386) optionally renames and prunes a tool's outputs before
+they merge into the context: `{context_key: output_key}` keeps only the listed
+output keys, each renamed. Omit it to merge every output key verbatim.
+
+To inject per-request secrets that must never appear in a model-visible schema
+(auth tokens, account numbers), pass them at execute-time instead of in
+`initial_input`:
+
+```python
+result = executor.execute_flow(
+    "account_overview",
+    {"query": "what's my balance?"},          # LLM-visible
+    dynamic_params={"billingAccountNumber": "1.60007029"},  # hidden, injected (#316)
+)
+```
 
 #### `Flow`
 
@@ -800,6 +823,8 @@ All errors are typed and traceable:
 | `SchemaValidationError` | Input or output fails Pydantic validation |
 | `InputMappingError` | A mapping key is not present in the context |
 | `FlowExecutionError` | The tool callable raises an unexpected exception |
+| `ApprovalDeniedError` | An execution-time approval callback denied a step, raised, or returned an invalid value — or `strict_safety=True` and a required-approval step has no callback |
+| `SafetyCeilingError` | A step's `ToolSafetyContract.side_effects` exceeds the executor's configured `max_side_effect_level` |
 | `ToolDefinitionError` | The `@tool` decorator cannot build a tool from a function |
 | `DAGDefinitionError` | A `DAGFlow` has a cycle, duplicate `step_id`, or unknown dependency |
 | `FlowCompositionError` | A composed flow has a sub-flow cycle, exceeds `max_composition_depth`, or references an unregistered sub-flow |
@@ -812,8 +837,14 @@ All errors are typed and traceable:
 | `FixtureStaleError` | A `record_then_replay` replay invocation cannot be matched to a recording (missing/stale fixture) |
 | `FuzzConfigError` | A property-based fuzzing run is misconfigured (no properties, `runs < 1`, a flow with no `input_schema` and no base input, or an unsupported input-field type) |
 | `CostProfileError` | A cost estimate is requested for a `(provider, model)` pair absent from the maintained `PROVIDER_PRICES` table |
+| `MCPMetadataError` | A server-provided MCP tool name fails the adapter's `MetadataPolicy` (and `on_invalid_name="error"`) |
+| `MCPSchemaDriftError` | A pinned MCP tool's raw schema changed under `MCPToolAdapter(on_drift="error")` |
+| `CheckpointVersionError` | A resumed snapshot's `snapshot_version` is an incompatible MAJOR relative to the running library |
 
-All exceptions inherit from `ChainWeaverError`.
+All exceptions inherit from `ChainWeaverError` and carry a stable diagnostic
+`code` (e.g. `CW-E006`); the CLI prefixes it on error output and failing
+`StepRecord`s expose it as `error_code`. See the full code table in
+[docs/reference/error-table.md](docs/reference/error-table.md#stable-diagnostic-codes).
 
 ---
 
@@ -1072,13 +1103,31 @@ chainweaver serve examples/double_add_format.flow.yaml \
 chainweaver validate flows/etl.flow.yaml
 chainweaver check flows/                  # whole-directory variant
 
-# Render a registered flow as ASCII or Graphviz DOT.
-# (See note below — `viz` reads from an in-memory registry, not a file.)
-chainweaver viz my_flow --format dot | dot -Tpng -o my_flow.png
+# Scaffold a runnable first flow project (tools + flow file + run script).
+chainweaver init my-first-flow --template linear --with-tests
 
-# Inspect a registered flow's structure (table or JSON).
-# (See note below — `inspect` reads from an in-memory registry, not a file.)
-chainweaver inspect my_flow --format json
+# Render a flow as ASCII, Graphviz DOT, or Mermaid. Discover it from a directory
+# of flow files, an installed package's entry points, or the default registry.
+chainweaver viz my_flow --discover-dir flows/ --format dot | dot -Tpng -o my_flow.png
+chainweaver viz my_flow --discover-dir flows/ --format mermaid
+chainweaver viz --result trace.json --format mermaid   # overlay a real run
+
+# Explain a flow deterministically (LLM-free) for review — paste into a PR.
+chainweaver explain my_flow --discover-dir flows/ > flow-review.md
+
+# Inspect a flow's structure (table or JSON). `flows list` previews what is
+# discoverable so you can see what `inspect`/`viz` can target.
+chainweaver inspect my_flow --discover-dir flows/ --format json
+chainweaver flows list --discover-dir flows/
+
+# Check that your environment is ready before running anything.
+chainweaver doctor flow --profile first-run
+
+# Inspect a coding-agent workspace's MCP / observe setup (read-only).
+chainweaver doctor vscode --workspace .
+
+# Install tab-completion for your shell (bash/zsh/fish).
+chainweaver --install-completion
 
 # Analyze ExecutionResult traces — bottlenecks, p50/p95/p99 across runs,
 # and per-step / per-tool retry / skip / fallback / failure aggregates.
@@ -1102,7 +1151,7 @@ chainweaver flows promote candidates/suggested__fetch__validate.flow.yaml --to a
 chainweaver service --tools my_pkg.tools --trace trace.jsonl
 
 # Check saved flows for tool schema drift against the live registry.
-chainweaver doctor flows/ --check-drift --tools my_pkg.tools
+chainweaver doctor flow flows/ --check-drift --tools my_pkg.tools
 
 # Property-based fuzzing: generate cases, check invariants, save/minimize failures.
 chainweaver fuzz flows/etl.flow.yaml --tools my_pkg.tools \
@@ -1118,20 +1167,27 @@ declare a `type: Flow` (or `type: DAGFlow`) discriminator at the top — see
 the [flow file format](docs/cli.md#flow-file-format) reference. Most
 reporting subcommands also accept `--format json` for machine consumption
 (`inspect`, `validate`, `check`, `run`, `profile`, `diff`, `attest`,
-`suggest`, `doctor`); the two exceptions are `viz`, which uses
-`--format ascii|dot`, and `dump-schema`, which writes a raw JSON Schema
-and has no `--format` flag. All subcommands share the same exit-code
-contract (`0` success, `1` business-logic error, `2` file-not-found /
-argument error).
+`suggest`, `doctor`); the exceptions are `viz`, which uses
+`--format ascii|dot|mermaid`, `explain`, which uses `--format md|text`, and
+`dump-schema`, which writes a raw JSON Schema and has no `--format` flag. The result-producing commands (`inspect`,
+`validate`, `check`, `profile`, `diff`, `attest`) wrap their `--format json`
+output in a stable, versioned envelope
+(`{"schema_version", "status", "data", "errors"}`) so automation can branch on
+`status` / error codes — see
+[machine-readable output](docs/cli.md#machine-readable-output---format-json).
+All subcommands share the same exit-code contract (`0` success, `1`
+business-logic error, `2` file-not-found / argument error), and the CLI ships
+tab-completion (`chainweaver --install-completion`).
 
-**`inspect` and `viz` need a registry — they don't read from disk.**
-Unlike `run`/`validate`/`check`/`profile`/`diff`/`attest`/`suggest`/`doctor`
-(which load a flow file every time they run), `inspect` and `viz` operate on
-a process-scoped, in-memory registry that **you must install programmatically
-before invoking the CLI**.  Running `chainweaver inspect my_flow` against a
-fresh install will exit `1` with `No registry configured. Call
-chainweaver.cli.set_default_registry(...) before invoking the CLI.` —
-that's expected.  The fix is to wire a small entry script:
+**`inspect` and `viz` resolve flows from disk or a registry.**
+Pass `--file <path>`, `--discover-dir <dir>`, or `--discover-entry-points` to
+resolve a flow without writing any Python (issue #381); `chainweaver flows
+list` previews what is discoverable. With no discovery flag they fall back to a
+process-scoped, in-memory registry installed programmatically — running
+`chainweaver inspect my_flow` with neither a flag nor a configured registry
+exits `1` with `No registry configured. Call
+chainweaver.cli.set_default_registry(...) before invoking the CLI.`. To wire
+the default-registry path, use a small entry script:
 
 ```python
 # my_cli_entry.py

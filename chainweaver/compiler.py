@@ -8,12 +8,14 @@ catching wiring errors (missing tools, unmapped keys, type mismatches) at
 from __future__ import annotations
 
 import types
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
+from chainweaver._pointer import is_pointer
 from chainweaver.flow import Flow
 from chainweaver.step_index import flow_output_step_index
 from chainweaver.tools import Tool
@@ -130,6 +132,78 @@ def _get_model_fields(model: type[BaseModel]) -> dict[str, FieldInfo]:
     return model.model_fields
 
 
+def _validate_fallback_inputs(
+    *,
+    step_index: int,
+    fallback_tool: Tool,
+    input_mapping: Mapping[str, object],
+    context_fields: dict[str, type | None],
+) -> list[CompilationError]:
+    """Validate the primary step's resolved inputs against its fallback tool."""
+    errors: list[CompilationError] = []
+    fallback_fields = _get_model_fields(fallback_tool.input_schema)
+
+    if input_mapping:
+        for target_key, source in input_mapping.items():
+            target_field = fallback_fields.get(target_key)
+            if target_field is None:
+                errors.append(
+                    CompilationError(
+                        step_index=step_index,
+                        tool_name=fallback_tool.name,
+                        field_name=target_key,
+                        issue_type="fallback_unknown_target_key",
+                        detail=(
+                            f"Step {step_index} fallback tool ('{fallback_tool.name}'): "
+                            f"input key '{target_key}' is not a declared input field "
+                            f"{set(fallback_fields.keys())}."
+                        ),
+                    )
+                )
+            elif isinstance(source, str) and source in context_fields:
+                source_type = context_fields[source]
+                target_type = _get_field_type(target_field)
+                if not _types_compatible(source_type, target_type):
+                    errors.append(
+                        CompilationError(
+                            step_index=step_index,
+                            tool_name=fallback_tool.name,
+                            field_name=target_key,
+                            issue_type="fallback_type_mismatch",
+                            detail=(
+                                f"Step {step_index} fallback tool ('{fallback_tool.name}'): "
+                                f"field '{target_key}' expects "
+                                f"{target_type.__name__ if target_type else 'unknown'}, got "
+                                f"{source_type.__name__ if source_type else 'unknown'} "
+                                f"from '{source}'."
+                            ),
+                        )
+                    )
+
+    for field_name, finfo in fallback_fields.items():
+        if not finfo.is_required():
+            continue
+        if input_mapping:
+            if field_name in input_mapping:
+                continue
+        elif field_name in context_fields:
+            continue
+        errors.append(
+            CompilationError(
+                step_index=step_index,
+                tool_name=fallback_tool.name,
+                field_name=field_name,
+                issue_type="fallback_missing_required_input",
+                detail=(
+                    f"Step {step_index} fallback tool ('{fallback_tool.name}'): required "
+                    f"input field '{field_name}' is not satisfied by input_mapping or "
+                    f"the accumulated context."
+                ),
+            )
+        )
+    return errors
+
+
 def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
     """Perform static validation of a flow's step sequence.
 
@@ -143,7 +217,9 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
     5. Required input coverage — every required tool input field is supplied
        either by an explicit mapping or, when ``input_mapping`` is empty, by
        the accumulated context.
-    6. Output coverage — if the flow has an output_schema, the accumulated
+    6. Fallback compatibility — ``fallback:<tool_name>`` targets exist and
+       accept the same resolved inputs as the primary tool.
+    7. Output coverage — if the flow has an output_schema, the accumulated
        context satisfies it.
 
     Args:
@@ -184,6 +260,20 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
 
         tool = tools[step.tool_name]
         tool_input_fields = _get_model_fields(tool.input_schema)
+        fallback_tool: Tool | None = None
+        if step.on_error.startswith("fallback:"):
+            fallback_name = step.on_error[len("fallback:") :]
+            fallback_tool = tools.get(fallback_name)
+            if fallback_tool is None:
+                errors.append(
+                    CompilationError(
+                        step_index=idx,
+                        tool_name=fallback_name,
+                        field_name=None,
+                        issue_type="missing_fallback_tool",
+                        detail=f"Fallback tool '{fallback_name}' is not registered.",
+                    )
+                )
 
         # 2. + 3. Input mapping resolution and target validity.
         if step.input_mapping:
@@ -204,7 +294,27 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                         )
                     )
 
-                if isinstance(source, str):
+                if isinstance(source, str) and is_pointer(source):
+                    # A JSON pointer (#387) addresses nested structure: only its
+                    # first token is a context key, and the nested value's type
+                    # cannot be resolved statically, so validate that the root
+                    # token exists and skip the type-compatibility check.
+                    root_token = source[1:].split("/")[0].replace("~1", "/").replace("~0", "~")
+                    if root_token not in context_fields:
+                        errors.append(
+                            CompilationError(
+                                step_index=idx,
+                                tool_name=step.tool_name,
+                                field_name=source,
+                                issue_type="missing_mapping_key",
+                                detail=(
+                                    f"Step {idx} ('{step.tool_name}'): pointer '{source}' root "
+                                    f"key '{root_token}' not in upstream outputs "
+                                    f"{set(context_fields.keys())}."
+                                ),
+                            )
+                        )
+                elif isinstance(source, str):
                     if source not in context_fields:
                         errors.append(
                             CompilationError(
@@ -282,10 +392,75 @@ def compile_flow(flow: Flow, tools: dict[str, Tool]) -> CompilationResult:
                 )
             )
 
-        # Update context with this tool's output fields.
+        if fallback_tool is not None:
+            errors.extend(
+                _validate_fallback_inputs(
+                    step_index=idx,
+                    fallback_tool=fallback_tool,
+                    input_mapping=step.input_mapping,
+                    context_fields=context_fields,
+                )
+            )
+
+        # Resolve the keys this step actually contributes to the context.  An
+        # output_mapping (#386) renames/prunes the tool's outputs before the
+        # merge, so the contribution is keyed by the mapping's *context* keys; a
+        # mapped output_key that the tool does not declare is a static error.
         tool_output_fields = _get_model_fields(tool.output_schema)
-        for name, finfo in tool_output_fields.items():
-            context_fields[name] = _get_field_type(finfo)
+        if step.output_mapping is None:
+            context_contribution: dict[str, type | None] = {
+                name: _get_field_type(finfo) for name, finfo in tool_output_fields.items()
+            }
+        else:
+            context_contribution = {}
+            for context_key, output_key in step.output_mapping.items():
+                if output_key not in tool_output_fields:
+                    errors.append(
+                        CompilationError(
+                            step_index=idx,
+                            tool_name=step.tool_name,
+                            field_name=output_key,
+                            issue_type="unknown_output_key",
+                            detail=(
+                                f"Step {idx} ('{step.tool_name}'): output_mapping references "
+                                f"output key '{output_key}' not declared by the tool "
+                                f"{set(tool_output_fields.keys())}."
+                            ),
+                        )
+                    )
+                    continue
+                context_contribution[context_key] = _get_field_type(tool_output_fields[output_key])
+
+        # Statically detectable context-key collision (issue #337): this step's
+        # contributed keys overwrite keys already in the accumulated context.
+        # Suppressed when the flow opts into overwrite-on-collision, which is
+        # the documented escape hatch for intentional refine-in-place pipelines.
+        if flow.on_context_collision != "overwrite":
+            for name in context_contribution:
+                if name in context_fields:
+                    warnings.append(
+                        CompilationWarning(
+                            step_index=idx,
+                            tool_name=step.tool_name,
+                            field_name=name,
+                            issue_type="context_collision",
+                            detail=(
+                                f"Step {idx} ('{step.tool_name}'): output key '{name}' "
+                                f"overwrites an existing context key. With "
+                                f"on_context_collision='{flow.on_context_collision}' this "
+                                f"is "
+                                + (
+                                    "logged at runtime"
+                                    if flow.on_context_collision == "warn"
+                                    else "a runtime error"
+                                )
+                                + "."
+                            ),
+                        )
+                    )
+
+        # Update context with this step's contributed (possibly remapped) keys.
+        context_fields.update(context_contribution)
 
     # 4. Output coverage.
     if flow.output_schema is not None:

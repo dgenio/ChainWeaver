@@ -37,7 +37,7 @@ import copy
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,6 +67,8 @@ class FuzzConfigError(ChainWeaverError):
     ``input_schema`` and no ``base_input`` to mutate, or an input field whose
     annotation the seeded generator cannot synthesize.
     """
+
+    code: ClassVar[str] = "CW-E038"
 
     def __init__(self, detail: str) -> None:
         self.detail = detail
