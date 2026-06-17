@@ -205,7 +205,6 @@ def llm_propose_flows(
     tools_list = list(tools)
     if not tools_list:
         return []
-    known_names = {tool.name for tool in tools_list}
     hints = _render_hints(static_candidates)
     schema = flow_proposal_schema()
 
@@ -223,20 +222,28 @@ def llm_propose_flows(
         build_prompt=build_prompt,
     )
 
-    def parse(raw: str) -> list[LLMProposal]:
-        entries = coerce_proposal_list(parse_llm_payload(raw))
-        return [_build_proposal(entry, known_names) for entry in entries]
+    def make_parse(batch_names: set[str]) -> Callable[[str], list[LLMProposal]]:
+        # Validate against the tools actually rendered into *this* batch's prompt,
+        # not the whole catalogue (issue #367): under batch/select overflow the
+        # model only saw a subset, so a proposal naming an unshown tool is a
+        # hallucination relative to its prompt and must be rejected.
+        def parse(raw: str) -> list[LLMProposal]:
+            entries = coerce_proposal_list(parse_llm_payload(raw))
+            return [_build_proposal(entry, batch_names) for entry in entries]
+
+        return parse
 
     proposals: list[LLMProposal] = []
     seen_names: set[str] = set()
     total_repairs = 0
     for batch in plan.batches:
         prompt = build_prompt(batch, plan.description_chars)
+        batch_names = {tool.name for tool in batch}
         batch_proposals, repairs = run_with_repair(
             llm_fn,
             prompt,
             json_schema=schema,
-            parse=parse,
+            parse=make_parse(batch_names),
             max_repair_attempts=max_repair_attempts,
         )
         total_repairs += repairs

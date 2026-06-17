@@ -1,4 +1,4 @@
-name: image_pipeline
+name: image_flow
 tools:
 - name: download_image
   description: Download an image from a URL.

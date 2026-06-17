@@ -361,6 +361,11 @@ def apply_budget(
         while kept and _est(kept, cap) > budget.max_tokens and len(kept) > 1:
             kept.pop()
         est = _est(kept, cap) if kept else 0
+        # Even the smallest possible prompt (a single capped tool) can exceed the
+        # budget; fail before any LLM call rather than silently making an
+        # oversized one, so the budget contract holds for every batch.
+        if est > budget.max_tokens:
+            raise PromptBudgetExceededError(est, budget.max_tokens)
         return BudgetPlan(
             batches=[kept] if kept else [],
             description_chars=cap,
@@ -381,6 +386,11 @@ def apply_budget(
         batches.append(current)
     rendered = sum(len(b) for b in batches)
     est = max((_est(b, None) for b in batches), default=0)
+    # A single tool whose rendered prompt already exceeds the budget cannot be
+    # batched down any further; fail before any LLM call rather than issuing an
+    # oversized one.
+    if est > budget.max_tokens:
+        raise PromptBudgetExceededError(est, budget.max_tokens)
     return BudgetPlan(
         batches=batches,
         description_chars=None,

@@ -229,7 +229,7 @@ def write_reports(report: EvalReport, directory: Path = RESULTS_DIR) -> tuple[Pa
         f"- pass rate: **{report.pass_rate:.0%}** ({sum(c.passed for c in report.cases)}"
         f"/{len(report.cases)})",
         "",
-        "| case | valid | chain hit | halluc. | repairs | compiled | pass |",
+        "| case | valid | flow hit | halluc. | repairs | compiled | pass |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for c in report.cases:
@@ -243,11 +243,11 @@ def write_reports(report: EvalReport, directory: Path = RESULTS_DIR) -> tuple[Pa
 
 
 def chain_in_order_stub(prompt: str) -> str:
-    """A deterministic stub LLM: propose one flow chaining the catalogue in order.
+    """A deterministic stub LLM: propose one flow that runs the catalogue in order.
 
     Reads the tool names from the rendered catalogue in the *prompt* and emits a
-    valid proposal chaining them.  Used to exercise the harness in CI without a
-    real provider; it is not a quality oracle.
+    valid proposal whose steps run them in listed order.  Used to exercise the
+    harness in CI without a real provider; it is not a quality oracle.
     """
     names: list[str] = []
     for line in prompt.splitlines():
@@ -260,9 +260,9 @@ def chain_in_order_stub(prompt: str) -> str:
             names.append(candidate)
     flow = {
         "type": "Flow",
-        "name": "in_order_chain",
+        "name": "in_order_flow",
         "version": "0.0.0",
-        "description": "Chain all tools.",
+        "description": "Run all tools in listed order.",
         "steps": [{"tool_name": name, "input_mapping": {}} for name in names],
     }
     return json.dumps(
@@ -270,7 +270,7 @@ def chain_in_order_stub(prompt: str) -> str:
             "proposals": [
                 {
                     "flow": flow,
-                    "rationale": "stub: chain everything in listed order",
+                    "rationale": "stub: run every tool in listed order",
                     "confidence": 0.5,
                 }
             ]

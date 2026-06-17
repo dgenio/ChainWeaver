@@ -1,4 +1,4 @@
-name: etl_pipeline
+name: etl_flow
 tools:
 - name: fetch_records
   description: Fetch raw records from a source system.

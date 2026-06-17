@@ -242,19 +242,27 @@ def optimize_tool_descriptions(
         build_prompt=build_prompt,
     )
 
-    def parse(raw: str) -> list[ToolDescriptionProposal]:
-        return _parse_proposals(raw, originals)
+    def make_parse(batch_names: set[str]) -> Callable[[str], list[ToolDescriptionProposal]]:
+        # Validate against the tools rendered into *this* batch's prompt (issue
+        # #367): under batch/select overflow the model only saw a subset, so a
+        # rewrite for an unshown tool is meaningless and is rejected. The full
+        # ``originals`` map still supplies each shown tool's original description.
+        def parse(raw: str) -> list[ToolDescriptionProposal]:
+            return _parse_proposals(raw, originals, allowed_names=batch_names)
+
+        return parse
 
     proposals: list[ToolDescriptionProposal] = []
     seen: set[str] = set()
     total_repairs = 0
     for batch in plan.batches:
         prompt = build_prompt(batch, plan.description_chars)
+        batch_names = {tool.name for tool in batch}
         batch_proposals, repairs = run_with_repair(
             llm_fn,
             prompt,
             json_schema=schema,
-            parse=parse,
+            parse=make_parse(batch_names),
             max_repair_attempts=max_repair_attempts,
         )
         total_repairs += repairs
@@ -384,16 +392,24 @@ def _estimate_tokens(text: str) -> int:
 def _parse_proposals(
     raw: str,
     originals: dict[str, str],
+    *,
+    allowed_names: set[str] | None = None,
 ) -> list[ToolDescriptionProposal]:
-    """Parse an LLM completion into validated description proposals."""
+    """Parse an LLM completion into validated description proposals.
+
+    *allowed_names* restricts which tools a proposal may name (the tools shown in
+    the current prompt batch); ``None`` allows every tool in *originals*.  The
+    original description is always sourced from *originals*.
+    """
     entries = coerce_proposal_list(parse_llm_payload(raw))
+    allowed = set(originals) if allowed_names is None else allowed_names
 
     proposals: list[ToolDescriptionProposal] = []
     for item in entries:
         tool_name = item.get("tool_name")
-        if not isinstance(tool_name, str) or tool_name not in originals:
+        if not isinstance(tool_name, str) or tool_name not in allowed:
             raise OfflineLLMError(
-                f"Proposal names an unknown tool: {tool_name!r}. Known tools: {sorted(originals)}."
+                f"Proposal names an unknown tool: {tool_name!r}. Known tools: {sorted(allowed)}."
             )
         proposed = item.get("proposed_description")
         if not isinstance(proposed, str):

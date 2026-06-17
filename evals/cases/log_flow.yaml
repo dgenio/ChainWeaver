@@ -1,4 +1,4 @@
-name: log_pipeline
+name: log_flow
 tools:
 - name: read_log
   description: Read a log file.

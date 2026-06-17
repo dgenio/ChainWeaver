@@ -296,32 +296,60 @@ def test_budget_error_raises_before_call() -> None:
 
 def test_budget_truncate_records_dropped_tools() -> None:
     tools = _catalogue()
+    # Budget fits the template + ~3 capped tools but not all 8 (see token probe).
     # truncate keeps the leading tools (drops from the end), so reference tool_0.
     llm = ScriptedLLM(_desc_yaml("tool_0"))
     proposals = optimize_tool_descriptions(
         tools,
         llm_fn=llm,
-        prompt_budget=PromptBudget(max_tokens=120, overflow="truncate"),
+        prompt_budget=PromptBudget(max_tokens=360, overflow="truncate"),
     )
     prov = proposals[0].provenance
     assert prov is not None
     assert prov.catalogue_tools_total == 8
     assert prov.catalogue_tools_rendered is not None
-    assert prov.catalogue_tools_rendered < 8  # some tools dropped to fit
+    assert 0 < prov.catalogue_tools_rendered < 8  # some, but not all, tools kept
 
 
-def test_budget_batch_merges_and_dedupes() -> None:
+def test_budget_truncate_raises_when_single_tool_overflows() -> None:
+    # The template alone (~188 tokens) already exceeds this budget, so even a
+    # one-tool prompt cannot fit: truncate must fail before any LLM call.
+    llm = ScriptedLLM(_desc_yaml("tool_0"))  # must never be consumed
+    with pytest.raises(PromptBudgetExceededError):
+        optimize_tool_descriptions(
+            _catalogue(),
+            llm_fn=llm,
+            prompt_budget=PromptBudget(max_tokens=100, overflow="truncate"),
+        )
+    assert llm.prompts == []
+
+
+def test_budget_batch_splits_and_validates_per_batch() -> None:
     tools = [SEARCH, SUMMARIZE, make_tool("extra")]
-    # Two batches propose 'search' (one is a duplicate); a third proposes 'extra'.
-    llm = ScriptedLLM(_desc_yaml("search"), _desc_yaml("search"), _desc_yaml("extra"))
+    # Budget forces one tool per batch; each batch proposes a rewrite for the tool
+    # it was actually shown (per-batch validation, issue #367).
+    llm = ScriptedLLM(_desc_yaml("search"), _desc_yaml("summarize"), _desc_yaml("extra"))
     proposals = optimize_tool_descriptions(
         tools,
         llm_fn=llm,
-        prompt_budget=PromptBudget(max_tokens=80, overflow="batch"),
+        prompt_budget=PromptBudget(max_tokens=215, overflow="batch"),
     )
-    names = [p.tool_name for p in proposals]
-    assert names == ["search", "extra"]  # duplicate 'search' dropped across batches
-    assert len(llm.prompts) >= 2  # catalogue was split into multiple batches
+    assert [p.tool_name for p in proposals] == ["search", "summarize", "extra"]
+    assert len(llm.prompts) == 3  # catalogue split into three single-tool batches
+
+
+def test_budget_batch_rejects_out_of_batch_tool() -> None:
+    # A batch that only rendered 'search' must not accept a rewrite for 'summarize'
+    # (shown in a different batch); with repair disabled this fails fast.
+    tools = [SEARCH, SUMMARIZE]
+    llm = ScriptedLLM(_desc_yaml("summarize"))
+    with pytest.raises(OfflineLLMError):
+        optimize_tool_descriptions(
+            tools,
+            llm_fn=llm,
+            prompt_budget=PromptBudget(max_tokens=215, overflow="batch"),
+            max_repair_attempts=0,
+        )
 
 
 def test_budget_select_uses_selector() -> None:

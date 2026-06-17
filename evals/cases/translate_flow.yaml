@@ -1,4 +1,4 @@
-name: translate_pipeline
+name: translate_flow
 tools:
 - name: detect_language
   description: Detect the language of a text.
