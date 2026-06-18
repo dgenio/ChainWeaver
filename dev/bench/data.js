@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781755228841,
+  "lastUpdate": 1781771100621,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3240,6 +3240,78 @@ window.BENCHMARK_DATA = {
             "value": 0.7927310000184207,
             "unit": "ms",
             "extra": "min=0.72ms max=0.81ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a3c9cc35c947396862357c70cb611cbeefabf449",
+          "message": "Merge pull request #462 from dgenio/claude/issue-triage-grouping-9pbto2\n\nfeat: harden the offline LLM proposer subsystem (#363, #364, #365, #366, #367, #368, #374)",
+          "timestamp": "2026-06-18T09:23:32+01:00",
+          "tree_id": "59125a3907f81ef026b493f7301b5d4fec31fe68",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/a3c9cc35c947396862357c70cb611cbeefabf449"
+        },
+        "date": 1781771099793,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.34477399999843783,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.58ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2648759999885897,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.29ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.5435550000072453,
+            "unit": "ms",
+            "extra": "min=0.54ms max=0.62ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.36734600001864237,
+            "unit": "ms",
+            "extra": "min=0.36ms max=0.40ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.70183600000848,
+            "unit": "ms",
+            "extra": "min=102.54ms max=103.11ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.96961199997736,
+            "unit": "ms",
+            "extra": "min=0.82ms max=1.22ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 252.2366989999938,
+            "unit": "ms",
+            "extra": "min=252.20ms max=252.32ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.8406010000072683,
+            "unit": "ms",
+            "extra": "min=0.83ms max=0.87ms repeats=5"
           }
         ]
       }
