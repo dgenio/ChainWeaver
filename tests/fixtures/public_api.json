@@ -51,6 +51,7 @@
     "ExecutionPlan",
     "ExecutionResult",
     "ExecutionSnapshot",
+    "FLOW_INPUT_STEP_INDEX",
     "FaultConfig",
     "FileCheckpointer",
     "FileStepCache",
@@ -169,6 +170,7 @@
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_output_step_index",
     "flow_proposal_schema",
     "flow_schema_json",
     "flow_to_ascii",
@@ -200,7 +202,7 @@
   ],
   "python_version": [
     3,
-    12
+    11
   ],
   "symbols": {
     "AgentTraceEvent": {
@@ -664,6 +666,11 @@
       },
       "module": "chainweaver.checkpoint",
       "qualname": "ExecutionSnapshot"
+    },
+    "FLOW_INPUT_STEP_INDEX": {
+      "kind": "int",
+      "module": null,
+      "qualname": null
     },
     "FaultConfig": {
       "kind": "class",
@@ -1613,6 +1620,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_from_yaml",
       "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
+    },
+    "flow_output_step_index": {
+      "kind": "function",
+      "module": "chainweaver.step_index",
+      "qualname": "flow_output_step_index",
+      "signature": "(flow: _FlowLike) -> int"
     },
     "flow_proposal_schema": {
       "kind": "function",

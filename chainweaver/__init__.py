@@ -10,6 +10,7 @@ Public API
         FlowBuilder, FlowRegistry, FlowExecutor, RetryPolicy,
         ExecutionPlan, ExecutionResult, ReplayMode, ReplayResult,
         StepDiff, StepPlan, StepRecord,
+        FLOW_INPUT_STEP_INDEX, flow_output_step_index,
         RedactionPolicy, TraceRecorder, ObservedStep, ObservedTrace,
         CostProfile, CostReport, PriceSnap, PROVIDER_PRICES, lookup_price,
         validate_dag_topology,
@@ -232,6 +233,7 @@ from chainweaver.service import (
     ServiceMetrics,
     ServiceProposal,
 )
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
 from chainweaver.tools import Tool
@@ -274,6 +276,7 @@ __version__ = "0.13.0"
 
 __all__ = [
     "BUILTIN_PROPERTIES",
+    "FLOW_INPUT_STEP_INDEX",
     "PROVIDER_PRICES",
     "AgentTraceEvent",
     "AgentTraceImportError",
@@ -442,6 +445,7 @@ __all__ = [
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
+    "flow_output_step_index",
     "flow_proposal_schema",
     "flow_schema_json",
     "flow_to_ascii",

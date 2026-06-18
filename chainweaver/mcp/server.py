@@ -47,6 +47,7 @@ from pydantic import BaseModel
 from chainweaver.contracts import SideEffectLevel, ToolSafetyContract, merge_safety
 from chainweaver.exceptions import FlowExecutionError
 from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX
 
 try:  # Optional dependency.
     from fastmcp import FastMCP
@@ -328,7 +329,7 @@ def _build_flow_tool_dispatcher(
                 if last is not None and last.error_type is not None
                 else "flow execution failed without recorded step error"
             )
-            raise FlowExecutionError(flow_name, -1, detail)
+            raise FlowExecutionError(flow_name, FLOW_INPUT_STEP_INDEX, detail)
         if output_schema is not None and result.final_output is not None:
             validated_out = output_schema.model_validate(result.final_output)
             return validated_out.model_dump()

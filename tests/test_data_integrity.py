@@ -7,7 +7,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from chainweaver import Flow, FlowExecutor, FlowRegistry, FlowStep, Tool
+from chainweaver import (
+    FLOW_INPUT_STEP_INDEX,
+    Flow,
+    FlowExecutor,
+    FlowRegistry,
+    FlowStep,
+    Tool,
+    flow_output_step_index,
+)
 
 
 class NumberInput(BaseModel):
@@ -186,7 +194,7 @@ def test_schema_validated_execution_context() -> None:
     input_result = input_executor.execute_flow("input_validated", {"number": "bad"})
 
     assert not input_result.success
-    assert input_result.execution_log[0].step_index == -1
+    assert input_result.execution_log[0].step_index == FLOW_INPUT_STEP_INDEX
     assert input_result.execution_log[0].error_type == "SchemaValidationError"
 
     output_validated = Flow(
@@ -203,5 +211,5 @@ def test_schema_validated_execution_context() -> None:
     output_result = output_executor.execute_flow("output_validated", {"number": 7})
 
     assert not output_result.success
-    assert output_result.execution_log[-1].step_index == len(output_validated.steps)
+    assert output_result.execution_log[-1].step_index == flow_output_step_index(output_validated)
     assert output_result.execution_log[-1].error_type == "SchemaValidationError"
