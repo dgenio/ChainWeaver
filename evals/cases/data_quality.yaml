@@ -1,0 +1,28 @@
+name: data_quality
+tools:
+- name: load_data
+  description: Load a dataset from disk.
+  inputs:
+  - path
+  outputs:
+  - data
+- name: validate_data
+  description: Validate a dataset against rules.
+  inputs:
+  - data
+  outputs:
+  - validated
+- name: report_quality
+  description: Report data-quality metrics.
+  inputs:
+  - validated
+  outputs:
+  - quality
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - load_data
+    - validate_data
+    - report_quality
+  max_hallucinated_tool_rate: 0.0

@@ -743,6 +743,77 @@ class OfflineLLMError(ChainWeaverError):
         super().__init__(detail)
 
 
+class PromptBudgetExceededError(OfflineLLMError):
+    """Raised when an offline proposer prompt exceeds its configured token budget (issue #367).
+
+    The offline proposers render every registered tool into the prompt
+    unconditionally by default.  When a caller supplies a
+    :class:`~chainweaver.proposals.PromptBudget` with ``overflow="error"`` (the
+    default), the assembled prompt is estimated *before* any LLM call and this
+    typed error is raised when the estimate exceeds ``max_tokens`` — failing
+    early and clearly instead of paying for a call the provider would reject.
+    It subclasses :class:`OfflineLLMError` so existing ``except OfflineLLMError``
+    handlers keep working.
+
+    Attributes:
+        estimated_tokens: The estimated token count of the assembled prompt.
+        max_tokens: The configured budget that was exceeded.
+    """
+
+    def __init__(self, estimated_tokens: int, max_tokens: int) -> None:
+        self.estimated_tokens = estimated_tokens
+        self.max_tokens = max_tokens
+        super().__init__(
+            f"Estimated prompt size {estimated_tokens} tokens exceeds the configured "
+            f"budget of {max_tokens} tokens. Raise PromptBudget.max_tokens, or set "
+            "overflow='truncate'/'batch'/'select' to fit the catalogue."
+        )
+
+
+class LLMProviderError(ChainWeaverError):
+    """Raised when an optional provider adapter cannot complete an LLM call (issue #368).
+
+    The shipped ``chainweaver.integrations.llm_*`` adapters wrap a provider SDK
+    behind the :data:`~chainweaver._offline_llm.LLMFn` seam, adding retry,
+    timeout, and usage accounting.  When a call fails after exhausting retries,
+    times out, or the provider returns an unusable response, the adapter raises
+    this typed error rather than leaking a provider-specific exception to the
+    proposer.
+
+    Attributes:
+        provider: The provider key (e.g. ``"anthropic"``, ``"openai"``).
+        detail: Human-readable explanation of what failed.
+    """
+
+    def __init__(self, provider: str, detail: str) -> None:
+        self.provider = provider
+        self.detail = detail
+        super().__init__(f"LLM provider '{provider}' call failed: {detail}.")
+
+
+class LLMBudgetExceededError(LLMProviderError):
+    """Raised when a provider adapter would exceed a configured spend ceiling (issue #368).
+
+    Adapters accept ``max_calls`` and ``max_cost_usd`` ceilings.  When the next
+    call would push an adapter instance past one of those ceilings, it aborts
+    with this error *before* making the call, so a runaway proposer loop cannot
+    quietly burn budget.
+
+    Attributes:
+        provider: The provider key whose ceiling was hit.
+        limit: Human-readable description of the ceiling that would be exceeded.
+    """
+
+    def __init__(self, provider: str, limit: str) -> None:
+        self.provider = provider
+        self.limit = limit
+        # Skip LLMProviderError.__init__ to compose a budget-specific message.
+        ChainWeaverError.__init__(
+            self, f"LLM provider '{provider}' budget ceiling reached: {limit}."
+        )
+        self.detail = limit
+
+
 class AgentTraceImportError(ChainWeaverError):
     """Raised when a coding-agent tool-use trace cannot be imported (issue #254).
 
@@ -842,6 +913,9 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     AgentTraceImportError: "CW-E035",
     PredicateSyntaxError: "CW-E036",
     OutputMappingError: "CW-E041",
+    PromptBudgetExceededError: "CW-E042",
+    LLMProviderError: "CW-E043",
+    LLMBudgetExceededError: "CW-E044",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

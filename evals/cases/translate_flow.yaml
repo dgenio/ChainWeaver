@@ -1,0 +1,28 @@
+name: translate_flow
+tools:
+- name: detect_language
+  description: Detect the language of a text.
+  inputs:
+  - text
+  outputs:
+  - language
+- name: translate
+  description: Translate text into English.
+  inputs:
+  - text
+  outputs:
+  - translated
+- name: store_text
+  description: Persist translated text.
+  inputs:
+  - translated
+  outputs:
+  - id
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - detect_language
+    - translate
+    - store_text
+  max_hallucinated_tool_rate: 0.0

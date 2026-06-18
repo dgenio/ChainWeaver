@@ -1,0 +1,28 @@
+name: etl_flow
+tools:
+- name: fetch_records
+  description: Fetch raw records from a source system.
+  inputs:
+  - source
+  outputs:
+  - records
+- name: normalize_records
+  description: Normalize raw records into a canonical shape.
+  inputs:
+  - records
+  outputs:
+  - normalized
+- name: write_report
+  description: Write a report from normalized records.
+  inputs:
+  - normalized
+  outputs:
+  - report_path
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - fetch_records
+    - normalize_records
+    - write_report
+  max_hallucinated_tool_rate: 0.0

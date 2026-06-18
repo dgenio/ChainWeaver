@@ -1,0 +1,27 @@
+name: ambiguous_lookup
+tools:
+- name: get_user
+  description: Get a user by id.
+  inputs:
+  - user_id
+  outputs:
+  - user
+- name: find_user
+  description: Search for users by name.
+  inputs:
+  - name
+  outputs:
+  - users
+- name: get_orders
+  description: Get orders for a user.
+  inputs:
+  - user
+  outputs:
+  - orders
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - get_user
+    - get_orders
+  max_hallucinated_tool_rate: 0.0

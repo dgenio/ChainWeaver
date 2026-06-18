@@ -1,0 +1,28 @@
+name: image_flow
+tools:
+- name: download_image
+  description: Download an image from a URL.
+  inputs:
+  - url
+  outputs:
+  - image
+- name: resize_image
+  description: Resize an image to a target width.
+  inputs:
+  - image
+  outputs:
+  - resized
+- name: upload_image
+  description: Upload an image to storage.
+  inputs:
+  - resized
+  outputs:
+  - asset_url
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - download_image
+    - resize_image
+    - upload_image
+  max_hallucinated_tool_rate: 0.0

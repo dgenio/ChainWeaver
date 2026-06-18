@@ -83,6 +83,16 @@ openai-agents = [
     # ``FunctionTool`` and validates it in a dry-run — no API key required.
     "openai-agents>=0.1",
 ]
+llm-anthropic = [
+    # Optional Anthropic adapter for the offline proposers (issue #368).  The base
+    # package never imports this SDK; only chainweaver.integrations.llm_anthropic does.
+    "anthropic>=0.40",
+]
+llm-openai = [
+    # Optional OpenAI / OpenAI-compatible adapter for the offline proposers
+    # (issue #368).  Also covers local runtimes via ``base_url``.
+    "openai>=1.40",
+]
 mcp = [
     # ``FlowServer`` (outbound) runs on the standalone ``fastmcp`` package
     # (issue #243); the inbound ``MCPToolAdapter`` still imports
@@ -157,7 +167,7 @@ python_functions = ["test_*"]
 # Bare-name imports inside tests/ (e.g. `from helpers import ...`,
 # `from strategies import ...`) resolve because pytest prepends these
 # directories to `sys.path` before collection.
-pythonpath = ["tests", "tests/property"]
+pythonpath = ["tests", "tests/property", "."]
 addopts = "--cov=chainweaver --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
 markers = [
@@ -201,6 +211,13 @@ disallow_untyped_defs = false
 # untyped rather than failing the type check on the optional integration.
 # Cover both the top-level package and its submodules.
 module = ["weaver_contracts", "weaver_contracts.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional provider SDKs for the llm-anthropic / llm-openai adapters (issue #368).
+# They are not part of the base or .[dev] install, so the type check must not
+# fail when they are absent; the adapters import them lazily behind a guard.
+module = ["anthropic", "anthropic.*", "openai", "openai.*"]
 ignore_missing_imports = true
 
 [tool.setuptools.packages.find]

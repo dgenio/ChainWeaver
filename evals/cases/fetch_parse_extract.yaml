@@ -1,0 +1,28 @@
+name: fetch_parse_extract
+tools:
+- name: fetch_page
+  description: Fetch the raw HTML of a URL.
+  inputs:
+  - url
+  outputs:
+  - html
+- name: parse_html
+  description: Parse HTML into a DOM document.
+  inputs:
+  - html
+  outputs:
+  - dom
+- name: extract_links
+  description: Extract hyperlinks from a DOM document.
+  inputs:
+  - dom
+  outputs:
+  - links
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - fetch_page
+    - parse_html
+    - extract_links
+  max_hallucinated_tool_rate: 0.0

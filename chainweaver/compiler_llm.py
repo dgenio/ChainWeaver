@@ -32,24 +32,49 @@ discriminator defaults to ``"Flow"``.  Parsing YAML requires ``pyyaml``
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from chainweaver._offline_llm import (
     LLMFn,
     coerce_proposal_list,
-    parse_llm_yaml,
+    parse_llm_payload,
     render_tool_catalogue,
 )
 from chainweaver.exceptions import FlowSerializationError, OfflineLLMError
 from chainweaver.flow import Flow
+from chainweaver.proposals import (
+    ModelInfo,
+    PromptBudget,
+    ProposalProvenance,
+    StructuredLLMFn,
+    apply_budget,
+    build_provenance,
+    run_with_repair,
+)
 from chainweaver.serialization import flow_from_dict, flow_to_yaml
 from chainweaver.tools import Tool
 
-__all__ = ["LLMProposal", "llm_propose_flows", "write_proposals"]
+__all__ = [
+    "FlowProposalEnvelope",
+    "LLMProposal",
+    "flow_proposal_schema",
+    "llm_propose_flows",
+    "read_provenance",
+    "write_proposals",
+]
+
+#: Stable identity of this proposer's prompt template (issue #364).  Bump
+#: ``PROMPT_VERSION`` whenever ``_PROMPT_TEMPLATE`` changes; a guard test
+#: (``tests/test_proposals.py``) fails if the template hash drifts without it.
+PROMPT_NAME = "compiler_llm.propose_flows"
+PROMPT_VERSION = "2026.06.0"
 
 
 @dataclass
@@ -62,12 +87,40 @@ class LLMProposal:
         confidence: The LLM's self-reported confidence, clamped to ``[0, 1]``.
         source: Provenance tag distinguishing these from static-analysis
             proposals.  Always ``"llm-compiler"``.
+        provenance: Generation metadata (prompt version, model, repair usage,
+            catalogue stats) populated by :func:`llm_propose_flows` (issue #364).
     """
 
     proposed_flow: Flow
     rationale: str
     confidence: float
     source: str = "llm-compiler"
+    provenance: ProposalProvenance | None = field(default=None)
+
+
+class _FlowProposalItem(BaseModel):
+    """One entry of the published flow-proposal envelope schema (issue #363)."""
+
+    flow: dict[str, Any]
+    rationale: str = ""
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class FlowProposalEnvelope(BaseModel):
+    """JSON Schema contract for :func:`llm_propose_flows` completions (issue #363).
+
+    The published schema (``schemas/proposal-flows.schema.json``) lets a
+    :class:`~chainweaver.proposals.StructuredLLMFn` request schema-constrained
+    JSON and lets external tools validate proposal files without importing
+    ChainWeaver.
+    """
+
+    proposals: list[_FlowProposalItem]
+
+
+def flow_proposal_schema() -> dict[str, Any]:
+    """Return the JSON Schema for the flow-proposal envelope (issue #363)."""
+    return FlowProposalEnvelope.model_json_schema()
 
 
 _PROMPT_TEMPLATE = """\
@@ -100,30 +153,50 @@ Output ONLY YAML: a list under the key "proposals". Each proposal has:
 def llm_propose_flows(
     tools: Iterable[Tool],
     *,
-    llm_fn: LLMFn,
+    llm_fn: LLMFn | StructuredLLMFn,
     max_proposals: int = 5,
     static_candidates: Iterable[Flow] | None = None,
+    model_info: ModelInfo | None = None,
+    parameters: dict[str, Any] | None = None,
+    max_repair_attempts: int = 1,
+    prompt_budget: PromptBudget | None = None,
+    token_counter: Callable[[str], int] | None = None,
 ) -> list[LLMProposal]:
     """Propose flows from tool metadata using an offline LLM.
 
     Args:
         tools: The tools the LLM may chain.  When empty, no LLM call is made
             and an empty list is returned.
-        llm_fn: A provider-agnostic ``prompt -> completion`` callable.  Never
-            invoked at runtime — this is a build-time tool.
-        max_proposals: Upper bound on returned proposals.  Extra proposals in
-            the completion are truncated; must be ``>= 1``.
-        static_candidates: Optional :class:`Flow` hints (e.g. from
-            :meth:`ChainAnalyzer.suggest_flows`) rendered into the prompt as
-            already-known schema-valid chains the LLM can refine or extend.
+        llm_fn: A provider-agnostic ``prompt -> completion`` callable, or a
+            :class:`~chainweaver.proposals.StructuredLLMFn` that also accepts a
+            ``json_schema`` (issue #363).  Never invoked at runtime.
+        max_proposals: Upper bound on returned proposals.  Extra proposals are
+            truncated; must be ``>= 1``.
+        static_candidates: Optional :class:`Flow` hints rendered into the prompt
+            as already-known schema-valid chains the LLM can refine or extend.
+        model_info: Caller-asserted model identity recorded in each proposal's
+            provenance (issue #364).  The :data:`LLMFn` seam hides the provider,
+            so this is metadata, not verified fact.
+        parameters: Optional generation parameters (e.g. ``{"temperature": 0.2}``)
+            recorded in provenance.
+        max_repair_attempts: Bounded follow-up calls issued on a malformed or
+            invalid completion (issue #363); ``0`` disables repair.
+        prompt_budget: Optional :class:`~chainweaver.proposals.PromptBudget`
+            enforcing a token ceiling with an overflow strategy (issue #367).
+            ``None`` renders every tool unconditionally (historical behaviour).
+        token_counter: Optional provider-accurate token counter for the budget;
+            defaults to a chars/4 heuristic.
 
     Returns:
-        A list of :class:`LLMProposal` objects, at most *max_proposals* long.
+        A list of :class:`LLMProposal` objects, at most *max_proposals* long,
+        each carrying a populated :class:`ProposalProvenance`.
 
     Raises:
-        OfflineLLMError: When the completion is blank, not valid YAML,
-            structurally malformed, references an unknown tool, or yields a
-            non-linear flow.
+        OfflineLLMError: When a completion is blank, not parseable, structurally
+            malformed, references an unknown tool, or yields a non-linear flow —
+            after exhausting repair attempts.
+        PromptBudgetExceededError: When the catalogue overflows ``prompt_budget``
+            under ``overflow="error"``.
         ValueError: When *max_proposals* is less than 1.
     """
     if max_proposals < 1:
@@ -132,20 +205,68 @@ def llm_propose_flows(
     tools_list = list(tools)
     if not tools_list:
         return []
-    known_names = {tool.name for tool in tools_list}
+    hints = _render_hints(static_candidates)
+    schema = flow_proposal_schema()
 
-    prompt = _PROMPT_TEMPLATE.format(
-        catalogue=render_tool_catalogue(tools_list),
-        hints=_render_hints(static_candidates),
-        max_proposals=max_proposals,
+    def build_prompt(subset: list[Tool], max_description_chars: int | None) -> str:
+        return _PROMPT_TEMPLATE.format(
+            catalogue=render_tool_catalogue(subset, max_description_chars=max_description_chars),
+            hints=hints,
+            max_proposals=max_proposals,
+        )
+
+    plan = apply_budget(
+        tools_list,
+        budget=prompt_budget,
+        token_counter=token_counter,
+        build_prompt=build_prompt,
     )
-    raw = llm_fn(prompt)
-    entries = coerce_proposal_list(parse_llm_yaml(raw))
+
+    def make_parse(batch_names: set[str]) -> Callable[[str], list[LLMProposal]]:
+        # Validate against the tools actually rendered into *this* batch's prompt,
+        # not the whole catalogue (issue #367): under batch/select overflow the
+        # model only saw a subset, so a proposal naming an unshown tool is a
+        # hallucination relative to its prompt and must be rejected.
+        def parse(raw: str) -> list[LLMProposal]:
+            entries = coerce_proposal_list(parse_llm_payload(raw))
+            return [_build_proposal(entry, batch_names) for entry in entries]
+
+        return parse
 
     proposals: list[LLMProposal] = []
-    for entry in entries[:max_proposals]:
-        proposals.append(_build_proposal(entry, known_names))
-    return proposals
+    seen_names: set[str] = set()
+    total_repairs = 0
+    for batch in plan.batches:
+        prompt = build_prompt(batch, plan.description_chars)
+        batch_names = {tool.name for tool in batch}
+        batch_proposals, repairs = run_with_repair(
+            llm_fn,
+            prompt,
+            json_schema=schema,
+            parse=make_parse(batch_names),
+            max_repair_attempts=max_repair_attempts,
+        )
+        total_repairs += repairs
+        for proposal in batch_proposals:
+            # Stable de-duplication across batches (issue #367).
+            if proposal.proposed_flow.name in seen_names:
+                continue
+            seen_names.add(proposal.proposed_flow.name)
+            proposals.append(proposal)
+
+    provenance = build_provenance(
+        prompt_name=PROMPT_NAME,
+        prompt_version=PROMPT_VERSION,
+        template=_PROMPT_TEMPLATE,
+        model_info=model_info,
+        parameters=parameters,
+        repair_attempts_used=total_repairs,
+        catalogue_stats=plan.stats,
+    )
+    for proposal in proposals:
+        proposal.provenance = provenance
+
+    return proposals[:max_proposals]
 
 
 def write_proposals(proposals: Iterable[LLMProposal], directory: str | Path) -> list[Path]:
@@ -184,15 +305,43 @@ def write_proposals(proposals: Iterable[LLMProposal], directory: str | Path) -> 
             # Re-raise under the offline-LLM error so callers catch one type.
             raise OfflineLLMError(str(exc)) from exc
         written.append(flow_path)
+        # Persist generation provenance alongside the flow file (issue #364).
+        if proposal.provenance is not None:
+            provenance_path = target / f"{flow.name}.provenance.json"
+            provenance_path.write_text(
+                json.dumps(proposal.provenance.model_dump(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            written.append(provenance_path)
+        version = "unknown" if proposal.provenance is None else proposal.provenance.prompt_version
         summary_lines.append(
             f"- **{flow.name}** (confidence {proposal.confidence:.2f}, "
-            f"source `{proposal.source}`): {proposal.rationale}"
+            f"source `{proposal.source}`, prompt `{version}`): {proposal.rationale}"
         )
 
     summary_path = target / "PROPOSALS.md"
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     written.append(summary_path)
     return written
+
+
+def read_provenance(flow_path: str | Path) -> ProposalProvenance | None:
+    """Read the provenance sibling written next to *flow_path*, if any (issue #364).
+
+    Returns the :class:`ProposalProvenance` persisted by :func:`write_proposals`
+    for the flow at ``<dir>/<name>.flow.yaml`` (looked up as
+    ``<dir>/<name>.provenance.json``), or ``None`` when no sibling exists.
+    """
+    path = Path(flow_path)
+    name = path.name
+    for suffix in (".flow.yaml", ".flow.yml", ".flow.json"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    provenance_path = path.with_name(f"{name}.provenance.json")
+    if not provenance_path.is_file():
+        return None
+    return ProposalProvenance.model_validate_json(provenance_path.read_text(encoding="utf-8"))
 
 
 _SAFE_FLOW_NAME = re.compile(r"^[A-Za-z0-9._-]+$")

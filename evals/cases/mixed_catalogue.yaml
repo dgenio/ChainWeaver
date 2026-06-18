@@ -1,0 +1,34 @@
+name: mixed_catalogue
+tools:
+- name: authenticate
+  description: Exchange credentials for a token.
+  inputs:
+  - credentials
+  outputs:
+  - token
+- name: list_repos
+  description: List repositories for a token.
+  inputs:
+  - token
+  outputs:
+  - repos
+- name: delete_repo
+  description: Delete a repository (distractor).
+  inputs:
+  - repo
+  outputs:
+  - ok
+- name: archive_repos
+  description: Archive a list of repositories.
+  inputs:
+  - repos
+  outputs:
+  - archived
+expectations:
+  min_valid_proposals: 1
+  must_compile: true
+  expected_chains:
+  - - authenticate
+    - list_repos
+    - archive_repos
+  max_hallucinated_tool_rate: 0.0

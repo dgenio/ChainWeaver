@@ -28,26 +28,47 @@ Parsing YAML requires ``pyyaml`` (the ``chainweaver[yaml]`` extra).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import copy
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from chainweaver._offline_llm import (
     LLMFn,
     coerce_proposal_list,
-    parse_llm_yaml,
+    parse_llm_payload,
     render_tool_catalogue,
 )
 from chainweaver.exceptions import OfflineLLMError
+from chainweaver.proposals import (
+    ModelInfo,
+    PromptBudget,
+    ProposalProvenance,
+    StructuredLLMFn,
+    apply_budget,
+    build_provenance,
+    run_with_repair,
+)
+from chainweaver.routing import RoutingCase, ToolSelector, evaluate_routing
 from chainweaver.tools import Tool
 
 __all__ = [
+    "DescriptionProposalEnvelope",
     "OptimizationStrategy",
     "ToolDescriptionProposal",
+    "description_proposal_schema",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
 ]
+
+#: Stable identity of this proposer's prompt template (issue #364).  Bump
+#: ``PROMPT_VERSION`` whenever ``_PROMPT_TEMPLATE`` changes; a guard test
+#: (``tests/test_proposals.py``) fails if the template hash drifts without it.
+PROMPT_NAME = "optimizer.optimize_tool_descriptions"
+PROMPT_VERSION = "2026.06.0"
 
 
 class OptimizationStrategy(str, Enum):
@@ -78,6 +99,13 @@ class ToolDescriptionProposal:
         token_delta: Approximate change in token count (``word_count * 1.3``).
             Negative means the rewrite is shorter (an improvement).
         source: Provenance tag.  Always ``"description-optimizer"``.
+        provenance: Generation metadata (prompt version, model, repair usage,
+            catalogue stats) populated by the proposer (issue #364).
+        routing_accuracy_before: Measured tool-selection accuracy of the
+            *original* description, when routing eval cases were supplied
+            (issue #374); ``None`` otherwise.
+        routing_accuracy_after: Measured tool-selection accuracy of the
+            *proposed* description under the same cases (issue #374).
     """
 
     tool_name: str
@@ -87,6 +115,35 @@ class ToolDescriptionProposal:
     similarity_group: list[str] = field(default_factory=list)
     token_delta: int = 0
     source: str = "description-optimizer"
+    provenance: ProposalProvenance | None = field(default=None)
+    routing_accuracy_before: float | None = field(default=None)
+    routing_accuracy_after: float | None = field(default=None)
+
+
+class _DescriptionProposalItem(BaseModel):
+    """One entry of the published description-proposal envelope schema (issue #363)."""
+
+    tool_name: str
+    proposed_description: str
+    rationale: str = ""
+    similarity_group: list[str] = Field(default_factory=list)
+
+
+class DescriptionProposalEnvelope(BaseModel):
+    """JSON Schema contract for description-optimizer completions (issue #363).
+
+    Published as ``schemas/proposal-descriptions.schema.json`` so a
+    :class:`~chainweaver.proposals.StructuredLLMFn` can request schema-constrained
+    JSON and external tools can validate proposal files without importing
+    ChainWeaver.
+    """
+
+    proposals: list[_DescriptionProposalItem]
+
+
+def description_proposal_schema() -> dict[str, Any]:
+    """Return the JSON Schema for the description-proposal envelope (issue #363)."""
+    return DescriptionProposalEnvelope.model_json_schema()
 
 
 _STRATEGY_GUIDANCE: dict[OptimizationStrategy, str] = {
@@ -126,44 +183,145 @@ Output ONLY YAML: a list under the key "proposals". Each proposal has:
 def optimize_tool_descriptions(
     tools: Iterable[Tool],
     *,
-    llm_fn: LLMFn,
+    llm_fn: LLMFn | StructuredLLMFn,
     strategy: OptimizationStrategy = OptimizationStrategy.DISCRIMINATIVE,
+    model_info: ModelInfo | None = None,
+    parameters: dict[str, Any] | None = None,
+    max_repair_attempts: int = 1,
+    prompt_budget: PromptBudget | None = None,
+    token_counter: Callable[[str], int] | None = None,
+    eval_cases: list[RoutingCase] | None = None,
+    routing_selector: ToolSelector | None = None,
 ) -> list[ToolDescriptionProposal]:
     """Rewrite tool descriptions for ecosystem-wide discriminability.
 
     Args:
         tools: All tools in the ecosystem.  When empty, no LLM call is made
             and an empty list is returned.
-        llm_fn: A provider-agnostic ``prompt -> completion`` callable.  Never
-            invoked at runtime — this is a build-time tool.
+        llm_fn: A provider-agnostic ``prompt -> completion`` callable, or a
+            :class:`~chainweaver.proposals.StructuredLLMFn` (issue #363).
         strategy: Which :class:`OptimizationStrategy` to instruct the LLM with.
+        model_info: Caller-asserted model identity recorded in provenance (#364).
+        parameters: Optional generation parameters recorded in provenance.
+        max_repair_attempts: Bounded follow-up calls on malformed output (#363).
+        prompt_budget: Optional token budget + overflow strategy (issue #367).
+        token_counter: Optional provider-accurate token counter for the budget.
+        eval_cases: Optional routing cases (issue #374).  When supplied with
+            *routing_selector*, each proposal is annotated with the per-tool
+            selection accuracy *before* and *after* applying its rewrite.
+        routing_selector: A ``(task, candidate_tools) -> tool_name`` selector used
+            to measure routing accuracy; required to populate the accuracy fields.
 
     Returns:
-        A list of :class:`ToolDescriptionProposal` objects, one per rewrite
-        the LLM proposed.
+        A list of :class:`ToolDescriptionProposal` objects, one per rewrite,
+        each carrying a populated :class:`ProposalProvenance`.
 
     Raises:
-        OfflineLLMError: When the completion is blank, not valid YAML,
-            structurally malformed, or names a tool absent from *tools*.
+        OfflineLLMError: When a completion is blank, not parseable, structurally
+            malformed, or names an unknown tool — after exhausting repairs.
+        PromptBudgetExceededError: When the catalogue overflows ``prompt_budget``
+            under ``overflow="error"``.
     """
     tools_list = list(tools)
     if not tools_list:
         return []
     originals = {tool.name: tool.description for tool in tools_list}
+    guidance = _STRATEGY_GUIDANCE[strategy]
+    schema = description_proposal_schema()
 
-    prompt = _PROMPT_TEMPLATE.format(
-        guidance=_STRATEGY_GUIDANCE[strategy],
-        catalogue=render_tool_catalogue(tools_list),
+    def build_prompt(subset: list[Tool], max_description_chars: int | None) -> str:
+        return _PROMPT_TEMPLATE.format(
+            guidance=guidance,
+            catalogue=render_tool_catalogue(subset, max_description_chars=max_description_chars),
+        )
+
+    plan = apply_budget(
+        tools_list,
+        budget=prompt_budget,
+        token_counter=token_counter,
+        build_prompt=build_prompt,
     )
-    return _parse_proposals(llm_fn(prompt), originals)
+
+    def make_parse(batch_names: set[str]) -> Callable[[str], list[ToolDescriptionProposal]]:
+        # Validate against the tools rendered into *this* batch's prompt (issue
+        # #367): under batch/select overflow the model only saw a subset, so a
+        # rewrite for an unshown tool is meaningless and is rejected. The full
+        # ``originals`` map still supplies each shown tool's original description.
+        def parse(raw: str) -> list[ToolDescriptionProposal]:
+            return _parse_proposals(raw, originals, allowed_names=batch_names)
+
+        return parse
+
+    proposals: list[ToolDescriptionProposal] = []
+    seen: set[str] = set()
+    total_repairs = 0
+    for batch in plan.batches:
+        prompt = build_prompt(batch, plan.description_chars)
+        batch_names = {tool.name for tool in batch}
+        batch_proposals, repairs = run_with_repair(
+            llm_fn,
+            prompt,
+            json_schema=schema,
+            parse=make_parse(batch_names),
+            max_repair_attempts=max_repair_attempts,
+        )
+        total_repairs += repairs
+        for proposal in batch_proposals:
+            if proposal.tool_name in seen:
+                continue
+            seen.add(proposal.tool_name)
+            proposals.append(proposal)
+
+    provenance = build_provenance(
+        prompt_name=PROMPT_NAME,
+        prompt_version=PROMPT_VERSION,
+        template=_PROMPT_TEMPLATE,
+        model_info=model_info,
+        parameters=parameters,
+        repair_attempts_used=total_repairs,
+        catalogue_stats=plan.stats,
+    )
+    for proposal in proposals:
+        proposal.provenance = provenance
+
+    if eval_cases is not None and routing_selector is not None and proposals:
+        _annotate_routing_accuracy(proposals, tools_list, eval_cases, routing_selector)
+    return proposals
+
+
+def _annotate_routing_accuracy(
+    proposals: list[ToolDescriptionProposal],
+    tools: list[Tool],
+    eval_cases: list[RoutingCase],
+    selector: ToolSelector,
+) -> None:
+    """Measure per-tool routing accuracy before/after each rewrite (issue #374)."""
+    original = {tool.name: tool for tool in tools}
+    proposed = dict(original)
+    for proposal in proposals:
+        base = original.get(proposal.tool_name)
+        if base is not None:
+            # Tool is a plain class (not a Pydantic model); shallow-copy and swap
+            # the description rather than re-running the validating constructor.
+            variant = copy.copy(base)
+            variant.description = proposal.proposed_description
+            proposed[proposal.tool_name] = variant
+    before = evaluate_routing(eval_cases, original, selector=selector)
+    after = evaluate_routing(eval_cases, proposed, selector=selector)
+    for proposal in proposals:
+        proposal.routing_accuracy_before = before.per_tool_accuracy.get(proposal.tool_name)
+        proposal.routing_accuracy_after = after.per_tool_accuracy.get(proposal.tool_name)
 
 
 def optimize_new_tool_description(
     new_tool: Tool,
     existing_tools: Iterable[Tool],
     *,
-    llm_fn: LLMFn,
+    llm_fn: LLMFn | StructuredLLMFn,
     strategy: OptimizationStrategy = OptimizationStrategy.DISCRIMINATIVE,
+    model_info: ModelInfo | None = None,
+    parameters: dict[str, Any] | None = None,
+    max_repair_attempts: int = 1,
 ) -> list[ToolDescriptionProposal]:
     """Optimize a single new tool's description against an existing ecosystem.
 
@@ -175,19 +333,24 @@ def optimize_new_tool_description(
     Args:
         new_tool: The tool being added.
         existing_tools: The tools already in the ecosystem.
-        llm_fn: A provider-agnostic ``prompt -> completion`` callable.
+        llm_fn: A provider-agnostic ``prompt -> completion`` callable, or a
+            :class:`~chainweaver.proposals.StructuredLLMFn` (issue #363).
         strategy: Which :class:`OptimizationStrategy` to instruct the LLM with.
+        model_info: Caller-asserted model identity recorded in provenance (#364).
+        parameters: Optional generation parameters recorded in provenance.
+        max_repair_attempts: Bounded follow-up calls on malformed output (#363).
 
     Returns:
         A list of :class:`ToolDescriptionProposal` objects for the new tool
-        and/or affected existing tools.
+        and/or affected existing tools, each carrying provenance.
 
     Raises:
-        OfflineLLMError: When the completion is blank, not valid YAML,
-            structurally malformed, or names an unknown tool.
+        OfflineLLMError: When a completion is blank, not parseable, structurally
+            malformed, or names an unknown tool — after exhausting repairs.
     """
     ecosystem = [new_tool, *existing_tools]
     originals = {tool.name: tool.description for tool in ecosystem}
+    schema = description_proposal_schema()
 
     prompt = (
         f"A new tool '{new_tool.name}' is being added to the ecosystem below. "
@@ -196,7 +359,29 @@ def optimize_new_tool_description(
             catalogue=render_tool_catalogue(ecosystem),
         )
     )
-    return _parse_proposals(llm_fn(prompt), originals)
+
+    def parse(raw: str) -> list[ToolDescriptionProposal]:
+        return _parse_proposals(raw, originals)
+
+    proposals, repairs = run_with_repair(
+        llm_fn,
+        prompt,
+        json_schema=schema,
+        parse=parse,
+        max_repair_attempts=max_repair_attempts,
+    )
+    provenance = build_provenance(
+        prompt_name=PROMPT_NAME,
+        prompt_version=PROMPT_VERSION,
+        template=_PROMPT_TEMPLATE,
+        model_info=model_info,
+        parameters=parameters,
+        repair_attempts_used=repairs,
+        catalogue_stats=None,
+    )
+    for proposal in proposals:
+        proposal.provenance = provenance
+    return proposals
 
 
 def _estimate_tokens(text: str) -> int:
@@ -207,16 +392,24 @@ def _estimate_tokens(text: str) -> int:
 def _parse_proposals(
     raw: str,
     originals: dict[str, str],
+    *,
+    allowed_names: set[str] | None = None,
 ) -> list[ToolDescriptionProposal]:
-    """Parse an LLM completion into validated description proposals."""
-    entries = coerce_proposal_list(parse_llm_yaml(raw))
+    """Parse an LLM completion into validated description proposals.
+
+    *allowed_names* restricts which tools a proposal may name (the tools shown in
+    the current prompt batch); ``None`` allows every tool in *originals*.  The
+    original description is always sourced from *originals*.
+    """
+    entries = coerce_proposal_list(parse_llm_payload(raw))
+    allowed = set(originals) if allowed_names is None else allowed_names
 
     proposals: list[ToolDescriptionProposal] = []
     for item in entries:
         tool_name = item.get("tool_name")
-        if not isinstance(tool_name, str) or tool_name not in originals:
+        if not isinstance(tool_name, str) or tool_name not in allowed:
             raise OfflineLLMError(
-                f"Proposal names an unknown tool: {tool_name!r}. Known tools: {sorted(originals)}."
+                f"Proposal names an unknown tool: {tool_name!r}. Known tools: {sorted(allowed)}."
             )
         proposed = item.get("proposed_description")
         if not isinstance(proposed, str):

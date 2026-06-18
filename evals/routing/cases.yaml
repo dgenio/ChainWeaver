@@ -1,0 +1,141 @@
+cases:
+- task: Get the raw HTML of https://example.com/pricing
+  expected_tool: fetch_url
+  candidate_tools:
+  - web_search
+  - fetch_url
+  - parse_html
+  source: hand-written
+- task: Find articles about deterministic workflows
+  expected_tool: web_search
+  candidate_tools:
+  - web_search
+  - fetch_url
+  - parse_html
+  source: hand-written
+- task: Extract the links from this HTML document
+  expected_tool: parse_html
+  candidate_tools:
+  - web_search
+  - fetch_url
+  - parse_html
+  source: hand-written
+- task: Look up the user with id 42
+  expected_tool: get_user
+  candidate_tools:
+  - get_user
+  - find_user
+  - list_users
+  source: hand-written
+- task: Search for users named Diogo
+  expected_tool: find_user
+  candidate_tools:
+  - get_user
+  - find_user
+  - list_users
+  source: hand-written
+- task: List every user in the system
+  expected_tool: list_users
+  candidate_tools:
+  - get_user
+  - find_user
+  - list_users
+  source: hand-written
+- task: Translate this paragraph to English
+  expected_tool: translate
+  candidate_tools:
+  - detect_language
+  - translate
+  - summarize
+  source: hand-written
+- task: What language is this text written in?
+  expected_tool: detect_language
+  candidate_tools:
+  - detect_language
+  - translate
+  - summarize
+  source: hand-written
+- task: Give me a short summary of this article
+  expected_tool: summarize
+  candidate_tools:
+  - detect_language
+  - translate
+  - summarize
+  source: hand-written
+- task: Resize the logo to 128px wide
+  expected_tool: resize_image
+  candidate_tools:
+  - download_image
+  - resize_image
+  - upload_image
+  source: hand-written
+- task: Download the image at this URL
+  expected_tool: download_image
+  candidate_tools:
+  - download_image
+  - resize_image
+  - upload_image
+  source: hand-written
+- task: Upload the processed image to storage
+  expected_tool: upload_image
+  candidate_tools:
+  - download_image
+  - resize_image
+  - upload_image
+  source: hand-written
+- task: Validate the dataset against the schema rules
+  expected_tool: validate_data
+  candidate_tools:
+  - load_data
+  - validate_data
+  - report_quality
+  source: hand-written
+- task: Load the CSV dataset from disk
+  expected_tool: load_data
+  candidate_tools:
+  - load_data
+  - validate_data
+  - report_quality
+  source: hand-written
+- task: Report data-quality metrics for the validated set
+  expected_tool: report_quality
+  candidate_tools:
+  - load_data
+  - validate_data
+  - report_quality
+  source: hand-written
+- task: Send a notification email to the on-call engineer
+  expected_tool: send_email
+  candidate_tools:
+  - send_email
+  - post_slack
+  - page_oncall
+  source: hand-written
+- task: Post an update to the team Slack channel
+  expected_tool: post_slack
+  candidate_tools:
+  - send_email
+  - post_slack
+  - page_oncall
+  source: hand-written
+- task: Page the on-call engineer immediately
+  expected_tool: page_oncall
+  candidate_tools:
+  - send_email
+  - post_slack
+  - page_oncall
+  source: hand-written
+- task: Authenticate with the API using these credentials
+  expected_tool: authenticate
+  candidate_tools:
+  - authenticate
+  - refresh_token
+  - revoke_token
+  source: hand-written
+- task: Revoke the access token for this session
+  expected_tool: revoke_token
+  candidate_tools:
+  - authenticate
+  - refresh_token
+  - revoke_token
+  source: hand-written

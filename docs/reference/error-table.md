@@ -59,6 +59,9 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E039` | `AttestationInputError` | The attestation input generator cannot synthesize a value for a schema field. |
 | `CW-E040` | `FixtureStaleError` | A `record_then_replay` invocation could not be matched to a recording. |
 | `CW-E041` | `OutputMappingError` | A step's `output_mapping` references an output key the tool did not produce. |
+| `CW-E042` | `PromptBudgetExceededError` | An offline proposer prompt exceeded its configured `PromptBudget.max_tokens` under `overflow="error"`. |
+| `CW-E043` | `LLMProviderError` | An optional `chainweaver.integrations.llm_*` provider adapter could not complete an LLM call (retries exhausted, timeout, or unusable response). |
+| `CW-E044` | `LLMBudgetExceededError` | A provider adapter would exceed its configured `max_calls` / `max_cost_usd` ceiling. |
 
 ## Catching strategy
 
