@@ -85,12 +85,14 @@ def _current_http_headers() -> dict[str, str]:
 
     Authenticators serving over SSE / streamable-HTTP read credentials (e.g. a
     bearer token) from here.  Outside an HTTP request context FastMCP returns an
-    empty mapping, which is the correct "no transport credentials" signal.
+    empty mapping, which is the correct "no transport credentials" signal.  Keys
+    are lower-cased so authenticators can look them up case-insensitively
+    (HTTP header names are case-insensitive, but FastMCP may surface mixed case).
     """
     if _get_http_headers is None:  # pragma: no cover — older fastmcp
         return {}
     try:
-        return dict(_get_http_headers())
+        return {str(k).lower(): v for k, v in _get_http_headers().items()}
     except Exception:  # pragma: no cover — never let header access break a call
         return {}
 
@@ -478,11 +480,15 @@ def _build_flow_tool_dispatcher(
         result = await executor.execute_flow_async(flow_name, data, version=flow_version)
         if not result.success:
             last = result.execution_log[-1] if result.execution_log else None
-            detail = (
-                gate.render_error(last.error_type, last.error_message)
-                if last is not None and last.error_type is not None
-                else "flow execution failed without recorded step error"
-            )
+            # Always route through the gate so error_detail / redaction apply
+            # uniformly, even when a failure record lacks error_type or there is
+            # no recorded step error at all.
+            if last is not None and last.error_type is not None:
+                detail = gate.render_error(last.error_type, last.error_message)
+            else:
+                detail = gate.render_error(
+                    "FlowExecutionError", "flow execution failed without a recorded step error"
+                )
             raise FlowExecutionError(flow_name, FLOW_INPUT_STEP_INDEX, detail)
         if output_schema is not None and result.final_output is not None:
             validated_out = output_schema.model_validate(result.final_output)

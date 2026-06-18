@@ -304,6 +304,26 @@ class TestRateLimiter:
         with pytest.raises(ValueError):
             FixedWindowRateLimiter(max_calls, window)
 
+    def test_invalid_max_tracked_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_tracked"):
+            FixedWindowRateLimiter(1, 10.0, max_tracked=0)
+
+    def test_expired_keys_are_evicted_to_bound_memory(self) -> None:
+        clock = {"t": 0.0}
+        limiter = FixedWindowRateLimiter(
+            5, 10.0, per_flow=True, max_tracked=3, time_fn=lambda: clock["t"]
+        )
+        # Fill three distinct keys inside the window.
+        for i in range(3):
+            assert limiter.acquire(None, f"flow_{i}") is True
+        assert len(limiter._hits) == 3
+        # Advance past the window so all three are now expired, then add a new
+        # key: the sweep reclaims the stale entries instead of growing forever.
+        clock["t"] = 20.0
+        assert limiter.acquire(None, "flow_new") is True
+        assert len(limiter._hits) == 1
+        assert ("anonymous", "flow_new") in limiter._hits
+
     def test_throttled_call_blocks_end_to_end(self) -> None:
         limiter = FixedWindowRateLimiter(1, 60.0)
         server = FlowServer(_ok_executor(), rate_limiter=limiter)

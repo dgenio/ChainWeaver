@@ -267,6 +267,11 @@ class FixedWindowRateLimiter:
     This is a single-process convenience for local / single-replica serving;
     multi-replica deployments should supply a shared-store limiter implementing
     the :class:`RateLimiter` protocol.
+
+    Memory is bounded: once the tracked-key count reaches ``max_tracked``,
+    fully-elapsed (expired-window) entries are swept before a new key is added,
+    so a stream of distinct caller ids cannot grow ``_hits`` without limit.
+    Steady-state memory reflects only the keys with an *active* window.
     """
 
     def __init__(
@@ -275,15 +280,19 @@ class FixedWindowRateLimiter:
         window_seconds: float,
         *,
         per_flow: bool = False,
+        max_tracked: int = 10_000,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         if max_calls < 1:
             raise ValueError("max_calls must be >= 1.")
         if window_seconds <= 0:
             raise ValueError("window_seconds must be > 0.")
+        if max_tracked < 1:
+            raise ValueError("max_tracked must be >= 1.")
         self.max_calls = max_calls
         self.window_seconds = window_seconds
         self.per_flow = per_flow
+        self.max_tracked = max_tracked
         self._time_fn = time_fn
         self._lock = threading.Lock()
         # key -> (window_start, count)
@@ -300,8 +309,16 @@ class FixedWindowRateLimiter:
             if count >= self.max_calls:
                 self._hits[key] = (start, count)
                 return False
+            if key not in self._hits and len(self._hits) >= self.max_tracked:
+                self._evict_expired(now)
             self._hits[key] = (start, count + 1)
             return True
+
+    def _evict_expired(self, now: float) -> None:
+        """Drop entries whose window has fully elapsed (caller holds the lock)."""
+        expired = [k for k, (start, _) in self._hits.items() if now - start >= self.window_seconds]
+        for k in expired:
+            del self._hits[k]
 
 
 # ---------------------------------------------------------------------------
