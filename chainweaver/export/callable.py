@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from chainweaver.exceptions import FlowExecutionError
 from chainweaver.export._schema import derive_flow_input_schema
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 
 if TYPE_CHECKING:  # pragma: no cover — type-only references
     from chainweaver.executor import FlowExecutor
@@ -78,7 +79,7 @@ def flow_to_callable(
             failed = next((r for r in result.execution_log if not r.success), None)
             if failed is None:
                 detail = "Flow execution failed without recording a failing step."
-                step_index = -1
+                step_index = FLOW_INPUT_STEP_INDEX
                 tool_name = flow_name
             else:
                 detail = failed.error_message or failed.error_type or "Unknown error."
@@ -88,7 +89,7 @@ def flow_to_callable(
         if result.final_output is None:
             raise FlowExecutionError(
                 tool_name=flow_name,
-                step_index=len(flow.steps),
+                step_index=flow_output_step_index(flow),
                 detail="Flow reported success but produced no final output.",
             )
         return result.final_output

@@ -17,6 +17,7 @@ from chainweaver.exceptions import FlowNotFoundError
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.registry import FlowRegistry
+from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
@@ -513,7 +514,7 @@ class TestFlowLevelSchemas:
         assert result.final_output is None
         # The only record should be the flow-level input validation failure.
         assert len(result.execution_log) == 1
-        assert result.execution_log[0].step_index == -1
+        assert result.execution_log[0].step_index == FLOW_INPUT_STEP_INDEX
         assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_invalid_output_caught_after_execution(
@@ -541,7 +542,7 @@ class TestFlowLevelSchemas:
         # Normal step succeeded + one output-validation record.
         assert len(result.execution_log) == 2
         output_record = result.execution_log[-1]
-        assert output_record.step_index == len(flow.steps)
+        assert output_record.step_index == flow_output_step_index(flow)
         assert output_record.error_type == "SchemaValidationError"
 
     def test_none_schemas_behave_unchanged(
@@ -1259,7 +1260,7 @@ class TestDAGFlowLevelSchemas:
 
         assert result.success is False
         assert len(result.execution_log) == 1
-        assert result.execution_log[0].step_index == -1
+        assert result.execution_log[0].step_index == FLOW_INPUT_STEP_INDEX
         assert result.execution_log[0].error_type == "SchemaValidationError"
 
     def test_invalid_output_schema_caught_after_execution(self) -> None:
