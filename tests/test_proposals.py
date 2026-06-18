@@ -352,6 +352,20 @@ def test_budget_batch_rejects_out_of_batch_tool() -> None:
         )
 
 
+def test_budget_batch_raises_when_single_tool_overflows() -> None:
+    # The template alone (~188 tokens) already exceeds this budget, so even a
+    # one-tool batch cannot fit: batch must fail before any LLM call rather than
+    # hand an oversized prompt to the proposer (issue #367).
+    llm = ScriptedLLM(_desc_yaml("tool_0"))  # must never be consumed
+    with pytest.raises(PromptBudgetExceededError):
+        optimize_tool_descriptions(
+            _catalogue(),
+            llm_fn=llm,
+            prompt_budget=PromptBudget(max_tokens=100, overflow="batch"),
+        )
+    assert llm.prompts == []
+
+
 def test_budget_select_uses_selector() -> None:
     tools = _catalogue()
     llm = ScriptedLLM(_desc_yaml("tool_0"))

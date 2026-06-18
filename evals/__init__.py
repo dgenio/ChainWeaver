@@ -5,3 +5,5 @@ they are run on demand, never in the library runtime.  The harness code runs in
 normal CI against a deterministic stub model (validating the plumbing); an
 opt-in workflow runs it against real providers using repo secrets.
 """
+
+from __future__ import annotations
