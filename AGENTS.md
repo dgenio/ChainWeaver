@@ -77,7 +77,8 @@ chainweaver/
 │   ├── __init__.py    Public surface: MCPToolAdapter, FlowServer, jsonschema_to_pydantic
 │   ├── _schema.py     JSON Schema ↔ Pydantic bridge
 │   ├── adapter.py     MCPToolAdapter: wrap MCP server tools as ChainWeaver Tools (#70, #150) + untrusted-metadata trust controls — annotation_trust→ToolSafetyContract (#371), MetadataPolicy name/description sanitisation (#359), schema-hash pinning + on_drift (#358), build_pin_file/load_pins
-│   └── server.py      FlowServer: safely expose governed flows as MCP tools via FastMCP (#72, #259, #294)
+│   ├── server.py      FlowServer: safely expose governed flows as MCP tools via FastMCP (#72, #259, #294) + trust-boundary hooks: force_expose governance (#360), authenticator/rate_limiter (#362), authorizer callback (#443), error_detail redaction (#347), MCPServerProfile + readiness_report (#446)
+│   └── security.py    FlowServer trust-boundary primitives: CallerIdentity/MCPRequestContext + Authenticator (#362), AuthorizationCallback/AuthorizationDecision/AuthorizationContext + coerce_authorizer (#443), RateLimiter + FixedWindowRateLimiter (#362), AuditEvent, render_error_detail (#347), MCPServerProfile/ReadinessFinding/evaluate_readiness (#446)
 ├── contrib/           Curated deterministic stdlib tools (#145); pip install 'chainweaver[contrib]'
 │   ├── __init__.py    Re-exports the public tool set
 │   └── tools.py       passthrough, json_pluck, json_set, assert_equal, map_list, filter_list

@@ -232,11 +232,15 @@ def _build_flow_server(
             executor.register_tool(tool_obj)
             seen_tool_names.add(tool_obj.name)
 
+    # ``chainweaver serve <flow_file>`` is an explicit operator action on a
+    # chosen flow, so it is the deliberate governance-filter override that
+    # issue #360 reserves ``force_expose`` for — serve exactly the named flow.
     return flow_server_cls(
         executor,
         name=name,
         flow_names=[flow.name],
         server_prefix=server_prefix,
+        force_expose=True,
     )
 
 

@@ -62,6 +62,9 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E042` | `PromptBudgetExceededError` | An offline proposer prompt exceeded its configured `PromptBudget.max_tokens` under `overflow="error"`. |
 | `CW-E043` | `LLMProviderError` | An optional `chainweaver.integrations.llm_*` provider adapter could not complete an LLM call (retries exhausted, timeout, or unusable response). |
 | `CW-E044` | `LLMBudgetExceededError` | A provider adapter would exceed its configured `max_calls` / `max_cost_usd` ceiling. |
+| `CW-E045` | `FlowAuthenticationError` | A `FlowServer` authenticator returned `None` or raised; the call is refused before dispatch. |
+| `CW-E046` | `RateLimitExceededError` | A `FlowServer` rate limiter declined the call. |
+| `CW-E047` | `FlowAuthorizationError` | A `FlowServer` authorization callback denied the call (client-safe reason code only). |
 
 ## Catching strategy
 

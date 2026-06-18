@@ -173,6 +173,79 @@ tools = await adapter.discover_tools(pins_path=".chainweaver/mcp-pins.json")
 
 ---
 
+## Hardening `FlowServer` for network exposure (#347, #360, #362, #443, #446)
+
+`FlowServer` turns governed flows into MCP tools. Over **stdio** it inherits the
+host process's trust boundary, but **SSE / streamable-HTTP** turns flows into a
+network service. The server exposes first-class trust-boundary seams — it never
+performs authentication or authorization policy itself; it only *calls*
+host-supplied hooks, keeping policy in your trust boundary.
+
+```python
+from chainweaver.mcp import (
+    FlowServer,
+    MCPServerProfile,
+    AuthorizationDecision,
+    FixedWindowRateLimiter,
+)
+
+def authenticate(req):
+    token = req.http_headers.get("authorization", "")
+    identity = verify_bearer(token)          # your code; raise/return None to refuse
+    return identity                           # a CallerIdentity
+
+def authorize(ctx):
+    if "flows:run" not in (ctx.caller.scopes if ctx.caller else ()):
+        return AuthorizationDecision.deny(reason_code="out_of_scope")
+    return AuthorizationDecision.allow()
+
+server = FlowServer(
+    executor,
+    profile=MCPServerProfile.strict(),                 # secure defaults (#446)
+    authenticator=authenticate,                        # #362
+    rate_limiter=FixedWindowRateLimiter(60, 60.0),     # #362
+    authorizer=authorize,                              # #443
+    audit_hook=emit_to_siem,                           # allow/deny audit
+)
+for finding in server.readiness_report():              # fail the deploy on errors
+    assert finding.severity != "error", finding.message
+server.serve(transport="streamable-http")
+```
+
+* **Authentication (#362):** `authenticator` resolves a `CallerIdentity` from an
+  `MCPRequestContext` (HTTP headers are populated best-effort per call).
+  Returning `None` or raising refuses the call with `FlowAuthenticationError`
+  before any step runs. `FixedWindowRateLimiter` provides basic abuse
+  protection; supply a shared-store `RateLimiter` for multi-replica serving.
+* **Authorization (#443):** `authorizer` makes a per-call allow/deny decision
+  with the flow name, a **redacted** input summary, the caller, and a request
+  id. A deny raises `FlowAuthorizationError` carrying only the client-safe
+  `reason_code`; any `detail` goes to the audit hook and logs, never the client.
+* **Uniform governance (#360):** the lifecycle / owner / side-effect / approval
+  filters apply to **explicitly named** flows too. Bypassing them is a
+  deliberate, reviewable `force_expose=True` rather than an easy-to-miss log line.
+* **Error redaction (#347):** `error_detail` controls how much of a failing
+  flow's error reaches the client — `"full"` (default), `"type_only"`, or
+  `"generic"` (a fixed message). `error_redaction=RedactionPolicy(...)` scrubs the
+  message text under `"full"`.
+* **Profile packs (#446):** `MCPServerProfile.strict()` /
+  `.balanced()` / `.trusted_network()` bundle secure defaults; explicit
+  arguments always override the profile. `profile.diff(other)` supports audit
+  reviews and `server.readiness_report()` flags missing required hooks or
+  side-effects exposed above the profile ceiling.
+
+| Profile | Lifecycles | Side effects | Approval flows | Error detail | Requires |
+|---|---|---|---|---|---|
+| `strict` | ACTIVE | none / read | excluded | `generic` | authorizer + authenticator |
+| `balanced` | ACTIVE | none / read | excluded | `type_only` | — |
+| `trusted-network` | ACTIVE, REVIEWED | up to write | allowed | `full` | — |
+
+> These hooks gate **who may call** a flow and **what leaks back**. They do not
+> change the executor's determinism guarantees, and they delegate the actual
+> identity / policy decision to your host — wire them to your existing auth stack.
+
+---
+
 ## Recommendations for production
 
 1. **Always configure a `RedactionPolicy`** for flows whose tools handle
@@ -196,6 +269,11 @@ tools = await adapter.discover_tools(pins_path=".chainweaver/mcp-pins.json")
 6. **Pin runtime dependencies.**  `pydantic`, `tenacity`, `typer`, and
    `packaging` are the runtime dependencies; all four are well-maintained,
    but pinning protects against supply-chain regressions.
+7. **Harden network-exposed `FlowServer`s.**  When serving over SSE /
+   streamable-HTTP, start from `MCPServerProfile.strict()`, wire an
+   `authenticator` and `authorizer`, set a `rate_limiter`, prefer
+   `error_detail="generic"`, and gate the deploy on `readiness_report()`.
+   See [Hardening `FlowServer` for network exposure](#hardening-flowserver-for-network-exposure-347-360-362-443-446).
 
 ---
 

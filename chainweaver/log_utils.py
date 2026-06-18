@@ -59,6 +59,17 @@ class RedactionPolicy(BaseModel):
         assert isinstance(result, dict)
         return result
 
+    def redact_text(self, text: str) -> str:
+        """Return *text* with :attr:`redact_pattern` applied and truncated (issue #347).
+
+        The scalar counterpart of :meth:`redact`: applies the configured
+        ``redact_pattern`` substitution and ``max_value_length`` truncation to a
+        bare string.  Used at the MCP server boundary to scrub error messages
+        before they reach a remote client without wrapping them in a dict first.
+        Key-name redaction does not apply — there is no key for a bare string.
+        """
+        return self._apply_string(text)
+
     def redact_step_record(self, step: StepRecord) -> StepRecord:
         """Return a copy of *step* with redacted ``inputs`` and ``outputs`` (issue #217).
 

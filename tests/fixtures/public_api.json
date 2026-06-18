@@ -59,6 +59,8 @@
     "FixtureStaleError",
     "Flow",
     "FlowAlreadyExistsError",
+    "FlowAuthenticationError",
+    "FlowAuthorizationError",
     "FlowBuilder",
     "FlowBuilderError",
     "FlowCancelledError",
@@ -115,6 +117,7 @@
     "PromptBudgetExceededError",
     "ProposalProvenance",
     "ProposalStatus",
+    "RateLimitExceededError",
     "Recommendation",
     "RedactionPolicy",
     "RegistryStore",
@@ -731,6 +734,18 @@
       "qualname": "FlowAlreadyExistsError",
       "signature": "(flow_name: str) -> None"
     },
+    "FlowAuthenticationError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "FlowAuthenticationError",
+      "signature": "(flow_name: str, reason_code: str = 'unauthenticated') -> None"
+    },
+    "FlowAuthorizationError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "FlowAuthorizationError",
+      "signature": "(flow_name: str, reason_code: str = 'forbidden') -> None"
+    },
     "FlowBuilder": {
       "kind": "class",
       "module": "chainweaver.builder",
@@ -1179,6 +1194,12 @@
       "kind": "enum",
       "module": "chainweaver.service",
       "qualname": "ProposalStatus"
+    },
+    "RateLimitExceededError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "RateLimitExceededError",
+      "signature": "(flow_name: str, reason_code: str = 'rate_limited') -> None"
     },
     "Recommendation": {
       "kind": "enum",
