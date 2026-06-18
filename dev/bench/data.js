@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781589236997,
+  "lastUpdate": 1781755228841,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3168,6 +3168,78 @@ window.BENCHMARK_DATA = {
             "value": 0.9588920000851431,
             "unit": "ms",
             "extra": "min=0.88ms max=1.10ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ac1d4e72e184542e52313b27d7d8e426e4bebbf6",
+          "message": "Merge pull request #382 from leno23/refactor/step-index-sentinels-339\n\nReplace flow validation step-index sentinels with named API",
+          "timestamp": "2026-06-18T04:59:07+01:00",
+          "tree_id": "150c5cd29c4f7d908c7a3f67c91114ce1751c6c3",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/ac1d4e72e184542e52313b27d7d8e426e4bebbf6"
+        },
+        "date": 1781755228556,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3223249999990685,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2512979999949039,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.37ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.46863400000063393,
+            "unit": "ms",
+            "extra": "min=0.46ms max=0.53ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.3324190000029148,
+            "unit": "ms",
+            "extra": "min=0.33ms max=0.40ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.46582300000284,
+            "unit": "ms",
+            "extra": "min=102.22ms max=102.58ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8976379999836581,
+            "unit": "ms",
+            "extra": "min=0.83ms max=0.91ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.90747599999952,
+            "unit": "ms",
+            "extra": "min=251.84ms max=252.08ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7927310000184207,
+            "unit": "ms",
+            "extra": "min=0.72ms max=0.81ms repeats=5"
           }
         ]
       }
