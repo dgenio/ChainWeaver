@@ -473,7 +473,9 @@ def _build_flow_tool_dispatcher(
             mcp_tool_name=mcp_name,
             raw_inputs=kwargs,
             safety=safety,
-            http_headers=_current_http_headers(),
+            # Only resolve request headers when an authenticator will read them;
+            # the other gates never touch headers, so the no-authn path stays free.
+            http_headers=_current_http_headers() if gate.has_authenticator else {},
         )
         validated = input_schema.model_validate(kwargs)
         data = validated.model_dump(exclude_none=False)

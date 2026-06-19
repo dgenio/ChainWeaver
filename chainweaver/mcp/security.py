@@ -272,6 +272,11 @@ class FixedWindowRateLimiter:
     fully-elapsed (expired-window) entries are swept before a new key is added,
     so a stream of distinct caller ids cannot grow ``_hits`` without limit.
     Steady-state memory reflects only the keys with an *active* window.
+    ``max_tracked`` is therefore a *soft* bound: entries whose window is still
+    active are never evicted (doing so would let a caller bypass the limit), so a
+    burst of more than ``max_tracked`` distinct callers *within a single window*
+    can briefly exceed it — bounded in practice by the actual per-window arrival
+    rate, which collapses back to the active set as windows elapse.
     """
 
     def __init__(

@@ -839,6 +839,9 @@ All errors are typed and traceable:
 | `CostProfileError` | A cost estimate is requested for a `(provider, model)` pair absent from the maintained `PROVIDER_PRICES` table |
 | `MCPMetadataError` | A server-provided MCP tool name fails the adapter's `MetadataPolicy` (and `on_invalid_name="error"`) |
 | `MCPSchemaDriftError` | A pinned MCP tool's raw schema changed under `MCPToolAdapter(on_drift="error")` |
+| `FlowAuthenticationError` | A network-exposed `FlowServer` authenticator returned `None` or raised; the call is refused before dispatch |
+| `RateLimitExceededError` | A `FlowServer` rate limiter declined the call |
+| `FlowAuthorizationError` | A `FlowServer` authorization callback denied the call (carries only a client-safe `reason_code`) |
 | `CheckpointVersionError` | A resumed snapshot's `snapshot_version` is an incompatible MAJOR relative to the running library |
 
 All exceptions inherit from `ChainWeaverError` and carry a stable diagnostic
