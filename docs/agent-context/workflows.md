@@ -113,14 +113,24 @@ and reruns never move an existing release tag.
 
 ## PR conventions
 
-- One logical change per PR.
+- **One primary issue per PR.** Implementing one issue's feature + its tests +
+  its docs is a single logical change. Only bundle multiple issues when the
+  work is genuinely coupled, and say *why* in the PR description.
+- **Declare closing issues** in the PR template's _Issues closed by this PR_
+  field (`Closes #N`). This field — not the branch name — is the source of
+  truth for what a PR resolves.
 - PR title: imperative mood (e.g., "Add retry logic to executor").
 - Architecture changes → update AGENTS.md repo map + `architecture.md` in the same PR.
 - Coding convention changes → update this file in the same PR.
 
+The contributor-facing version of these rules lives in
+[`CONTRIBUTING.md` § PR process](/CONTRIBUTING.md#pr-process).
+
 ---
 
 ## Branch naming
+
+Manually created branches:
 
 ```
 {type}/{issue_number}-{short-description}
@@ -129,6 +139,12 @@ and reruns never move an existing release tag.
 Types: `feat`, `fix`, `docs`, `test`, `refactor`.
 
 Example: `feat/43-tool-timeout-guardrails`
+
+**Tool-generated branches** (e.g. the `claude/<task-slug>` branches the
+AI-agent workflow produces) often cannot embed an issue number. They are
+accepted as-is — do **not** rename them to satisfy the pattern. The
+authoritative link to the issue is the PR's _Issues closed by this PR_ field
+(see [PR conventions](#pr-conventions)), not the branch name.
 
 ---
 

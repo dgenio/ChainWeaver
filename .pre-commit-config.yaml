@@ -48,6 +48,16 @@ repos:
         types: [python]
         pass_filenames: false
 
+      # Banned-vocabulary check (issue #466): flags "pipeline" used as a
+      # flow-synonym in docs/docstrings. Scans its own default scope, so
+      # pass_filenames is false (like the checks above).
+      - id: check-vocabulary
+        name: check vocabulary
+        entry: python scripts/check_vocabulary.py
+        language: system
+        types_or: [python, markdown]
+        pass_filenames: false
+
   # ---------------------------------------------------------------------
   # Generic hygiene.
   # ---------------------------------------------------------------------

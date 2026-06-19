@@ -81,7 +81,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/mcp-publisher"
 
       - name: Validate MCP registry manifest
-        run: "${RUNNER_TEMP}/mcp-publisher validate server.json"
+        run: '"${RUNNER_TEMP}/mcp-publisher" validate server.json'
 
       - name: Smoke-test released action and package
         id: action-smoke

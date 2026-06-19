@@ -68,7 +68,7 @@ def test_distribution_check_runs_after_successful_publication() -> None:
     assert 'workflows: ["Publish to PyPI"]' in workflow
     assert "github.event.workflow_run.conclusion == 'success'" in workflow
     assert "python scripts/release.py verify-pypi" in workflow
-    assert "mcp-publisher validate server.json" in workflow
+    assert 'mcp-publisher" validate server.json' in workflow
     assert "sha256sum --check -" in workflow
     assert "uses: ./.github/actions/chainweaver" in workflow
     assert "chainweaver-version: ${{ steps.release.outputs.version }}" in workflow

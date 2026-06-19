@@ -189,7 +189,7 @@ changes. The executor is deterministic by design.
 9. Pydantic `BaseModel` for all data schemas (`Flow`, `FlowStep`, I/O contracts).
 10. No secrets, credentials, or PII in code, logs, or tests.
 11. All new code must pass: `ruff check`, `ruff format --check`, `mypy`, `pytest`.
-12. One logical change per PR; all tests must pass before merge.
+12. One primary issue per PR (bundle only genuinely coupled work, and say why); declare closing issues in the PR template; all tests must pass before merge. See [workflows.md § PR conventions](docs/agent-context/workflows.md#pr-conventions).
 
 For the full prohibited-actions list and anti-patterns, see
 [invariants.md](docs/agent-context/invariants.md).
@@ -416,8 +416,11 @@ python -m mypy chainweaver/ tests/
 python -m pytest tests/ -v
 ```
 
-CI runs lint + format + mypy on Python 3.10 / `ubuntu-latest` only; tests
-run across `{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
+CI runs lint + format + mypy in a dedicated `lint` job on Python 3.10 /
+`ubuntu-latest` (issue #458); that job also runs the banned-vocabulary check
+(`scripts/check_vocabulary.py`, issue #466) and lints the workflows with
+`actionlint`. Tests run across
+`{ubuntu-latest, windows-latest, macos-latest} × {3.10, 3.11,
 3.12, 3.13, 3.14}` (15 jobs in total). A `floor-deps` job additionally
 installs the minimum declared dependency versions
 (`uv pip install --resolution lowest-direct`) and runs the full suite on
