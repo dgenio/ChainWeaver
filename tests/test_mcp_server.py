@@ -263,7 +263,7 @@ class TestFlowServerRegistration:
 
         assert FlowServer(executor).registered_tool_names == []
 
-    def test_explicit_names_override_default_filters(self) -> None:
+    def _writer_executor(self) -> FlowExecutor:
         registry = FlowRegistry()
         registry.register_flow(
             Flow(
@@ -274,8 +274,16 @@ class TestFlowServerRegistration:
                 safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE),
             )
         )
-        executor = FlowExecutor(registry=registry)
-        server = FlowServer(executor, flow_names=["writer"])
+        return FlowExecutor(registry=registry)
+
+    def test_named_flows_are_filtered_without_force_expose(self) -> None:
+        # Issue #360: governance filters apply uniformly — a named flow that
+        # fails the filters is skipped unless force_expose is set.
+        server = FlowServer(self._writer_executor(), flow_names=["writer"])
+        assert server.registered_tool_names == []
+
+    def test_force_expose_overrides_default_filters(self) -> None:
+        server = FlowServer(self._writer_executor(), flow_names=["writer"], force_expose=True)
         assert server.registered_tool_names == ["writer"]
 
     def test_duplicate_explicit_names_raise(self, executor_with_flow: FlowExecutor) -> None:

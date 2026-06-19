@@ -549,6 +549,72 @@ class MCPToolInvocationError(MCPError):
         super().__init__(f"MCP tool '{tool_name}' invocation failed: {detail}.")
 
 
+class FlowAuthenticationError(MCPError):
+    """Raised when a FlowServer authenticator rejects a caller (issue #362).
+
+    :class:`~chainweaver.mcp.FlowServer` exposes an optional ``authenticator``
+    hook that runs **before** a flow is dispatched.  Network transports
+    (SSE / streamable-HTTP) turn governed flows into a wire service where the
+    host owns the authentication story; the hook resolves a
+    :class:`~chainweaver.mcp.security.CallerIdentity` from the request (e.g. a
+    bearer token in the HTTP headers).  When the hook returns ``None`` or
+    raises, the call is refused with this typed error before any step runs.
+    The message carries only a safe, non-leaky reason — operational ``detail``
+    is sent to the audit hook and logs, not back to the MCP client.
+
+    Attributes:
+        flow_name: Name of the flow whose invocation was refused.
+        reason_code: Stable, client-safe reason code (e.g. ``"unauthenticated"``).
+    """
+
+    def __init__(self, flow_name: str, reason_code: str = "unauthenticated") -> None:
+        self.flow_name = flow_name
+        self.reason_code = reason_code
+        super().__init__(f"Authentication failed for flow '{flow_name}': {reason_code}.")
+
+
+class RateLimitExceededError(MCPError):
+    """Raised when a FlowServer rate limiter rejects a caller (issue #362).
+
+    :class:`~chainweaver.mcp.FlowServer` exposes an optional ``rate_limiter``
+    hook (see :class:`~chainweaver.mcp.security.RateLimiter`) that runs after
+    authentication and before authorization.  When the limiter declines the
+    call, the dispatcher refuses it with this typed error rather than executing
+    the flow, providing basic abuse protection for network-exposed flows.
+
+    Attributes:
+        flow_name: Name of the flow whose invocation was throttled.
+        reason_code: Stable, client-safe reason code (e.g. ``"rate_limited"``).
+    """
+
+    def __init__(self, flow_name: str, reason_code: str = "rate_limited") -> None:
+        self.flow_name = flow_name
+        self.reason_code = reason_code
+        super().__init__(f"Rate limit exceeded for flow '{flow_name}': {reason_code}.")
+
+
+class FlowAuthorizationError(MCPError):
+    """Raised when a FlowServer authorization callback denies a call (issue #443).
+
+    :class:`~chainweaver.mcp.FlowServer` exposes an optional ``authorizer`` hook
+    that makes a per-call allow/deny decision *before* a flow is dispatched,
+    receiving the flow name, a redacted input summary, the caller identity, and
+    a request id (see :class:`~chainweaver.mcp.security.AuthorizationContext`).
+    A deny decision aborts the call with this typed error carrying only the
+    client-safe ``reason_code``; any operational ``detail`` is routed to the
+    audit hook and logs, never back to the remote agent.
+
+    Attributes:
+        flow_name: Name of the flow whose invocation was denied.
+        reason_code: Stable, client-safe reason code (e.g. ``"forbidden"``).
+    """
+
+    def __init__(self, flow_name: str, reason_code: str = "forbidden") -> None:
+        self.flow_name = flow_name
+        self.reason_code = reason_code
+        super().__init__(f"Authorization denied for flow '{flow_name}': {reason_code}.")
+
+
 class ApprovalDeniedError(ChainWeaverError):
     """Raised when an :class:`~chainweaver.approvals.ApprovalCallback` denies a step (issue #356).
 
@@ -916,6 +982,9 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     PromptBudgetExceededError: "CW-E042",
     LLMProviderError: "CW-E043",
     LLMBudgetExceededError: "CW-E044",
+    FlowAuthenticationError: "CW-E045",
+    RateLimitExceededError: "CW-E046",
+    FlowAuthorizationError: "CW-E047",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

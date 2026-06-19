@@ -40,6 +40,7 @@ from __future__ import annotations
 import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import uuid4
 
 from packaging.version import Version
 from pydantic import BaseModel
@@ -47,6 +48,20 @@ from pydantic import BaseModel
 from chainweaver.contracts import SideEffectLevel, ToolSafetyContract, merge_safety
 from chainweaver.exceptions import FlowExecutionError
 from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
+from chainweaver.log_utils import RedactionPolicy
+from chainweaver.mcp.security import (
+    AuditHook,
+    Authenticator,
+    AuthorizationCallback,
+    AuthorizerCallable,
+    ErrorDetail,
+    MCPServerProfile,
+    RateLimiter,
+    ReadinessFinding,
+    _RequestGate,
+    coerce_authorizer,
+    evaluate_readiness,
+)
 from chainweaver.step_index import FLOW_INPUT_STEP_INDEX
 
 try:  # Optional dependency.
@@ -58,6 +73,29 @@ except ImportError as exc:  # pragma: no cover — depends on install layout
         "chainweaver.mcp.server requires the 'fastmcp' package and the 'mcp' SDK. "
         "Install with: pip install 'chainweaver[mcp]'."
     ) from exc
+
+try:  # FastMCP exposes the active HTTP request's headers for network transports.
+    from fastmcp.server.dependencies import get_http_headers as _get_http_headers
+except ImportError:  # pragma: no cover — depends on fastmcp version
+    _get_http_headers = None  # type: ignore[assignment]
+
+
+def _current_http_headers() -> dict[str, str]:
+    """Best-effort request headers for the active call; ``{}`` for stdio.
+
+    Authenticators serving over SSE / streamable-HTTP read credentials (e.g. a
+    bearer token) from here.  Outside an HTTP request context FastMCP returns an
+    empty mapping, which is the correct "no transport credentials" signal.  Keys
+    are lower-cased so authenticators can look them up case-insensitively
+    (HTTP header names are case-insensitive, but FastMCP may surface mixed case).
+    """
+    if _get_http_headers is None:  # pragma: no cover — older fastmcp
+        return {}
+    try:
+        return {str(k).lower(): v for k, v in _get_http_headers().items()}
+    except Exception:  # pragma: no cover — never let header access break a call
+        return {}
+
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
     from collections.abc import Iterable
@@ -85,19 +123,48 @@ class FlowServer:
         flow_names: Optional iterable of flow names to expose.  When
             ``None`` (the default), only flows allowed by the lifecycle,
             ownership, side-effect, and approval filters are exposed.
-            Explicit names are an owner override and bypass those filters.
+            Named flows are subject to the **same** filters unless
+            ``force_expose=True`` (issue #360).
         server_prefix: Optional prefix applied to the MCP tool name
             for each flow (so the same server can sit alongside other
             MCP servers without name collisions).  Default ``""``
             keeps flow names verbatim.
-        allowed_lifecycles: Review lifecycle states eligible for implicit
-            exposure.  Defaults to ``{ACTIVE}``.
-        allowed_side_effects: Side-effect levels eligible for implicit
-            exposure.  Defaults to read-only levels ``NONE`` and ``READ``.
-        owners: Optional allow-list of governance owners for implicit
-            exposure.
-        allow_requires_approval: Whether implicit exposure may include
-            flows whose safety contract requires approval.
+        force_expose: Bypass the governance filters for ``flow_names``
+            (issue #360).  Off by default so the safe behaviour applies to
+            both the implicit and explicit paths; set it to ``True`` as a
+            deliberate, reviewable override when exposing a flow that the
+            filters would otherwise exclude.  Ignored when ``flow_names`` is
+            ``None``.
+        allowed_lifecycles: Review lifecycle states eligible for exposure.
+            Defaults to the profile's value, else ``{ACTIVE}``.
+        allowed_side_effects: Side-effect levels eligible for exposure.
+            Defaults to the profile's value, else read-only ``NONE`` / ``READ``.
+        owners: Optional allow-list of governance owners for exposure.
+        allow_requires_approval: Whether exposure may include flows whose
+            safety contract requires approval.
+        profile: Optional :class:`~chainweaver.mcp.security.MCPServerProfile`
+            supplying secure defaults (issue #446).  Explicit keyword arguments
+            always override the profile.  Drives :meth:`readiness_report`.
+        authenticator: Optional hook resolving a
+            :class:`~chainweaver.mcp.security.CallerIdentity` from each request
+            before dispatch (issue #362).  Returning ``None`` or raising refuses
+            the call with ``FlowAuthenticationError``.
+        rate_limiter: Optional :class:`~chainweaver.mcp.security.RateLimiter`
+            consulted per call (issue #362); a declined call raises
+            ``RateLimitExceededError``.
+        authorizer: Optional per-call allow/deny callback (issue #443); a deny
+            raises ``FlowAuthorizationError`` carrying only a client-safe reason
+            code.  Accepts an object with ``authorize(ctx)`` or a bare callable.
+        audit_hook: Optional sink receiving an
+            :class:`~chainweaver.mcp.security.AuditEvent` for every allow/deny
+            decision across all three gates.
+        error_detail: How much of a failing flow's error reaches the client
+            (issue #347): ``"full"`` (default), ``"type_only"``, or
+            ``"generic"``.  Defaults to the profile's value when a profile is
+            given.
+        error_redaction: Optional
+            :class:`~chainweaver.log_utils.RedactionPolicy` applied to the error
+            message text under ``error_detail="full"`` (issue #347).
 
     Example::
 
@@ -121,29 +188,59 @@ class FlowServer:
         name: str = "chainweaver",
         flow_names: Iterable[str] | None = None,
         server_prefix: str = "",
+        force_expose: bool | None = None,
         allowed_lifecycles: Iterable[FlowLifecycle] | None = None,
         allowed_side_effects: Iterable[SideEffectLevel] | None = None,
         owners: Iterable[str] | None = None,
-        allow_requires_approval: bool = False,
+        allow_requires_approval: bool | None = None,
+        profile: MCPServerProfile | None = None,
+        authenticator: Authenticator | None = None,
+        rate_limiter: RateLimiter | None = None,
+        authorizer: AuthorizationCallback | AuthorizerCallable | None = None,
+        audit_hook: AuditHook | None = None,
+        error_detail: ErrorDetail | None = None,
+        error_redaction: RedactionPolicy | None = None,
     ) -> None:
         self.executor = executor
         self.name = name
         self.server_prefix = server_prefix
+        self.profile = profile
         self._explicit_flow_names: list[str] | None = (
             list(flow_names) if flow_names is not None else None
         )
+        # Resolve profile-controlled knobs: an explicit argument always wins,
+        # then the profile's value, then the hard-coded secure default.
         self.allowed_lifecycles = (
-            _DEFAULT_LIFECYCLES if allowed_lifecycles is None else frozenset(allowed_lifecycles)
+            frozenset(allowed_lifecycles)
+            if allowed_lifecycles is not None
+            else profile.allowed_lifecycles
+            if profile is not None
+            else _DEFAULT_LIFECYCLES
         )
         self.allowed_side_effects = (
-            _DEFAULT_SIDE_EFFECTS
-            if allowed_side_effects is None
-            else frozenset(allowed_side_effects)
+            frozenset(allowed_side_effects)
+            if allowed_side_effects is not None
+            else profile.allowed_side_effects
+            if profile is not None
+            else _DEFAULT_SIDE_EFFECTS
         )
         self.owners = frozenset(owners) if owners is not None else None
-        self.allow_requires_approval = allow_requires_approval
+        self.allow_requires_approval = _resolve(
+            allow_requires_approval, profile, "allow_requires_approval", False
+        )
+        self.force_expose = _resolve(force_expose, profile, "force_expose", False)
+        self.error_detail: ErrorDetail = _resolve(error_detail, profile, "error_detail", "full")
+        self._gate = _RequestGate(
+            authenticator=authenticator,
+            rate_limiter=rate_limiter,
+            authorizer=coerce_authorizer(authorizer),
+            audit_hook=audit_hook,
+            error_detail=self.error_detail,
+            error_redaction=error_redaction,
+        )
         self._mcp = FastMCP(name=name)
         self._registered_tool_names: list[str] = []
+        self._exposed_side_effects: set[SideEffectLevel] = set()
         self._register_all_flows()
 
     @property
@@ -172,16 +269,20 @@ class FlowServer:
         else:
             flows = [registry.get_flow(flow_name) for flow_name in self._explicit_flow_names]
 
+        forced = self._explicit_flow_names is not None and self.force_expose
         for flow in flows:
             safety = _resolve_flow_safety(flow, self.executor)
-            if self._explicit_flow_names is None:
+            if not forced:
+                # Governance filters apply uniformly to the implicit path and to
+                # explicitly named flows (issue #360) — the safe behaviour is the
+                # default unless force_expose is set.
                 reason = self._implicit_exclusion_reason(flow, safety)
                 if reason is not None:
                     _LOGGER.warning("Skipping MCP flow '%s': %s", flow.name, reason)
                     continue
             elif safety is None:
                 _LOGGER.warning(
-                    "Explicitly exposing MCP flow '%s' with unknown safety metadata.",
+                    "Force-exposing MCP flow '%s' with unknown safety metadata.",
                     flow.name,
                 )
             elif (
@@ -190,7 +291,7 @@ class FlowServer:
                 or flow.governance.lifecycle not in self.allowed_lifecycles
             ):
                 _LOGGER.warning(
-                    "Explicitly exposing MCP flow '%s' despite restrictive "
+                    "Force-exposing MCP flow '%s' despite restrictive "
                     "lifecycle or safety metadata.",
                     flow.name,
                 )
@@ -226,6 +327,9 @@ class FlowServer:
         if mcp_name in self._registered_tool_names:
             raise ValueError(f"MCP tool name collision for '{mcp_name}'.")
 
+        if safety is not None:
+            self._exposed_side_effects.add(safety.side_effects)
+
         description = _flow_description(flow, safety)
         flow_tool = _build_flow_tool_dispatcher(
             mcp_name=mcp_name,
@@ -235,6 +339,8 @@ class FlowServer:
             input_schema=input_schema,
             output_schema=output_schema,
             executor=self.executor,
+            gate=self._gate,
+            safety=safety,
         )
 
         annotations = _tool_annotations(mcp_name, safety)
@@ -287,6 +393,40 @@ class FlowServer:
         """
         await self._mcp.run_async(transport=transport, show_banner=False)
 
+    def readiness_report(self) -> list[ReadinessFinding]:
+        """Check this server against its configured profile (issue #446).
+
+        Returns a list of :class:`~chainweaver.mcp.security.ReadinessFinding`;
+        ``severity="error"`` findings are deployment-blocking (e.g. a ``strict``
+        profile with no authorizer wired).  When no profile was supplied a
+        single informational finding is returned.
+        """
+        if self.profile is None:
+            return [
+                ReadinessFinding(
+                    severity="info",
+                    code="no-profile",
+                    message="No MCP server profile configured; readiness checks are skipped.",
+                )
+            ]
+        return evaluate_readiness(
+            self.profile,
+            has_authorizer=self._gate.has_authorizer,
+            has_authenticator=self._gate.has_authenticator,
+            has_rate_limiter=self._gate.has_rate_limiter,
+            error_detail=self.error_detail,
+            exposed_side_effects=self._exposed_side_effects,
+        )
+
+
+def _resolve(explicit: Any, profile: MCPServerProfile | None, attr: str, default: Any) -> Any:
+    """Pick *explicit* if given, else the profile's *attr*, else *default*."""
+    if explicit is not None:
+        return explicit
+    if profile is not None:
+        return getattr(profile, attr)
+    return default
+
 
 def _safe_identifier(raw: str) -> str:
     """Coerce *raw* into a valid Python identifier for ``__name__`` assignment."""
@@ -307,6 +447,8 @@ def _build_flow_tool_dispatcher(
     input_schema: type[BaseModel],
     output_schema: type[BaseModel] | None,
     executor: FlowExecutor,
+    gate: _RequestGate,
+    safety: ToolSafetyContract | None,
 ) -> Any:
     """Synthesize a coroutine whose signature mirrors *input_schema*'s fields.
 
@@ -316,19 +458,39 @@ def _build_flow_tool_dispatcher(
     them under a single ``payload`` parameter) keeps the resulting
     MCP tool ergonomic for clients — they call
     ``tool(n=5)`` instead of ``tool(payload={"n": 5})``.
+
+    The *gate* runs the authentication / rate-limit / authorization hooks
+    before dispatch and renders boundary errors afterwards (issues #362, #443,
+    #347); with no hooks configured it is a transparent pass-through.
     """
 
     async def _dispatcher(**kwargs: Any) -> dict[str, Any]:
+        request_id = uuid4().hex
+        gate.check(
+            request_id=request_id,
+            flow_name=flow_name,
+            flow_version=flow_version,
+            mcp_tool_name=mcp_name,
+            raw_inputs=kwargs,
+            safety=safety,
+            # Only resolve request headers when an authenticator will read them;
+            # the other gates never touch headers, so the no-authn path stays free.
+            http_headers=_current_http_headers() if gate.has_authenticator else {},
+        )
         validated = input_schema.model_validate(kwargs)
         data = validated.model_dump(exclude_none=False)
         result = await executor.execute_flow_async(flow_name, data, version=flow_version)
         if not result.success:
             last = result.execution_log[-1] if result.execution_log else None
-            detail = (
-                f"{last.error_type}: {last.error_message}"
-                if last is not None and last.error_type is not None
-                else "flow execution failed without recorded step error"
-            )
+            # Always route through the gate so error_detail / redaction apply
+            # uniformly, even when a failure record lacks error_type or there is
+            # no recorded step error at all.
+            if last is not None and last.error_type is not None:
+                detail = gate.render_error(last.error_type, last.error_message)
+            else:
+                detail = gate.render_error(
+                    "FlowExecutionError", "flow execution failed without a recorded step error"
+                )
             raise FlowExecutionError(flow_name, FLOW_INPUT_STEP_INDEX, detail)
         if output_schema is not None and result.final_output is not None:
             validated_out = output_schema.model_validate(result.final_output)
