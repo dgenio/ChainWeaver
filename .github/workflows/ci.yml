@@ -32,21 +32,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      # Lint / format / mypy are stable across OSes and Pythons, so we run
-      # them once (the canonical Python 3.10 on ubuntu-latest leg) to keep
-      # the matrix fast and the gating signal unambiguous.
-      - name: Lint with Ruff
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
-        run: ruff check chainweaver/ tests/ examples/
-
-      - name: Check formatting with Ruff
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
-        run: ruff format --check chainweaver/ tests/ examples/
-
-      - name: Type check with mypy
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
-        run: python -m mypy chainweaver/ tests/
-
+      # Lint / format / mypy / workflow + vocabulary checks live in the
+      # dedicated `lint` job below so the static-analysis signal is a single
+      # unambiguous gate, independent of the OS/Python test matrix.
       - name: Run tests
         run: python -m pytest tests/ -v
 
@@ -66,6 +54,48 @@ jobs:
       - name: Run notebooks (nbmake)
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
         run: python -m pytest --nbmake notebooks/ --no-cov -v
+
+  # Dedicated static-analysis gate (issue #458): lint, format, types, the
+  # banned-vocabulary check (#466), and GitHub Actions workflow linting all
+  # run once on the canonical Python 3.10 / ubuntu lane. Keeping them in one
+  # job — instead of conditional steps buried in the test matrix — makes the
+  # "is the code clean?" signal a single, clearly named check.
+  lint:
+    name: lint, format, types, workflows
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # The first three steps are the static-analysis commands from
+      # AGENTS.md §7, verbatim (same scope, same flags) so local pre-commit
+      # == CI; §7's fourth canonical command, pytest, runs in the test
+      # matrix above. The banned-vocabulary check (#466) is additive.
+      - name: Lint with Ruff
+        run: ruff check chainweaver/ tests/ examples/
+
+      - name: Check formatting with Ruff
+        run: ruff format --check chainweaver/ tests/ examples/
+
+      - name: Type check with mypy
+        run: python -m mypy chainweaver/ tests/
+
+      - name: Check banned vocabulary (#466)
+        run: python scripts/check_vocabulary.py
+
+      # actionlint (pinned to match .pre-commit-config.yaml) lints every
+      # workflow; the image bundles shellcheck so `run:` scripts are checked
+      # too. Docker is available on GitHub-hosted ubuntu runners.
+      - name: Lint GitHub Actions workflows (actionlint)
+        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.7 -color
 
   conformance:
     name: weaver-spec conformance (#91)

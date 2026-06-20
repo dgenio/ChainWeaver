@@ -1,0 +1,29 @@
+# Vocabulary allowlist for scripts/check_vocabulary.py (issue #466).
+#
+# The checker bans "pipeline"/"pipelines" used as a synonym for a ChainWeaver
+# *flow*. Each line below is a case-insensitive substring; a flagged match is
+# suppressed when its scanned text segment contains that substring. Keep
+# entries specific so real misuse is still caught.
+#
+# Add an entry ONLY for a genuine non-flow use of the word "pipeline"
+# (a generic software pipeline, a quoted rule definition, etc.) — never to
+# paper over a flow that should just be called a flow.
+
+# The vocabulary rule's own definition rows (AGENTS.md, CONTRIBUTING.md,
+# .github/copilot-instructions.md, review-checklist.md) and the prose that
+# documents the checker itself.
+chain, pipeline
+never "chain"
+`pipeline`/`pipelines`
+
+# Generic software pipelines that are not ChainWeaver flows.
+json pipeline
+review pipeline
+reviewer pipeline
+analysis pipeline
+proposal pipeline
+trace pipeline
+otel pipeline
+evaluation pipeline
+refine-in-place pipeline
+strict pipeline

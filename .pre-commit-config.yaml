@@ -8,11 +8,12 @@
 #     pre-commit run --all-files
 #
 # Conventions:
-# - The four canonical Python checks (ruff check / ruff format --check / mypy)
-#   are `local` hooks so they invoke exactly the commands documented in
+# - Three of the four canonical checks (ruff check / ruff format --check /
+#   mypy) are `local` hooks so they invoke exactly the commands documented in
 #   AGENTS.md §7 — including the scope `chainweaver/ tests/ examples/`. This
 #   keeps the hook output identical to CI; see lessons-learned.md rule #3
-#   ("commands that don't match CI exactly").
+#   ("commands that don't match CI exactly"). pytest is deliberately NOT a
+#   hook — run it manually or rely on CI.
 # - External hooks are pinned to specific tags. Update them deliberately.
 
 default_language_version:
@@ -23,7 +24,7 @@ default_stages: [pre-commit, manual]
 
 repos:
   # ---------------------------------------------------------------------
-  # Canonical four checks (mirror AGENTS.md §7 verbatim).
+  # Canonical static checks (mirror AGENTS.md §7 verbatim; pytest excluded).
   # ---------------------------------------------------------------------
   - repo: local
     hooks:
@@ -46,6 +47,16 @@ repos:
         entry: python -m mypy chainweaver/ tests/
         language: system
         types: [python]
+        pass_filenames: false
+
+      # Banned-vocabulary check (issue #466): flags "pipeline" used as a
+      # flow-synonym in docs/docstrings. Scans its own default scope, so
+      # pass_filenames is false (like the checks above).
+      - id: check-vocabulary
+        name: check vocabulary
+        entry: python scripts/check_vocabulary.py
+        language: system
+        types_or: [python, markdown]
         pass_filenames: false
 
   # ---------------------------------------------------------------------

@@ -187,10 +187,14 @@ flows, no server) around it.
 | Lean dep set | ✅ 5 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
 | File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
+| Stateful long-running workflows | ❌ by design | ❌ | ⚠️ partial | ✅ | ✅ | ✅ |
+| Graph branches on LLM output | ❌ by design | ⚠️ limited | ✅ | ✅ N/A | ✅ N/A | ✅ N/A |
 
-See [docs/comparisons.md](docs/comparisons.md) for the full matrix —
-including version pins, citations to each alternative's own docs, and a
-"when to pick which" guide.
+See [docs/comparisons.md](docs/comparisons.md) (also on the
+[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/)) for
+the full matrix — version pins, citations to each alternative's own docs, and
+a "when to pick which" guide. Re-evaluated on each minor release of any of the
+projects above.
 
 ---
 
@@ -217,22 +221,10 @@ the nuances; the short version:
   (use Prefect, Dagster, or Temporal).
 - You expect the executor to call an LLM. It deliberately doesn't.
 
-### How ChainWeaver relates to neighbours
-
-| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
-|---|---|---|---|---|---|---|
-| LLM-free between steps (by design) | **Yes** | No | N/A | N/A | N/A | No |
-| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
-| Small runtime dependency set | **Yes** (5 packages) | No | No | No | No | No |
-| File-serializable flow definitions | **Yes** (JSON / YAML) | No | Python | Python | Python | No |
-| Standalone (no server / scheduler) | **Yes** | Yes | No | No | No | Yes |
-| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
-| Graph branches on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
-
-The full one-paragraph-per-tool comparison lives at
-[docs/comparisons.md](docs/comparisons.md) and on the
-[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/). Re-evaluated
-on each minor release of any of the projects above.
+The framework comparison table above (and the full one-paragraph-per-tool
+matrix in [docs/comparisons.md](docs/comparisons.md)) covers how ChainWeaver
+relates to its neighbours — LangChain, LangGraph, Prefect, Dagster, and
+Temporal.
 
 For the correctness argument behind the design, see
 [docs/data-integrity.md](docs/data-integrity.md).
@@ -1210,6 +1202,10 @@ introspection-friendly).
 ---
 
 ## Development
+
+New contributors: see [**Your first contribution**](CONTRIBUTING.md#your-first-contribution)
+in `CONTRIBUTING.md` for the `good-first-issue` / `good-first-ai-issue` onramp
+and the step-by-step path to your first PR.
 
 ```bash
 # Install with dev dependencies

@@ -10,6 +10,7 @@ For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context
 ## Table of Contents
 
 - [Dev environment setup](#dev-environment-setup)
+- [Your first contribution](#your-first-contribution)
 - [Pre-commit hooks](#pre-commit-hooks)
 - [Running tests](#running-tests)
 - [Code style](#code-style)
@@ -40,28 +41,70 @@ Python 3.10 or later is required.
 
 ---
 
+## Your first contribution
+
+New here? Start with a curated, well-scoped task rather than a sprawling one.
+
+**Look for these labels on open issues:**
+
+| Label | Who it's for | What it means |
+|-------|--------------|---------------|
+| `good-first-issue` | First-time human contributors | Scoped, low-context, with clear acceptance criteria. |
+| `good-first-ai-issue` | AI agents (Copilot, Claude Code, …) | Same bar, plus enough file/path detail in the body for an agent to act without repo-wide spelunking. |
+
+A task qualifies for either label when it is **scoped** (one logical change),
+**low-context** (no deep architectural background required), and ships with
+**clear acceptance criteria**. Docs fixes, an example or test for an existing
+behavior, and small CLI/output polish are typical starting points.
+
+**Your first change, step by step:**
+
+1. Read [`AGENTS.md`](AGENTS.md) and the per-file-type guidance in
+   [`.github/instructions/`](.github/instructions/) for the area you're
+   touching.
+2. Make the smallest correct change for the issue — resist bundling adjacent
+   fixes (open a follow-up issue instead; see
+   [`workflows.md` § Out-of-scope discoveries](docs/agent-context/workflows.md)).
+3. Run the four validation commands (see [Running tests](#running-tests))
+   until they pass locally.
+4. Open a PR following the [PR process](#pr-process); fill in every template
+   section.
+
+Maintainers curate the labelled pool — if you spot a task that looks
+first-issue sized, mention it on the issue rather than self-assigning a label.
+
+---
+
 ## Pre-commit hooks
 
 ChainWeaver ships a [`.pre-commit-config.yaml`](.pre-commit-config.yaml) that
-mirrors the four CI checks plus a few hygiene hooks. Set it up once per
-clone:
+mirrors **three of the four** validation commands documented in
+[`AGENTS.md` §7](AGENTS.md#7-validation-commands) — `ruff check`,
+`ruff format --check`, and `mypy` — plus a few hygiene hooks, secret
+scanning, and GitHub Actions linting. **`pytest` is *not* a hook**: it is
+excluded to keep commit speed reasonable, so run it manually before pushing
+or rely on CI. Set the hooks up once per clone:
 
 ```bash
+# One-time install (after `pip install -e ".[dev]"`)
 pip install pre-commit
 pre-commit install
 ```
 
-After installation, the hooks run automatically on every `git commit`.
-You can also run them manually against the whole tree:
+After installation, the hooks run automatically on every `git commit`. You
+can also run them against the whole tree (recommended after a rebase):
 
 ```bash
 pre-commit run --all-files
 ```
 
-The hooks invoke exactly the commands documented in
-[`AGENTS.md` §7](AGENTS.md#7-validation-commands) — same scope
-(`chainweaver/ tests/ examples/`), same flags — so a clean local run
-matches a clean CI run.
+The three Python hooks use `language: system` and invoke the canonical
+commands verbatim — same scope (`chainweaver/ tests/ examples/`), same flags
+— so a clean local run matches a clean CI run. If a hook fails, fix the
+underlying issue and re-stage; do **not** bypass it with `--no-verify`.
+
+Hook versions are pinned in `.pre-commit-config.yaml`. Bumping a hook is a
+deliberate change: update the pin in the same PR that benefits from it.
 
 ### Secret scanning
 
@@ -98,25 +141,6 @@ python -m pytest tests/ -v
 ```
 
 CI runs lint + format + mypy on Python 3.10, and tests across Python 3.10–3.14.
-
----
-
-## Pre-commit hooks
-
-A `.pre-commit-config.yaml` at the repo root mirrors three of the four validation commands above (ruff check, ruff format --check, mypy) plus secret scanning. pytest is excluded to keep commit speed reasonable — run it manually before pushing or rely on CI. Hooks use `language: system` so they run from the project venv with the same tool versions.
-
-```bash
-# One-time install (after `pip install -e ".[dev]"`)
-pip install pre-commit
-pre-commit install
-
-# Run all hooks against every tracked file (recommended after a rebase)
-pre-commit run --all-files
-```
-
-Once installed, the hooks run automatically on `git commit`. If a hook fails, fix the underlying issue and re-stage — do not bypass the hook with `--no-verify`.
-
-Hook versions are pinned in `.pre-commit-config.yaml`. Bumping a hook is a deliberate change: update the pin in the same PR that benefits from it.
 
 ---
 
@@ -162,16 +186,27 @@ Use the canonical terms consistently in code, docs, and PR descriptions:
 | **flow** | chain, pipeline |
 | **tool** | function, action (when referring to a `Tool` instance) |
 
+**Automated check.** [`scripts/check_vocabulary.py`](scripts/check_vocabulary.py)
+flags `pipeline`/`pipelines` used as a flow-synonym in Markdown prose and
+Python docstrings/comments, and runs as a pre-commit hook and in CI. Genuine
+non-flow uses of the word (e.g. "JSON pipeline", "review pipeline") are
+exempted in [`.vocabulary-allowlist.txt`](.vocabulary-allowlist.txt); add an
+entry there with care rather than reaching for an LLM-friendly synonym.
+
+**Why not auto-check "chain"?** It is a legitimate domain noun here —
+`ChainAnalyzer.find_chains()` returns *chains* (candidate tool sequences), and
+the builder offers fluent method *chaining*. Auto-banning it would force a
+sprawling allowlist that masks real misuse, so **using "chain" as a synonym
+for a flow remains a human-review item**: reviewers should still catch it.
+
 ---
 
 ## PR process
 
-1. **One logical change per PR.** A PR that implements a feature, adds tests, and updates docs is one logical change. Only split if changes are genuinely unrelated.
-2. **Link the relevant issue** in your PR description under _Related Issues_.
+1. **One primary issue per PR.** A PR that implements one issue's feature, adds its tests, and updates its docs is one logical change. Prefer one issue per PR — smaller PRs review faster, conflict less, and keep `main` green. If a PR must touch several issues because the work is genuinely coupled, say *why* in the PR description.
+2. **Declare the issues this PR closes** in the PR template's _Issues closed by this PR_ field (e.g. `Closes #123`), and link related-but-not-closed issues under _Related Issues_. The closing field is the source of truth when the branch name cannot carry the issue number.
 3. **All tests must pass** before requesting review.
-4. **Branch naming:** `{type}/{issue_number}-{short-description}`
-   - Types: `feat`, `fix`, `docs`, `test`, `refactor`
-   - Example: `feat/55-add-pr-template`
+4. **Branch naming.** Manually created branches use `{type}/{issue_number}-{short-description}` (types: `feat`, `fix`, `docs`, `test`, `refactor`; e.g. `feat/55-add-pr-template`). Tool-generated branches (e.g. the `claude/<task>` branches the AI-agent workflow produces) are accepted as-is — they often can't embed an issue number — **provided the PR declares its closing issue(s)** per step 2. See [`workflows.md` § Branch naming](docs/agent-context/workflows.md#branch-naming) for the canonical rule.
 5. **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/):
    ```
    feat: add timeout guardrails to tool execution
