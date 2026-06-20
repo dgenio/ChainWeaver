@@ -75,8 +75,10 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      # These four invocations are the canonical commands from AGENTS.md §7,
-      # verbatim (same scope, same flags) so local pre-commit == CI.
+      # The first three steps are the static-analysis commands from
+      # AGENTS.md §7, verbatim (same scope, same flags) so local pre-commit
+      # == CI; §7's fourth canonical command, pytest, runs in the test
+      # matrix above. The banned-vocabulary check (#466) is additive.
       - name: Lint with Ruff
         run: ruff check chainweaver/ tests/ examples/
 
