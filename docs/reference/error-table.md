@@ -65,6 +65,7 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E045` | `FlowAuthenticationError` | A `FlowServer` authenticator returned `None` or raised; the call is refused before dispatch. |
 | `CW-E046` | `RateLimitExceededError` | A `FlowServer` rate limiter declined the call. |
 | `CW-E047` | `FlowAuthorizationError` | A `FlowServer` authorization callback denied the call (client-safe reason code only). |
+| `CW-E048` | `OpenCodeAdapterError` | An OpenCode plugin payload could not be normalized into a trace event, or a flow name has no name-safe characters. |
 
 ## Catching strategy
 
