@@ -68,7 +68,11 @@ def test_distribution_check_runs_after_successful_publication() -> None:
     assert 'workflows: ["Publish to PyPI"]' in workflow
     assert "github.event.workflow_run.conclusion == 'success'" in workflow
     assert "python scripts/release.py verify-pypi" in workflow
-    assert 'mcp-publisher" validate server.json' in workflow
+    # SC2086: the ${RUNNER_TEMP}/mcp-publisher path must be quoted. Assert the full
+    # quoted form (including the opening quote) is present and the unquoted pre-fix
+    # form is gone, so this test fails if the SC2086 fix ever regresses.
+    assert '"${RUNNER_TEMP}/mcp-publisher" validate server.json' in workflow
+    assert "mcp-publisher validate server.json" not in workflow
     assert "sha256sum --check -" in workflow
     assert "uses: ./.github/actions/chainweaver" in workflow
     assert "chainweaver-version: ${{ steps.release.outputs.version }}" in workflow
