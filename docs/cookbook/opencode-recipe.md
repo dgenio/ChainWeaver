@@ -137,6 +137,6 @@ config, your captured traces, and your flow files are left untouched.
 - **Unsafe to compile:** edit/fix/refactor loops, anything whose next step
   depends on model judgement, or side-effecting paths that need approval.
 
-See also: [`chainweaver opencode`](../../chainweaver/cli/opencode.py),
-[`chainweaver.opencode`](../../chainweaver/opencode.py), and the
-[trace pipeline](../../chainweaver/traces.py).
+See also: [`chainweaver opencode`](https://github.com/dgenio/ChainWeaver/blob/main/chainweaver/cli/opencode.py),
+[`chainweaver.opencode`](https://github.com/dgenio/ChainWeaver/blob/main/chainweaver/opencode.py),
+and the [trace pipeline](https://github.com/dgenio/ChainWeaver/blob/main/chainweaver/traces.py).
