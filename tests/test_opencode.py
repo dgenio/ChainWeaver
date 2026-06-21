@@ -214,3 +214,10 @@ class TestObservePlugin:
     def test_plugin_disables_redaction_when_requested(self) -> None:
         source = render_observe_plugin(redact=False)
         assert "--no-redact" in source
+
+    def test_plugin_normalizes_windows_backslash_sink(self) -> None:
+        # A Windows ``str(Path(...))`` sink uses backslashes; the baked plugin
+        # must always use forward slashes so the generated JS is portable.
+        source = render_observe_plugin(sink=".chainweaver\\traces\\opencode.jsonl")
+        assert ".chainweaver/traces/opencode.jsonl" in source
+        assert "\\" not in source
