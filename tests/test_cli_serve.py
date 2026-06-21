@@ -70,6 +70,29 @@ class TestBuildFlowServer:
         exit_code = cli.main(["serve", str(tmp_path / "nope.flow.yaml")])
         assert exit_code == 2
 
+    def test_directory_exposes_active_withholds_draft(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A directory serves its active/reviewed flows only (issue #279).
+        monkeypatch.syspath_prepend(str(_REPO_ROOT))
+        (tmp_path / "active.flow.yaml").write_text(
+            _EXAMPLE_FLOW.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        (tmp_path / "draft.flow.yaml").write_text(
+            "type: Flow\nname: draft_flow\nversion: '0.1.0'\ndescription: d\n"
+            "governance:\n  lifecycle: draft\n"
+            "steps:\n  - tool_name: double\n    input_mapping: {number: number}\n",
+            encoding="utf-8",
+        )
+        server = cli._build_flow_server(
+            tmp_path,
+            ["examples.simple_linear_flow"],
+            name="cw-test",
+            server_prefix="cw",
+        )
+        # Only the active flow is exposed, under FlowServer's cw__<name> scheme.
+        assert server.registered_tool_names == ["cw__double_add_format"]
+
     def test_missing_mcp_extra_exits_1(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

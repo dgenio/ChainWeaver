@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *FlowServer exposure* (#279): `build_flow_mcp_entry` /
     `add_flow_server_to_config` / `remove_flow_server_from_config` generate and
     merge the OpenCode MCP entry; only active/reviewed flows are exposed.
+    `chainweaver serve` now accepts a **directory** of flow files (not just a
+    single file) and exposes its active/reviewed flows, so the generated entry
+    serves the whole `.chainweaver/flows` directory. `safe_macro_tool_name`
+    mirrors FlowServer's real `<prefix>__<flow.name>` naming so collision
+    detection matches what OpenCode actually sees.
   - *Reversible setup* (#277): `chainweaver opencode setup --observe/--flows`
     (dry-run by default, `--write` creates `.bak` backups) and `opencode
     revert` remove only ChainWeaver-managed entries, leaving traces, flows, and

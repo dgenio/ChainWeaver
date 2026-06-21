@@ -325,48 +325,35 @@ def _opt_iso(value: Any) -> Any:
 # Macro-tool naming and collision detection (#280)
 # --------------------------------------------------------------------------- #
 
-_NAME_SAFE_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_"
-
-
-def _slugify_tool_name(name: str) -> str:
-    """Lower-case *name* and collapse unsafe characters to single underscores."""
-    lowered = name.strip().lower()
-    out: list[str] = []
-    for char in lowered:
-        out.append(char if char in _NAME_SAFE_CHARS else "_")
-    slug = "".join(out)
-    while "__" in slug:
-        slug = slug.replace("__", "_")
-    return slug.strip("_")
-
 
 def safe_macro_tool_name(flow_name: str, *, prefix: str = OPENCODE_TOOL_PREFIX) -> str:
-    """Return a namespace-safe OpenCode tool name for *flow_name* (#280).
+    """Return the OpenCode-visible tool name for *flow_name* (#280).
 
-    The result is lower-cased, restricted to ``[a-z0-9_]``, and prefixed (unless
-    it already starts with *prefix*) so generated macro-tools live in their own
-    namespace and never shadow built-in OpenCode tools.  The mapping is stable:
+    This mirrors exactly how :class:`chainweaver.mcp.FlowServer` names exposed
+    tools — ``f"{server_prefix}__{flow.name}"`` — so collision detection and the
+    ``opencode setup`` report predict the *actual* names OpenCode will see.
+    ``build_flow_mcp_entry`` passes ``--prefix <base>`` to ``chainweaver serve``
+    (the trailing underscore of the default ``cw_`` is stripped), and FlowServer
+    joins prefix and flow name with a double underscore.  The mapping is stable:
     the same *flow_name* and *prefix* always yield the same tool name.
 
     Args:
-        flow_name: The flow's name.
+        flow_name: The flow's name (used verbatim, as FlowServer does).
         prefix: Namespace prefix; defaults to :data:`OPENCODE_TOOL_PREFIX`.
-            An empty prefix is allowed for advanced users who manage collisions
-            themselves.
+            Trailing underscores are stripped before the ``__`` separator is
+            applied.  An empty prefix exposes the raw flow name (advanced use:
+            the caller then owns collision avoidance).
 
     Returns:
-        The exposed tool name.
+        The exposed tool name, e.g. ``cw__ship_it`` for ``ship_it``.
 
     Raises:
-        OpenCodeAdapterError: If *flow_name* has no usable characters.
+        OpenCodeAdapterError: If *flow_name* is empty.
     """
-    slug = _slugify_tool_name(flow_name)
-    if not slug:
-        raise OpenCodeAdapterError(f"flow name {flow_name!r} has no name-safe characters")
-    clean_prefix = _slugify_tool_name(prefix) if prefix else ""
-    if clean_prefix and not slug.startswith(f"{clean_prefix}_"):
-        return f"{clean_prefix}_{slug}"
-    return slug
+    if not flow_name:
+        raise OpenCodeAdapterError("flow name is empty")
+    base = prefix.rstrip("_") if prefix else ""
+    return f"{base}__{flow_name}" if base else flow_name
 
 
 def detect_tool_name_collisions(

@@ -124,25 +124,29 @@ class TestNormalizeEvent:
 
 
 class TestNaming:
-    def test_prefix_and_slugify(self) -> None:
-        assert safe_macro_tool_name("PR Review Flow") == "cw_pr_review_flow"
-        assert safe_macro_tool_name("github.get-pr") == "cw_github_get_pr"
+    def test_mirrors_flowserver_double_underscore(self) -> None:
+        # Must match FlowServer's f"{prefix}__{flow.name}" exactly.
+        assert safe_macro_tool_name("ship_it") == "cw__ship_it"
+        assert safe_macro_tool_name("pr_review") == "cw__pr_review"
 
-    def test_already_prefixed_not_doubled(self) -> None:
-        assert safe_macro_tool_name("cw_existing") == "cw_existing"
+    def test_prefix_trailing_underscores_stripped_before_separator(self) -> None:
+        # The default OPENCODE_TOOL_PREFIX ("cw_") yields a single "cw" base so
+        # the separator is exactly the FlowServer double underscore, not "cw___".
+        assert safe_macro_tool_name("x", prefix="cw_") == "cw__x"
+        assert safe_macro_tool_name("x", prefix="cw") == "cw__x"
 
     def test_stable_across_calls(self) -> None:
-        assert safe_macro_tool_name("My Flow") == safe_macro_tool_name("My Flow")
+        assert safe_macro_tool_name("My_Flow") == safe_macro_tool_name("My_Flow")
 
     def test_custom_prefix(self) -> None:
-        assert safe_macro_tool_name("deploy", prefix="chainweaver") == "chainweaver_deploy"
+        assert safe_macro_tool_name("deploy", prefix="chainweaver") == "chainweaver__deploy"
 
     def test_empty_prefix_allowed(self) -> None:
         assert safe_macro_tool_name("deploy", prefix="") == "deploy"
 
-    def test_no_safe_characters_raises(self) -> None:
+    def test_empty_flow_name_raises(self) -> None:
         with pytest.raises(OpenCodeAdapterError):
-            safe_macro_tool_name("!!!")
+            safe_macro_tool_name("")
 
     def test_reserved_collision_detected(self) -> None:
         collisions = detect_tool_name_collisions(["read"], prefix="")
@@ -154,13 +158,13 @@ class TestNaming:
 
     def test_known_name_collision_detected(self) -> None:
         collisions = detect_tool_name_collisions(
-            ["deploy"], known_tool_names=["cw_deploy"], prefix=OPENCODE_TOOL_PREFIX
+            ["deploy"], known_tool_names=["cw__deploy"], prefix=OPENCODE_TOOL_PREFIX
         )
         assert "deploy" in collisions
 
     def test_interflow_collision_detected(self) -> None:
-        collisions = detect_tool_name_collisions(["PR Review", "pr-review"], prefix="")
-        # Both slugify to the same name; the second is flagged.
+        # Two flows with the same name map to the same exposed tool name.
+        collisions = detect_tool_name_collisions(["deploy", "deploy"], prefix="")
         assert len(collisions) == 1
 
 

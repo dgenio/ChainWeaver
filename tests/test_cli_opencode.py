@@ -147,7 +147,7 @@ class TestSetupFlows:
         assert exit_code == 0
         change = json.loads(capsys.readouterr().out)["changes"][0]
         assert "ship_it" in change["exposed_tools"]
-        assert change["exposed_tools"]["ship_it"] == "cw_ship_it"
+        assert change["exposed_tools"]["ship_it"] == "cw__ship_it"
         assert "wip" in change["withheld_flows"]
 
     def test_write_creates_config_preserving_other_servers(self, tmp_path: Path) -> None:

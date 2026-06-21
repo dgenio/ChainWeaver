@@ -14,6 +14,7 @@ from chainweaver.exceptions import (
     FlowSerializationError,
 )
 from chainweaver.executor import FlowExecutor
+from chainweaver.flow import FlowLifecycle
 from chainweaver.registry import FlowRegistry
 
 if TYPE_CHECKING:
@@ -26,12 +27,17 @@ from chainweaver.cli._shared import (
     _emit_json,
     _error_line,
     _import_tools_from,
+    _iter_flow_files,
     _load_flow_file,
     _parse_initial_input,
     _require_existing_file,
     _run_result_to_table,
     app,
 )
+
+# Flow lifecycles ``chainweaver serve <dir>`` exposes by default (issue #279):
+# active and reviewed flows only — drafts/archived are withheld.
+_EXPOSABLE_LIFECYCLES = frozenset({FlowLifecycle.ACTIVE, FlowLifecycle.REVIEWED})
 
 _RUN_INPUT_OPTION = typer.Option(
     None,
@@ -146,7 +152,10 @@ class ServeTransport(str, Enum):
 
 _SERVE_FILE_ARG = typer.Argument(
     ...,
-    help="Path to a .flow.yaml, .flow.yml, or .flow.json file to expose over MCP.",
+    help=(
+        "Path to a .flow.yaml/.yml/.json file, or a directory of flow files. "
+        "A directory exposes its active/reviewed flows (drafts withheld)."
+    ),
 )
 _SERVE_TOOLS_OPTION = typer.Option(
     [],
@@ -195,33 +204,64 @@ def _import_flow_server() -> type[FlowServer]:
     return FlowServer
 
 
+def _load_flows_from_dir(directory: Path) -> tuple[FlowRegistry, list[str]]:
+    """Register every flow under *directory*; return (registry, exposable names).
+
+    Malformed files are skipped with a stderr warning rather than aborting,
+    matching ``chainweaver check`` discovery semantics.  Only active/reviewed
+    flows (:data:`_EXPOSABLE_LIFECYCLES`) are returned as exposable names so a
+    served directory withholds drafts/archived flows by default (issue #279).
+    """
+    registry = FlowRegistry()
+    exposable: list[str] = []
+    for path in _iter_flow_files(directory):
+        try:
+            flow = _load_flow_file(path)
+        except FlowSerializationError as exc:
+            typer.echo(f"chainweaver: skipping {path}: {exc.detail}", err=True)
+            continue
+        registry.register_flow(flow, overwrite=True)
+        if flow.governance.lifecycle in _EXPOSABLE_LIFECYCLES:
+            exposable.append(flow.name)
+    return registry, exposable
+
+
 def _build_flow_server(
-    flow_file: Path,
+    flow_path: Path,
     tools: list[str],
     *,
     name: str,
     server_prefix: str,
 ) -> FlowServer:
-    """Load *flow_file* + ``--tools`` modules and build a :class:`FlowServer`.
+    """Load a flow file *or directory* + ``--tools`` modules into a :class:`FlowServer`.
+
+    When *flow_path* is a single ``.flow.*`` file, that one flow is served.
+    When it is a directory, every flow under it is registered and the
+    active/reviewed flows are exposed (drafts/archived withheld) — the
+    ``chainweaver opencode setup --flows`` workflow points here (issues #279).
 
     Factored out of :func:`serve_command` so tests can assert the exposed
-    tool set without entering the blocking transport loop.  Mirrors the
-    flow/tool loading performed by ``run`` (issue #129).
+    tool set without entering the blocking transport loop.
 
-    Exit codes match the CLI contract: ``2`` for a missing flow file or
+    Exit codes match the CLI contract: ``2`` for a missing path or
     un-importable tools module, ``1`` for a malformed flow file or a missing
     ``mcp`` extra.
     """
-    _require_existing_file(flow_file)
     flow_server_cls = _import_flow_server()
-    try:
-        flow = _load_flow_file(flow_file)
-    except FlowSerializationError as exc:
-        typer.echo(f"chainweaver: {exc.detail}", err=True)
-        raise typer.Exit(code=1) from exc
 
-    registry = FlowRegistry()
-    registry.register_flow(flow)
+    if flow_path.is_dir():
+        registry, flow_names = _load_flows_from_dir(flow_path)
+    else:
+        _require_existing_file(flow_path)
+        try:
+            flow = _load_flow_file(flow_path)
+        except FlowSerializationError as exc:
+            typer.echo(f"chainweaver: {exc.detail}", err=True)
+            raise typer.Exit(code=1) from exc
+        registry = FlowRegistry()
+        registry.register_flow(flow)
+        flow_names = [flow.name]
+
     executor = FlowExecutor(registry=registry)
 
     seen_tool_names: set[str] = set()
@@ -232,15 +272,17 @@ def _build_flow_server(
             executor.register_tool(tool_obj)
             seen_tool_names.add(tool_obj.name)
 
-    # ``chainweaver serve <flow_file>`` is an explicit operator action on a
-    # chosen flow, so it is the deliberate governance-filter override that
-    # issue #360 reserves ``force_expose`` for — serve exactly the named flow.
+    # ``chainweaver serve <path>`` is an explicit operator action on a chosen
+    # flow (or curated directory), so it is the deliberate governance-filter
+    # override that issue #360 reserves ``force_expose`` for — serve exactly the
+    # named flows.  The directory path pre-filters to active/reviewed names.
     return flow_server_cls(
         executor,
         name=name,
-        flow_names=[flow.name],
+        flow_names=flow_names,
         server_prefix=server_prefix,
         force_expose=True,
+        allowed_lifecycles=_EXPOSABLE_LIFECYCLES,
     )
 
 
@@ -252,13 +294,15 @@ def serve_command(
     name: str = _SERVE_NAME_OPTION,
     prefix: str = _SERVE_PREFIX_OPTION,
 ) -> None:
-    """Expose a flow's compiled tools over MCP (issues #72, #230).
+    """Expose compiled flow tools over MCP (issues #72, #230, #279).
 
-    Loads ``flow_file``, registers the tools from each ``--tools`` module,
-    and mounts the flow on a :class:`~chainweaver.mcp.FlowServer` so
-    MCP-aware agents see the whole compiled flow as a single deterministic
-    tool — the inverse of consuming MCP tools into a flow.  The process then
-    blocks serving the chosen transport (Ctrl-C to stop).
+    ``flow_file`` may be a single ``.flow.*`` file or a directory of flow
+    files; a directory exposes its active/reviewed flows (drafts/archived
+    withheld). Registers the tools from each ``--tools`` module and mounts the
+    flows on a :class:`~chainweaver.mcp.FlowServer` so MCP-aware agents see each
+    compiled flow as a single deterministic tool — the inverse of consuming MCP
+    tools into a flow.  The process then blocks serving the chosen transport
+    (Ctrl-C to stop).
 
     The startup banner is written to stderr so the ``stdio`` transport keeps
     stdout as a clean MCP wire channel.

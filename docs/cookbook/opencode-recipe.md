@@ -95,17 +95,21 @@ chainweaver opencode setup --flows --write   --workspace . \
 ```
 
 This adds (or replaces) a single `chainweaver` entry under `mcp` in your
-OpenCode config that runs `chainweaver serve` over the flows directory.
-Existing MCP servers are preserved.
+OpenCode config that runs `chainweaver serve` over the flows **directory**
+(`chainweaver serve` accepts a file or a directory; a directory exposes its
+active/reviewed flows and withholds drafts). Existing MCP servers are preserved.
 
 ### Safe naming and collisions
 
-Generated macro-tools are **prefixed** (default `cw_`) so they never shadow
-OpenCode built-ins such as `read`, `bash`, `edit`, or `write`. A high-level
-macro-flow can hide several actions behind one call, so a generic name would be
-misleading. Setup **refuses to expose colliding names** (reserved built-ins,
-names already configured, or two flows mapping to the same tool name); rename
-the flow, change `--prefix`, or pass `--allow-collisions` to override.
+`FlowServer` exposes each flow as `<prefix>__<flow.name>` — with the default
+prefix, the flow `ship_it` becomes the tool `cw__ship_it`. The `cw__` namespace
+keeps generated macro-tools from shadowing OpenCode built-ins such as `read`,
+`bash`, `edit`, or `write` (a high-level macro-flow can hide several actions
+behind one call, so a generic name would be misleading). `opencode setup`
+predicts these exact names and **refuses to expose colliding ones** (reserved
+built-ins, names already configured, or two flows mapping to the same tool
+name); rename the flow, change `--prefix`, or pass `--allow-collisions` to
+override.
 
 The mapping is stable — the same flow name and prefix always yield the same
 tool name across runs.
