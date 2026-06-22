@@ -198,14 +198,18 @@ from chainweaver.middleware import (
 from chainweaver.observation import ObservedStep, ObservedTrace, TraceRecorder
 from chainweaver.observer import ChainObserver, FlowSuggestion
 from chainweaver.opencode import (
+    OPENCODE_OBSERVE_PLUGIN_FILENAME,
     OPENCODE_TOOL_PREFIX,
     OPENCODE_TRACE_SINK,
     RESERVED_OPENCODE_TOOL_NAMES,
     OpenCodeAdapterError,
+    add_flow_server_to_config,
     build_flow_mcp_entry,
     detect_tool_name_collisions,
+    exposable_flow_lifecycle,
     normalize_opencode_event,
     normalize_opencode_events,
+    remove_flow_server_from_config,
     render_observe_plugin,
     safe_macro_tool_name,
 )
@@ -292,6 +296,7 @@ __version__ = "0.13.0"
 __all__ = [
     "BUILTIN_PROPERTIES",
     "FLOW_INPUT_STEP_INDEX",
+    "OPENCODE_OBSERVE_PLUGIN_FILENAME",
     "OPENCODE_TOOL_PREFIX",
     "OPENCODE_TRACE_SINK",
     "PROVIDER_PRICES",
@@ -449,6 +454,7 @@ __all__ = [
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
+    "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
     "backtest_flow",
@@ -466,6 +472,7 @@ __all__ = [
     "draft_flow_from_candidate",
     "evaluate_predicate",
     "evaluate_routing",
+    "exposable_flow_lifecycle",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -490,6 +497,7 @@ __all__ = [
     "optimize_tool_descriptions",
     "parse_agent_trace",
     "read_provenance",
+    "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",
     "result_to_mermaid",

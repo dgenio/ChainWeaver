@@ -36,7 +36,7 @@ from chainweaver.cli._shared import (
     app,
 )
 from chainweaver.cli.doctor import _load_json_config, _opencode_config_path
-from chainweaver.exceptions import ChainWeaverError
+from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
 from chainweaver.opencode import (
     OPENCODE_OBSERVE_PLUGIN_FILENAME,
     OPENCODE_TOOL_PREFIX,
@@ -201,13 +201,16 @@ def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
 
     Exposable = governance lifecycle in :data:`exposable_flow_lifecycle`
     (active / reviewed).  Drafts and archived flows are withheld by default.
+    Malformed flow files are skipped with a stderr warning rather than
+    aborting, matching ``chainweaver serve <dir>`` discovery semantics.
     """
     exposable: list[str] = []
     withheld: list[str] = []
     for flow_file in _iter_flow_files(flows_dir):
         try:
             flow = _load_flow_file(flow_file)
-        except ChainWeaverError:
+        except FlowSerializationError as exc:
+            typer.echo(f"chainweaver: skipping {flow_file}: {exc.detail}", err=True)
             continue
         if flow_lifecycle(flow) in exposable_flow_lifecycle:
             exposable.append(flow.name)

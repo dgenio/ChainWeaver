@@ -14,7 +14,7 @@ from chainweaver.exceptions import (
     FlowSerializationError,
 )
 from chainweaver.executor import FlowExecutor
-from chainweaver.flow import FlowLifecycle
+from chainweaver.opencode import exposable_flow_lifecycle
 from chainweaver.registry import FlowRegistry
 
 if TYPE_CHECKING:
@@ -34,10 +34,6 @@ from chainweaver.cli._shared import (
     _run_result_to_table,
     app,
 )
-
-# Flow lifecycles ``chainweaver serve <dir>`` exposes by default (issue #279):
-# active and reviewed flows only — drafts/archived are withheld.
-_EXPOSABLE_LIFECYCLES = frozenset({FlowLifecycle.ACTIVE, FlowLifecycle.REVIEWED})
 
 _RUN_INPUT_OPTION = typer.Option(
     None,
@@ -209,8 +205,9 @@ def _load_flows_from_dir(directory: Path) -> tuple[FlowRegistry, list[str]]:
 
     Malformed files are skipped with a stderr warning rather than aborting,
     matching ``chainweaver check`` discovery semantics.  Only active/reviewed
-    flows (:data:`_EXPOSABLE_LIFECYCLES`) are returned as exposable names so a
-    served directory withholds drafts/archived flows by default (issue #279).
+    flows (:data:`~chainweaver.opencode.exposable_flow_lifecycle`) are returned
+    as exposable names so a served directory withholds drafts/archived flows by
+    default (issue #279).
     """
     registry = FlowRegistry()
     exposable: list[str] = []
@@ -221,7 +218,7 @@ def _load_flows_from_dir(directory: Path) -> tuple[FlowRegistry, list[str]]:
             typer.echo(f"chainweaver: skipping {path}: {exc.detail}", err=True)
             continue
         registry.register_flow(flow, overwrite=True)
-        if flow.governance.lifecycle in _EXPOSABLE_LIFECYCLES:
+        if flow.governance.lifecycle in exposable_flow_lifecycle:
             exposable.append(flow.name)
     return registry, exposable
 
@@ -282,7 +279,7 @@ def _build_flow_server(
         flow_names=flow_names,
         server_prefix=server_prefix,
         force_expose=True,
-        allowed_lifecycles=_EXPOSABLE_LIFECYCLES,
+        allowed_lifecycles=exposable_flow_lifecycle,
     )
 
 

@@ -104,6 +104,7 @@
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
     "ModelInfo",
+    "OPENCODE_OBSERVE_PLUGIN_FILENAME",
     "OPENCODE_TOOL_PREFIX",
     "OPENCODE_TRACE_SINK",
     "ObservedStep",
@@ -159,6 +160,7 @@
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
+    "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
     "backtest_flow",
@@ -176,6 +178,7 @@
     "draft_flow_from_candidate",
     "evaluate_predicate",
     "evaluate_routing",
+    "exposable_flow_lifecycle",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -200,6 +203,7 @@
     "optimize_tool_descriptions",
     "parse_agent_trace",
     "read_provenance",
+    "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",
     "result_to_mermaid",
@@ -1097,6 +1101,11 @@
       "module": "chainweaver.proposals",
       "qualname": "ModelInfo"
     },
+    "OPENCODE_OBSERVE_PLUGIN_FILENAME": {
+      "kind": "str",
+      "module": null,
+      "qualname": null
+    },
     "OPENCODE_TOOL_PREFIX": {
       "kind": "str",
       "module": null,
@@ -1566,6 +1575,12 @@
       "qualname": "TraceRecorder",
       "signature": "() -> None"
     },
+    "add_flow_server_to_config": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "add_flow_server_to_config",
+      "signature": "(config: Mapping[str, Any] | None, entry: Mapping[str, Any], *, name: str = 'chainweaver') -> dict[str, Any]"
+    },
     "agent_trace_to_traces": {
       "kind": "function",
       "module": "chainweaver.traces",
@@ -1666,6 +1681,11 @@
       "module": "chainweaver.routing",
       "qualname": "evaluate_routing",
       "signature": "(cases: Iterable[RoutingCase], tools: Mapping[str, Tool], *, selector: ToolSelector) -> RoutingEvalResult"
+    },
+    "exposable_flow_lifecycle": {
+      "kind": "frozenset",
+      "module": null,
+      "qualname": null
     },
     "flow_from_dict": {
       "kind": "function",
@@ -1810,6 +1830,12 @@
       "module": "chainweaver.compiler_llm",
       "qualname": "read_provenance",
       "signature": "(flow_path: str | Path) -> ProposalProvenance | None"
+    },
+    "remove_flow_server_from_config": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "remove_flow_server_from_config",
+      "signature": "(config: Mapping[str, Any] | None, *, name: str = 'chainweaver') -> tuple[dict[str, Any], bool]"
     },
     "render_candidate_report": {
       "kind": "function",
