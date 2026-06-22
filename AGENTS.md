@@ -45,7 +45,7 @@ chainweaver/
 ├── contracts.py       ToolSafetyContract + SideEffectLevel/StabilityLevel/DeterminismLevel enums + merge_safety() + side_effect_exceeds() (#356) + evaluate_predicate() — determinism + operational safety vocabulary (#19, #125, #293, #9, #8)
 ├── approvals.py       ApprovalCallback Protocol + ApprovalContext/ApprovalDecision/ApprovalRecord + coerce_approval_callback — execution-time ToolSafetyContract enforcement seam (#356); mirrors decisions.py
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
-├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19) + metadata provenance (#358/#359/#371) + dry_run_fn/run_dry (#357); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125)
+├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19) + metadata provenance (#358/#359/#371) + dry_run_fn/run_dry (#357); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125); StreamingTool + ToolChunk for streamed output via run_streaming (#320)
 ├── flow.py            FlowStep (+ output_mapping #386) + Flow + DAGFlow (+ dynamic_params #316) + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8) + ContextCollisionPolicy / on_context_collision (#337)
 ├── step_index.py      Named sentinels for flow input/output validation records (#339)
 ├── _pointer.py        Dependency-free RFC-6901 JSON pointer resolver shared by executor input_mapping (#387) and contrib json_pluck
@@ -58,8 +58,8 @@ chainweaver/
 ├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
 │   ├── __init__.py    Re-exports merge_step_outputs + apply_output_mapping
 │   └── context.py     merge_step_outputs + apply_output_mapping: single context-merge honouring on_context_collision (#337) and output_mapping (#386)
-├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131)
-├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow (#134)
+├── middleware.py      FlowExecutorMiddleware Protocol + lifecycle context models + BaseMiddleware (#131); optional on_step_chunk hook + StepChunkContext for streaming steps (#320)
+├── events.py          FlowEvent streamable lifecycle payload yielded by FlowExecutor.stream_flow / stream_flow_async (#134, #389) — incl. kind="step_chunk" carrying a ToolChunk for streaming tools (#320)
 ├── cache.py           StepCache Protocol + InMemoryStepCache + FileStepCache + StepCacheKey (#127)
 ├── checkpoint.py      Checkpointer Protocol + ExecutionSnapshot + InMemoryCheckpointer + FileCheckpointer (#128)
 ├── integrations/      Optional third-party adapters (each guards its extra import)

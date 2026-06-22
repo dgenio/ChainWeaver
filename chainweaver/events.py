@@ -43,11 +43,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from chainweaver.tools import ToolChunk
+
 if TYPE_CHECKING:  # pragma: no cover — import-cycle guard
     from chainweaver.executor import ExecutionResult, StepRecord
 
 
-FlowEventKind = Literal["flow_start", "step_start", "step_end", "flow_end"]
+FlowEventKind = Literal["flow_start", "step_start", "step_chunk", "step_end", "flow_end"]
 
 
 class FlowEvent(BaseModel):
@@ -65,6 +67,8 @@ class FlowEvent(BaseModel):
     | flow_start   | ``flow_version``, ``initial_input``, ``total_steps``|
     +--------------+----------------------------------------------------+
     | step_start   | ``step_index``, ``tool_name``, ``inputs``          |
+    +--------------+----------------------------------------------------+
+    | step_chunk   | ``step_index``, ``tool_name``, ``chunk``           |
     +--------------+----------------------------------------------------+
     | step_end     | ``step_index``, ``tool_name``, ``step_record``     |
     +--------------+----------------------------------------------------+
@@ -93,6 +97,8 @@ class FlowEvent(BaseModel):
         step_record: Final :class:`~chainweaver.executor.StepRecord`
             for the step (``step_end`` only) — inspect
             ``step_record.success`` to branch.
+        chunk: The :class:`~chainweaver.tools.ToolChunk` produced by a
+            streaming step (``step_chunk`` only, issue #320).
         result: Full :class:`~chainweaver.executor.ExecutionResult`
             (``flow_end`` only).
     """
@@ -110,6 +116,7 @@ class FlowEvent(BaseModel):
     tool_name: str | None = None
     inputs: dict[str, Any] | None = None
     step_record: StepRecord | None = None
+    chunk: ToolChunk | None = None
     result: ExecutionResult | None = None
 
 

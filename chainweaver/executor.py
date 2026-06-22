@@ -78,6 +78,7 @@ from chainweaver.exceptions import (
     PredicateSyntaxError,
     SafetyCeilingError,
     SchemaValidationError,
+    ToolDefinitionError,
     ToolNotFoundError,
     ToolOutputSizeError,
     ToolTimeoutError,
@@ -104,13 +105,14 @@ from chainweaver.middleware import (
     FlowEndContext,
     FlowExecutorMiddleware,
     FlowStartContext,
+    StepChunkContext,
     StepEndContext,
     StepStartContext,
 )
 from chainweaver.observation import TraceRecorder
 from chainweaver.registry import AnyFlow, FlowRegistry
 from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
-from chainweaver.tools import Tool
+from chainweaver.tools import StreamingTool, Tool
 
 _logger = get_logger("chainweaver.executor")
 _middleware_logger = get_logger("chainweaver.middleware")
@@ -249,6 +251,19 @@ class _StreamCollectorMiddleware(BaseMiddleware):
                 step_index=ctx.step_index,
                 tool_name=ctx.tool_name,
                 inputs=dict(ctx.inputs),
+            )
+        )
+
+    def on_step_chunk(self, ctx: StepChunkContext) -> None:
+        self._emit(
+            FlowEvent(
+                kind="step_chunk",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_index,
+                tool_name=ctx.tool_name,
+                chunk=ctx.chunk,
             )
         )
 
@@ -890,7 +905,11 @@ class FlowExecutor:
     def _fire_hook(
         self,
         hook: str,
-        ctx: FlowStartContext | StepStartContext | StepEndContext | FlowEndContext,
+        ctx: FlowStartContext
+        | StepStartContext
+        | StepChunkContext
+        | StepEndContext
+        | FlowEndContext,
     ) -> None:
         """Dispatch *hook* to every registered middleware, catching exceptions.
 
@@ -986,6 +1005,9 @@ class FlowExecutor:
 
     def _fire_step_end(self, ctx: StepEndContext) -> None:
         self._fire_hook("on_step_end", ctx)
+
+    def _fire_step_chunk(self, ctx: StepChunkContext) -> None:
+        self._fire_hook("on_step_chunk", ctx)
 
     def _fire_flow_end(self, ctx: FlowEndContext) -> None:
         self._fire_hook("on_flow_end", ctx)
@@ -2609,6 +2631,25 @@ class FlowExecutor:
                 )
             )
 
+        # Streaming tool (issue #320): consume the chunk stream, emitting a
+        # ``step_chunk`` event per chunk (surfaced by ``stream_flow_async``),
+        # and use the terminal chunk's assembled — already output-schema
+        # validated — data as the step output.  The step cache is bypassed
+        # (streaming tools are I/O-bound and typically non-deterministic).
+        if isinstance(tool, StreamingTool):
+            return _finish(
+                await self._run_streaming_step_async(
+                    tool=tool,
+                    step=step,
+                    step_index=step_index,
+                    inputs=inputs,
+                    flow_name=flow_name,
+                    trace_id=trace_id,
+                    tool_attempts=tool_attempts,
+                    record_fn=_record,
+                )
+            )
+
         # Step cache lookup (issue #127 / #388) — mirrors the sync lane.  Hash
         # the *validated* inputs so equivalent payloads collapse onto one key;
         # bypass for non-cacheable tools and during replay.
@@ -2737,6 +2778,97 @@ class FlowExecutor:
                 skipped=False,
                 retry_errors=retry_errors,
             )
+        )
+
+    async def _run_streaming_step_async(
+        self,
+        *,
+        tool: StreamingTool,
+        step: FlowStep,
+        step_index: int,
+        inputs: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        tool_attempts: list[int],
+        record_fn: Callable[..., StepRecord],
+    ) -> StepRecord:
+        """Drive a :class:`StreamingTool`, emitting per-chunk events (#320).
+
+        Consumes :meth:`StreamingTool.run_streaming`, firing an
+        ``on_step_chunk`` hook per :class:`ToolChunk`, and returns the step's
+        :class:`StepRecord` built from the terminal chunk's assembled output.
+        Tool failures route through the same async ``on_error`` machinery as a
+        normal step (fail / skip / fallback).
+        """
+        tool_attempts[0] += 1
+        retry_errors: list[str] = []
+        try:
+            final_output: dict[str, Any] | None = None
+            async for chunk in tool.run_streaming(inputs):
+                self._fire_step_chunk(
+                    StepChunkContext(
+                        trace_id=trace_id,
+                        flow_name=flow_name,
+                        step_index=step_index,
+                        tool_name=step.display_name,
+                        chunk=chunk,
+                    )
+                )
+                if chunk.is_final:
+                    final_output = chunk.data
+            if final_output is None:
+                raise ToolDefinitionError(
+                    tool.name, "streaming tool produced no terminal (is_final=True) chunk."
+                )
+        except Exception as exc:
+            wrapped = self._wrap_tool_exception(step, step_index, exc)
+            log_step_error(_logger, step_index, step.display_name, wrapped)
+            return await self._apply_on_error_async(
+                step=step,
+                step_index=step_index,
+                inputs=inputs,
+                wrapped_error=wrapped,
+                retry_errors=retry_errors,
+                make_record=record_fn,
+            )
+
+        log_step_end(
+            _logger,
+            step_index,
+            step.display_name,
+            final_output,
+            redaction=self._redaction_policy,
+        )
+
+        # Step-level output contract (issue #172) — mirrors the non-streaming path.
+        if step.output_contract is not None:
+            output_contract_cls = step.resolved_output_contract
+            assert output_contract_cls is not None
+            out_contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=final_output,
+                contract=output_contract_cls,
+                context_label="step_output_contract",
+            )
+            if out_contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, out_contract_err)
+                return record_fn(
+                    inputs=inputs,
+                    outputs=None,
+                    error=out_contract_err,
+                    success=False,
+                    skipped=False,
+                    retry_errors=retry_errors,
+                )
+
+        return record_fn(
+            inputs=inputs,
+            outputs=final_output,
+            error=None,
+            success=True,
+            skipped=False,
+            retry_errors=retry_errors,
         )
 
     async def _execute_subflow_step_async(

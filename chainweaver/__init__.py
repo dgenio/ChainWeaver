@@ -196,6 +196,7 @@ from chainweaver.middleware import (
     FlowEndContext,
     FlowExecutorMiddleware,
     FlowStartContext,
+    StepChunkContext,
     StepEndContext,
     StepStartContext,
 )
@@ -259,7 +260,7 @@ from chainweaver.service import (
 from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
-from chainweaver.tools import Tool
+from chainweaver.tools import StreamingTool, Tool, ToolChunk
 from chainweaver.traces import (
     AgentTraceEvent,
     BacktestMismatch,
@@ -444,15 +445,18 @@ __all__ = [
     "StabilityLevel",
     "StepCache",
     "StepCacheKey",
+    "StepChunkContext",
     "StepDiff",
     "StepEndContext",
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StreamingTool",
     "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
+    "ToolChunk",
     "ToolDefinitionError",
     "ToolDescriptionProposal",
     "ToolNotFoundError",

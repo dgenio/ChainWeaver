@@ -38,6 +38,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
+from chainweaver.tools import ToolChunk
+
 if TYPE_CHECKING:  # pragma: no cover — import-cycle guard
     from chainweaver.executor import ExecutionResult, StepRecord
 
@@ -118,6 +120,33 @@ class StepEndContext(BaseModel):
     trace_id: str
     flow_name: str
     step_record: StepRecord
+
+
+class StepChunkContext(BaseModel):
+    """Context passed to ``on_step_chunk`` for a streaming step (issue #320).
+
+    Fired once per :class:`~chainweaver.tools.ToolChunk` produced by a
+    :class:`~chainweaver.tools.StreamingTool` while it runs under
+    :meth:`~chainweaver.executor.FlowExecutor.stream_flow_async` — interleaved
+    between that step's ``on_step_start`` and ``on_step_end``.  Non-streaming
+    tools and the non-streaming execution paths never fire it, so this hook is
+    purely additive.
+
+    Attributes:
+        trace_id: UUID4 hex string matching the parent flow's trace id.
+        flow_name: Name of the flow being executed.
+        step_index: Zero-based position of the streaming step in the flow.
+        tool_name: Name of the streaming tool producing the chunk.
+        chunk: The :class:`~chainweaver.tools.ToolChunk` just produced.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    trace_id: str
+    flow_name: str
+    step_index: int
+    tool_name: str
+    chunk: ToolChunk
 
 
 class FlowEndContext(BaseModel):
@@ -202,6 +231,16 @@ class BaseMiddleware:
     def on_step_end(self, ctx: StepEndContext) -> None:
         """Default no-op."""
 
+    def on_step_chunk(self, ctx: StepChunkContext) -> None:
+        """Default no-op (issue #320).
+
+        Fired per :class:`~chainweaver.tools.ToolChunk` while a streaming step
+        runs under ``stream_flow_async``.  Optional and additive — it is not
+        part of the :class:`FlowExecutorMiddleware` Protocol, so existing
+        middleware are unaffected; the executor dispatches it only to
+        middleware that define it.
+        """
+
     def on_flow_end(self, ctx: FlowEndContext) -> None:
         """Default no-op."""
 
@@ -211,6 +250,7 @@ __all__ = [
     "FlowEndContext",
     "FlowExecutorMiddleware",
     "FlowStartContext",
+    "StepChunkContext",
     "StepEndContext",
     "StepStartContext",
 ]

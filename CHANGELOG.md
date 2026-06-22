@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming tool output propagation** (#320): a new
+  `chainweaver.StreamingTool` (a `Tool` subclass) produces its output as a
+  stream of `chainweaver.ToolChunk` objects via an async `run_streaming`
+  generator — zero or more intermediate chunks followed by one terminal
+  `is_final=True` chunk whose data is the schema-validated assembled output.
+  `stream_flow_async` surfaces each chunk as a new `FlowEvent(kind="step_chunk",
+  chunk=...)`, interleaved between `step_start` and `step_end`, so real-time
+  pipelines (voice, A2A, SSE) can consume partial output as it is produced.
+  Streaming tools are fully backward compatible: on the non-streaming paths
+  (`run` / `run_async` / sync `execute_flow` / non-streamed
+  `execute_flow_async`) they transparently drain to the assembled output and
+  behave like any other tool. A new optional `on_step_chunk` middleware hook
+  (with a `StepChunkContext`) receives chunks; it is additive and dispatched
+  only to middleware that define it, so existing middleware are unaffected.
+
 - **`stream_flow_async` and streamed-run cancellation** (#389): a new
   `FlowExecutor.stream_flow_async(...)` async generator yields the same
   `flow_start → (step_start → step_end)* → flow_end` `FlowEvent` sequence as

@@ -146,15 +146,18 @@
     "StabilityLevel",
     "StepCache",
     "StepCacheKey",
+    "StepChunkContext",
     "StepDiff",
     "StepEndContext",
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StreamingTool",
     "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
+    "ToolChunk",
     "ToolDefinitionError",
     "ToolDescriptionProposal",
     "ToolNotFoundError",
@@ -835,11 +838,12 @@
     "FlowEvent": {
       "kind": "pydantic-model",
       "model_fields": {
+        "chunk": "chainweaver.tools.ToolChunk | NoneType",
         "flow_name": "str",
         "flow_version": "str | NoneType",
         "initial_input": "dict[str, Any] | NoneType",
         "inputs": "dict[str, Any] | NoneType",
-        "kind": "Literal['flow_start', 'step_start', 'step_end', 'flow_end']",
+        "kind": "Literal['flow_start', 'step_start', 'step_chunk', 'step_end', 'flow_end']",
         "result": "chainweaver.executor.ExecutionResult | NoneType",
         "step_index": "int | NoneType",
         "step_record": "chainweaver.executor.StepRecord | NoneType",
@@ -1445,6 +1449,18 @@
       "module": "chainweaver.cache",
       "qualname": "StepCacheKey"
     },
+    "StepChunkContext": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "chunk": "chainweaver.tools.ToolChunk",
+        "flow_name": "str",
+        "step_index": "int",
+        "tool_name": "str",
+        "trace_id": "str"
+      },
+      "module": "chainweaver.middleware",
+      "qualname": "StepChunkContext"
+    },
     "StepDiff": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -1522,6 +1538,12 @@
       "module": "chainweaver.middleware",
       "qualname": "StepStartContext"
     },
+    "StreamingTool": {
+      "kind": "class",
+      "module": "chainweaver.tools",
+      "qualname": "StreamingTool",
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], stream_fn: Callable[[Any], AsyncIterator[ToolChunk]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None, metadata: dict[str, Any] | None = None) -> None"
+    },
     "StructuredLLMFn": {
       "kind": "class",
       "module": "chainweaver.proposals",
@@ -1550,6 +1572,15 @@
       "kind": "GenericAlias",
       "module": "builtins",
       "qualname": "tuple"
+    },
+    "ToolChunk": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "data": "Any",
+        "is_final": "bool"
+      },
+      "module": "chainweaver.tools",
+      "qualname": "ToolChunk"
     },
     "ToolDefinitionError": {
       "kind": "class",
