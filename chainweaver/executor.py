@@ -20,7 +20,7 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -215,15 +215,19 @@ class _RunScopedState:
 class _StreamCollectorMiddleware(BaseMiddleware):
     """Per-call middleware that pushes lifecycle events onto a queue.
 
-    Used by :meth:`FlowExecutor.stream_flow` to bridge the lifecycle
-    hook surface to a generator yielding :class:`FlowEvent` payloads.
+    Used by :meth:`FlowExecutor.stream_flow` (sync, thread-backed queue) and
+    :meth:`FlowExecutor.stream_flow_async` (asyncio queue) to bridge the
+    lifecycle hook surface to a generator yielding :class:`FlowEvent`
+    payloads.  *emit* is the queue's enqueue callable —
+    :meth:`queue.Queue.put` for the sync variant, :meth:`asyncio.Queue.put_nowait`
+    for the async one (the queues are unbounded, so neither blocks).
     """
 
-    def __init__(self, events: queue.Queue[FlowEvent | _StreamSentinel]) -> None:
-        self._events = events
+    def __init__(self, emit: Callable[[FlowEvent], None]) -> None:
+        self._emit = emit
 
     def on_flow_start(self, ctx: FlowStartContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="flow_start",
                 flow_name=ctx.flow_name,
@@ -236,7 +240,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
         )
 
     def on_step_start(self, ctx: StepStartContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="step_start",
                 flow_name=ctx.flow_name,
@@ -249,7 +253,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
         )
 
     def on_step_end(self, ctx: StepEndContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="step_end",
                 flow_name=ctx.flow_name,
@@ -262,7 +266,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
         )
 
     def on_flow_end(self, ctx: FlowEndContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="flow_end",
                 flow_name=ctx.flow_name,
@@ -2969,6 +2973,8 @@ class FlowExecutor:
         initial_input: dict[str, Any],
         *,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> Iterator[FlowEvent]:
         """Execute a flow and yield :class:`FlowEvent` lifecycle events (#134).
 
@@ -2986,17 +2992,23 @@ class FlowExecutor:
         The flow runs on a background worker thread; events are delivered
         through a synchronized queue.
 
-        **Cancellation is not supported** for the sync variant.  If the
-        consumer breaks out of the iteration (or otherwise lets the
+        **Consumer-driven cancellation is limited** for the sync variant.
+        If the consumer breaks out of the iteration (or otherwise lets the
         generator be garbage-collected), the generator's ``finally``
         block blocks on ``thread.join()`` until the background flow
         finishes — for a 10-step flow with a long step 3 that means
         the caller's "stop iterating" intent is silently translated
         into "block here until everything completes".  A ``WARNING``
         is logged via the ``chainweaver.executor`` logger when this
-        happens so the behavior shows up in production traces.  For
-        proper cancellation use the async variant once issue #80
-        lands.
+        happens so the behavior shows up in production traces.
+
+        A ``deadline`` / ``cancel_token`` *can* be supplied (issue #389):
+        they are forwarded to the underlying :meth:`execute_flow` and
+        checked at step boundaries on the worker thread, so an in-flight
+        tool always finishes but the flow stops before the next step —
+        the same cooperative contract as :meth:`execute_flow`.  For
+        cancellation that also stops the consumer's ``await`` promptly,
+        use :meth:`stream_flow_async`.
 
         Hook exceptions and middleware exceptions still follow the
         catch-and-log contract from :class:`FlowExecutorMiddleware`: a
@@ -3008,6 +3020,12 @@ class FlowExecutor:
                 step.
             force: When ``True``, bypass the status guard and execute
                 even if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional wall-clock deadline (issue #142 / #389),
+                forwarded to :meth:`execute_flow` and checked between steps
+                on the worker thread.
+            cancel_token: Optional :class:`CancellationToken` (issue #142 /
+                #389), forwarded and checked between steps on the worker
+                thread.
 
         Yields:
             :class:`~chainweaver.events.FlowEvent` instances in the order
@@ -3021,7 +3039,7 @@ class FlowExecutor:
                 *force* is ``False``.  Same re-raise behavior.
         """
         events: queue.Queue[FlowEvent | _StreamSentinel] = queue.Queue()
-        collector = _StreamCollectorMiddleware(events)
+        collector = _StreamCollectorMiddleware(events.put)
         exc_holder: list[BaseException] = []
 
         # Register the event collector as *run-scoped* middleware on the worker
@@ -3033,7 +3051,13 @@ class FlowExecutor:
         def _worker() -> None:
             try:
                 with self._scoped_middleware(collector):
-                    self.execute_flow(flow_name, initial_input, force=force)
+                    self.execute_flow(
+                        flow_name,
+                        initial_input,
+                        force=force,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
             except BaseException as exc:
                 exc_holder.append(exc)
             finally:
@@ -3069,6 +3093,101 @@ class FlowExecutor:
             # No cleanup needed: the collector lived on the worker thread's
             # run-scoped middleware slot (issue #336) and was popped when the
             # worker's ``_scoped_middleware`` context exited.
+
+    async def stream_flow_async(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+    ) -> AsyncIterator[FlowEvent]:
+        """Async-native streaming counterpart to :meth:`stream_flow` (#389).
+
+        Drives :meth:`execute_flow_async` directly on the calling event loop —
+        no worker thread — and yields the same lifecycle events in the same
+        order::
+
+            flow_start
+            (step_start, step_end)*       # one pair per executed step
+            flow_end                       # on normal completion
+
+        Steps that fail before input resolution (tool-not-found, input-mapping)
+        emit ``step_end`` without a preceding ``step_start`` — the same
+        middleware contract as the sync variant.
+
+        Unlike :meth:`stream_flow`, cancellation is prompt and cooperative:
+        passing a ``cancel_token`` (or a ``deadline``) ends the stream at the
+        next step boundary by raising
+        :class:`~chainweaver.exceptions.FlowCancelledError` from the iterator —
+        its :attr:`~chainweaver.exceptions.FlowCancelledError.result` carries
+        the partial run.  No ``flow_end`` is emitted on cancellation (execution
+        raised before the flow-end hook).  If the consumer stops iterating
+        early, the backing :meth:`execute_flow_async` task is cancelled.
+
+        The async lane's feature support applies (issue #388): composed
+        sub-flows, the step cache, and checkpoints work; conditional branching
+        and decision callbacks raise :class:`AsyncLaneUnsupportedError` before
+        any event is emitted.
+
+        Args:
+            flow_name: Name of the flow to execute.
+            initial_input: Initial key/value context passed to the first step.
+            force: When ``True``, bypass the status guard.
+            deadline: Optional wall-clock deadline (issue #142); checked
+                between steps / DAG levels.
+            cancel_token: Optional :class:`CancellationToken` (issue #142);
+                checked between steps / DAG levels.
+
+        Yields:
+            :class:`~chainweaver.events.FlowEvent` instances in the order above.
+
+        Raises:
+            FlowCancelledError: When *deadline* has passed or *cancel_token* is
+                cancelled at a step boundary.
+            AsyncLaneUnsupportedError: When the flow uses async-unsupported
+                features (raised before any event is yielded).
+        """
+        events: asyncio.Queue[FlowEvent | _StreamSentinel] = asyncio.Queue()
+        collector = _StreamCollectorMiddleware(events.put_nowait)
+        exc_holder: list[BaseException] = []
+
+        async def _runner() -> None:
+            # Register the collector as run-scoped middleware on this task's
+            # context (issue #336): ``execute_flow_async`` inherits it through
+            # its own ``_run_scope`` copy, so concurrent streams never see each
+            # other's events and the shared middleware list is never mutated.
+            try:
+                with self._scoped_middleware(collector):
+                    await self.execute_flow_async(
+                        flow_name,
+                        initial_input,
+                        force=force,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
+            except BaseException as exc:  # surfaced from the consumer below
+                exc_holder.append(exc)
+            finally:
+                events.put_nowait(_STREAM_SENTINEL)
+
+        task = asyncio.create_task(_runner())
+        try:
+            while True:
+                item = await events.get()
+                if isinstance(item, _StreamSentinel):
+                    if exc_holder:
+                        raise exc_holder[0]
+                    return
+                yield item
+        finally:
+            # Consumer stopped early (``break`` / ``aclose``) or an event was
+            # re-raised: cancel the backing run so it cannot outlive the stream.
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     # ------------------------------------------------------------------
     # Internal helpers

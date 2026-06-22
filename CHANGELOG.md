@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`stream_flow_async` and streamed-run cancellation** (#389): a new
+  `FlowExecutor.stream_flow_async(...)` async generator yields the same
+  `flow_start → (step_start → step_end)* → flow_end` `FlowEvent` sequence as
+  `stream_flow`, driving `execute_flow_async` directly on the calling loop
+  (no worker thread). A `cancel_token` / `deadline` ends the stream promptly
+  at the next step boundary, raising `FlowCancelledError` with the partial run
+  on `.result`; abandoning the iterator cancels the backing task. The sync
+  `stream_flow` also gains optional `cancel_token` / `deadline` parameters,
+  checked at step boundaries on the worker thread (the in-flight step still
+  completes). Event ordering and the "observability never aborts a flow"
+  contract are unchanged.
+
 - **Async-lane parity: cache, checkpoint resume, sub-flow composition**
   (#388): `execute_flow_async` now consults the step cache (records
   `StepRecord.cached=True` on hits and skips `Tool.run_async`), writes
