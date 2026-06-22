@@ -118,6 +118,7 @@ nav:
           - Before/after MCP-style flow: cookbook/mcp-before-after.md
           - LangGraph node: cookbook/langgraph-node.md
           - OpenAI Agents SDK tool: cookbook/openai-agents-tool.md
+          - OpenCode observe / compile / expose: cookbook/opencode-recipe.md
           - Release-readiness workflow: cookbook/release-readiness.md
           - Offline policy evaluation (skdr-eval): cookbook/policy-eval-skdr.md
           - Offline LLM-assisted flow proposals: cookbook/offline-llm-flow-proposals.md

@@ -104,9 +104,13 @@
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
     "ModelInfo",
+    "OPENCODE_OBSERVE_PLUGIN_FILENAME",
+    "OPENCODE_TOOL_PREFIX",
+    "OPENCODE_TRACE_SINK",
     "ObservedStep",
     "ObservedTrace",
     "OfflineLLMError",
+    "OpenCodeAdapterError",
     "OptimizationStrategy",
     "OutputMappingError",
     "PROVIDER_PRICES",
@@ -117,6 +121,7 @@
     "PromptBudgetExceededError",
     "ProposalProvenance",
     "ProposalStatus",
+    "RESERVED_OPENCODE_TOOL_NAMES",
     "RateLimitExceededError",
     "Recommendation",
     "RedactionPolicy",
@@ -155,9 +160,11 @@
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
+    "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
     "backtest_flow",
+    "build_flow_mcp_entry",
     "check_flow_compatibility",
     "classify_safety",
     "cli",
@@ -165,11 +172,13 @@
     "coerce_decision_callback",
     "compile_flow",
     "description_proposal_schema",
+    "detect_tool_name_collisions",
     "discover_flows",
     "discover_tools",
     "draft_flow_from_candidate",
     "evaluate_predicate",
     "evaluate_routing",
+    "exposable_flow_lifecycle",
     "flow_from_dict",
     "flow_from_json",
     "flow_from_yaml",
@@ -188,12 +197,17 @@
     "merge_safety",
     "mine_routing_cases",
     "minimize_failure",
+    "normalize_opencode_event",
+    "normalize_opencode_events",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
     "parse_agent_trace",
     "read_provenance",
+    "remove_flow_server_from_config",
     "render_candidate_report",
+    "render_observe_plugin",
     "result_to_mermaid",
+    "safe_macro_tool_name",
     "schema_fingerprint",
     "score_candidate",
     "side_effect_exceeds",
@@ -1087,6 +1101,21 @@
       "module": "chainweaver.proposals",
       "qualname": "ModelInfo"
     },
+    "OPENCODE_OBSERVE_PLUGIN_FILENAME": {
+      "kind": "str",
+      "module": null,
+      "qualname": null
+    },
+    "OPENCODE_TOOL_PREFIX": {
+      "kind": "str",
+      "module": null,
+      "qualname": null
+    },
+    "OPENCODE_TRACE_SINK": {
+      "kind": "str",
+      "module": null,
+      "qualname": null
+    },
     "ObservedStep": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -1116,6 +1145,12 @@
       "module": "chainweaver.exceptions",
       "qualname": "OfflineLLMError",
       "signature": "(detail: str) -> None"
+    },
+    "OpenCodeAdapterError": {
+      "kind": "class",
+      "module": "chainweaver.opencode",
+      "qualname": "OpenCodeAdapterError",
+      "signature": null
     },
     "OptimizationStrategy": {
       "kind": "enum",
@@ -1194,6 +1229,11 @@
       "kind": "enum",
       "module": "chainweaver.service",
       "qualname": "ProposalStatus"
+    },
+    "RESERVED_OPENCODE_TOOL_NAMES": {
+      "kind": "frozenset",
+      "module": null,
+      "qualname": null
     },
     "RateLimitExceededError": {
       "kind": "class",
@@ -1535,6 +1575,12 @@
       "qualname": "TraceRecorder",
       "signature": "() -> None"
     },
+    "add_flow_server_to_config": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "add_flow_server_to_config",
+      "signature": "(config: Mapping[str, Any] | None, entry: Mapping[str, Any], *, name: str = 'chainweaver') -> dict[str, Any]"
+    },
     "agent_trace_to_traces": {
       "kind": "function",
       "module": "chainweaver.traces",
@@ -1552,6 +1598,12 @@
       "module": "chainweaver.traces",
       "qualname": "backtest_flow",
       "signature": "(flow: Flow, events: Sequence[AgentTraceEvent]) -> BacktestReport"
+    },
+    "build_flow_mcp_entry": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "build_flow_mcp_entry",
+      "signature": "(*, flows_dir: str, tools_module: str | None = None, prefix: str = 'cw_') -> dict[str, Any]"
     },
     "check_flow_compatibility": {
       "kind": "function",
@@ -1594,6 +1646,12 @@
       "qualname": "description_proposal_schema",
       "signature": "() -> dict[str, Any]"
     },
+    "detect_tool_name_collisions": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "detect_tool_name_collisions",
+      "signature": "(flow_names: Iterable[str], *, known_tool_names: Iterable[str] = (), prefix: str = 'cw_') -> dict[str, str]"
+    },
     "discover_flows": {
       "kind": "function",
       "module": "chainweaver.plugins",
@@ -1623,6 +1681,11 @@
       "module": "chainweaver.routing",
       "qualname": "evaluate_routing",
       "signature": "(cases: Iterable[RoutingCase], tools: Mapping[str, Tool], *, selector: ToolSelector) -> RoutingEvalResult"
+    },
+    "exposable_flow_lifecycle": {
+      "kind": "frozenset",
+      "module": null,
+      "qualname": null
     },
     "flow_from_dict": {
       "kind": "function",
@@ -1732,6 +1795,18 @@
       "qualname": "minimize_failure",
       "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, failing_input: dict[str, Any], prop: FlowProperty, *, max_rounds: int = 50) -> dict[str, Any]"
     },
+    "normalize_opencode_event": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "normalize_opencode_event",
+      "signature": "(payload: Any, *, redaction: RedactionPolicy | None = None) -> AgentTraceEvent | None"
+    },
+    "normalize_opencode_events": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "normalize_opencode_events",
+      "signature": "(payloads: Iterable[Any], *, redaction: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
+    },
     "optimize_new_tool_description": {
       "kind": "function",
       "module": "chainweaver.optimizer",
@@ -1756,17 +1831,35 @@
       "qualname": "read_provenance",
       "signature": "(flow_path: str | Path) -> ProposalProvenance | None"
     },
+    "remove_flow_server_from_config": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "remove_flow_server_from_config",
+      "signature": "(config: Mapping[str, Any] | None, *, name: str = 'chainweaver') -> tuple[dict[str, Any], bool]"
+    },
     "render_candidate_report": {
       "kind": "function",
       "module": "chainweaver.traces",
       "qualname": "render_candidate_report",
       "signature": "(candidates: Sequence[CandidateScore], *, limit: int | None = None) -> str"
     },
+    "render_observe_plugin": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "render_observe_plugin",
+      "signature": "(*, sink: str = '.chainweaver/traces/opencode.jsonl', redact: bool = True) -> str"
+    },
     "result_to_mermaid": {
       "kind": "function",
       "module": "chainweaver.viz",
       "qualname": "result_to_mermaid",
       "signature": "(result: ExecutionResult, *, direction: str = 'LR') -> str"
+    },
+    "safe_macro_tool_name": {
+      "kind": "function",
+      "module": "chainweaver.opencode",
+      "qualname": "safe_macro_tool_name",
+      "signature": "(flow_name: str, *, prefix: str = 'cw_') -> str"
     },
     "schema_fingerprint": {
       "kind": "function",

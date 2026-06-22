@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenCode integration** (#276, #277, #278, #279, #280, #282): observe →
+  suggest → compile → expose for OpenCode, end to end and reversible.
+  - *Trace adapter* (#278/#276): `chainweaver.opencode.normalize_opencode_event`
+    / `normalize_opencode_events` convert OpenCode plugin tool-execution
+    payloads into vendor-neutral `AgentTraceEvent`s — tolerant of key-spelling
+    variants, redaction on by default, unknown fields preserved under
+    `metadata`, non-tool events skipped, deterministic output (absent
+    timestamps stay `None`).
+  - *Observe mode* (#276): `chainweaver opencode capture` reads plugin events
+    from stdin and appends normalized JSONL to a workspace-local sink
+    (`.chainweaver/traces/opencode.jsonl`); malformed input fails to stderr
+    without corrupting the sink. `render_observe_plugin` emits the small,
+    auditable `.opencode/plugin/` plugin that drives it.
+  - *Safe naming* (#280): `safe_macro_tool_name` / `detect_tool_name_collisions`
+    derive prefixed (`cw_`), stable tool names and flag collisions with
+    reserved OpenCode built-ins, known tool names, or each other.
+  - *FlowServer exposure* (#279): `build_flow_mcp_entry` /
+    `add_flow_server_to_config` / `remove_flow_server_from_config` generate and
+    merge the OpenCode MCP entry; only active/reviewed flows are exposed.
+    `chainweaver serve` now accepts a **directory** of flow files (not just a
+    single file) and exposes its active/reviewed flows, so the generated entry
+    serves the whole `.chainweaver/flows` directory. `safe_macro_tool_name`
+    mirrors FlowServer's real `<prefix>__<flow.name>` naming so collision
+    detection matches what OpenCode actually sees.
+  - *Reversible setup* (#277): `chainweaver opencode setup --observe/--flows`
+    (dry-run by default, `--write` creates `.bak` backups) and `opencode
+    revert` remove only ChainWeaver-managed entries, leaving traces, flows, and
+    unrelated config untouched.
+  - *Recipe* (#282): `docs/cookbook/opencode-recipe.md` documents the full
+    workflow and safety boundaries; linked from the README integrations table.
+  - New error code `CW-E048` (`OpenCodeAdapterError`).
+
 - **Offline LLM proposer hardening** (#363, #364, #366, #367, #368, #374): the
   build-time proposers (`llm_propose_flows`, `optimize_tool_descriptions`) gain
   a coherent production-grade layer, all opt-in and back-compatible with the

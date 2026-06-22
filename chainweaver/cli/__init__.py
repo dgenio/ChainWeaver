@@ -39,6 +39,7 @@ from chainweaver.cli import (  # noqa: F401  side-effect: command registration
     fuzz,
     init,
     inspect,
+    opencode,
     record,
     run,
     service,
