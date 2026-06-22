@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
 from pydantic import BaseModel
 
 from chainweaver import (
@@ -17,6 +19,7 @@ from chainweaver import (
     ToolChunk,
 )
 from chainweaver.events import FlowEvent
+from chainweaver.exceptions import ToolDefinitionError
 
 
 class _Query(BaseModel):
@@ -201,3 +204,53 @@ async def test_streaming_tool_without_terminal_chunk_fails_step() -> None:
     )
     result = await ex.execute_flow_async("bad", {"prompt": "hi"})
     assert result.success is False
+
+
+async def test_chunk_after_terminal_is_rejected() -> None:
+    async def _extra_after_final(inp: _Query) -> AsyncIterator[ToolChunk]:
+        yield ToolChunk(data={"text": "done"}, is_final=True)
+        yield ToolChunk(data={"delta": "oops"})  # illegal: chunk after terminal
+
+    tool = StreamingTool(
+        name="g",
+        description="",
+        input_schema=_Query,
+        output_schema=_Completion,
+        stream_fn=_extra_after_final,
+    )
+    # The contract is enforced on both the streaming and the drained paths.
+    with pytest.raises(ToolDefinitionError, match="after its terminal"):
+        async for _ in tool.run_streaming({"prompt": "hi"}):
+            pass
+    with pytest.raises(ToolDefinitionError, match="after its terminal"):
+        await tool.run_async({"prompt": "hi"})
+
+
+async def test_streaming_tool_timeout_is_enforced() -> None:
+    async def _slow_stream(inp: _Query) -> AsyncIterator[ToolChunk]:
+        await asyncio.sleep(0.3)
+        yield ToolChunk(data={"text": "late"}, is_final=True)
+
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="slow",
+            version="1.0.0",
+            description="",
+            steps=[FlowStep(tool_name="g", input_mapping={"prompt": "prompt"})],
+        )
+    )
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        StreamingTool(
+            name="g",
+            description="",
+            input_schema=_Query,
+            output_schema=_Completion,
+            stream_fn=_slow_stream,
+            timeout_seconds=0.05,
+        )
+    )
+    result = await ex.execute_flow_async("slow", {"prompt": "hi"})
+    assert result.success is False
+    assert result.execution_log[0].error_type == "ToolTimeoutError"

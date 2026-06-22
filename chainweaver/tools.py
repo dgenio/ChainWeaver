@@ -674,9 +674,15 @@ class StreamingTool(Tool):
     through a non-streaming path (``run`` / ``run_async`` / the sync executor,
     or ``execute_flow_async`` without streaming consumption) it transparently
     drains the stream and returns the terminal chunk's assembled output, so it
-    behaves exactly like an ordinary tool.  Only
+    produces the same final output as an ordinary tool.  Only
     :meth:`~chainweaver.executor.FlowExecutor.stream_flow_async` surfaces the
     intermediate chunks as ``step_chunk`` events.
+
+    Streaming-step semantics (intentional, see
+    :meth:`~chainweaver.executor.FlowExecutor.execute_flow_async`): the tool's
+    ``timeout_seconds`` bounds the whole stream, but the executor's step cache
+    is bypassed and step-level ``retry`` is not applied to a streaming step —
+    a partially emitted stream cannot be safely memoised or replayed.
 
     Example::
 
@@ -717,14 +723,25 @@ class StreamingTool(Tool):
             # Non-streaming dispatch path: consume the stream and return the
             # terminal chunk's assembled output so the tool behaves like any
             # other tool under ``run`` / ``run_async`` / the sync executor.
+            # Enforce the streaming contract: exactly one terminal chunk, and
+            # it must be the last one emitted.
             final: dict[str, Any] | None = None
+            seen_final = False
             async for chunk in stream_fn(validated_input):
+                if seen_final:
+                    raise ToolDefinitionError(
+                        name,
+                        "streaming tool yielded a chunk after its terminal "
+                        "(is_final=True) chunk; the terminal chunk must be last.",
+                    )
                 if chunk.is_final:
+                    seen_final = True
                     final = chunk.data
-            if final is None:
+            if not seen_final:
                 raise ToolDefinitionError(
                     name, "streaming tool produced no terminal (is_final=True) chunk."
                 )
+            assert final is not None
             return final
 
         super().__init__(
@@ -748,14 +765,31 @@ class StreamingTool(Tool):
         (``is_final=True``) chunk's ``data`` is validated against the tool's
         ``output_schema`` (and size cap) before being yielded, so a streaming
         tool can never emit an invalid assembled output.
+
+        Enforces the streaming contract: exactly one terminal chunk, and it
+        must be the last one emitted.  A chunk after the terminal chunk, or no
+        terminal chunk at all, raises
+        :class:`~chainweaver.exceptions.ToolDefinitionError`.
         """
         validated_input = self.input_schema.model_validate(raw_inputs)
+        seen_final = False
         async for chunk in self.stream_fn(validated_input):
+            if seen_final:
+                raise ToolDefinitionError(
+                    self.name,
+                    "streaming tool yielded a chunk after its terminal "
+                    "(is_final=True) chunk; the terminal chunk must be last.",
+                )
             if chunk.is_final:
+                seen_final = True
                 validated = self._validate_output(chunk.data)
                 yield ToolChunk(data=validated, is_final=True)
             else:
                 yield chunk
+        if not seen_final:
+            raise ToolDefinitionError(
+                self.name, "streaming tool produced no terminal (is_final=True) chunk."
+            )
 
 
 def _terminal_step(flow: Flow | DAGFlow) -> FlowStep:

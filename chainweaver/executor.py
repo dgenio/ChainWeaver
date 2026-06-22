@@ -2799,11 +2799,22 @@ class FlowExecutor:
         :class:`StepRecord` built from the terminal chunk's assembled output.
         Tool failures route through the same async ``on_error`` machinery as a
         normal step (fail / skip / fallback).
+
+        The tool's ``timeout_seconds`` bounds the *whole* stream via
+        :func:`asyncio.wait_for` (a stalled stream cannot hang the loop
+        indefinitely); a breach surfaces as
+        :class:`~chainweaver.exceptions.ToolTimeoutError`, matching the
+        non-streaming path.  By design the step cache is bypassed and
+        ``step.retry`` is not applied to a streaming step: a partially consumed
+        stream (whose chunks have already been emitted downstream) cannot be
+        safely replayed or memoised.  Those semantics are intentional, not an
+        oversight.
         """
         tool_attempts[0] += 1
         retry_errors: list[str] = []
-        try:
-            final_output: dict[str, Any] | None = None
+
+        async def _consume() -> dict[str, Any] | None:
+            collected: dict[str, Any] | None = None
             async for chunk in tool.run_streaming(inputs):
                 self._fire_step_chunk(
                     StepChunkContext(
@@ -2815,8 +2826,22 @@ class FlowExecutor:
                     )
                 )
                 if chunk.is_final:
-                    final_output = chunk.data
+                    collected = chunk.data
+            return collected
+
+        try:
+            if tool.timeout_seconds is not None:
+                try:
+                    final_output: dict[str, Any] | None = await asyncio.wait_for(
+                        _consume(), timeout=tool.timeout_seconds
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise ToolTimeoutError(tool.name, tool.timeout_seconds) from exc
+            else:
+                final_output = await _consume()
             if final_output is None:
+                # ``run_streaming`` already enforces a terminal chunk; this guards
+                # the type and any future stream source that bypasses it.
                 raise ToolDefinitionError(
                     tool.name, "streaming tool produced no terminal (is_final=True) chunk."
                 )
@@ -3254,9 +3279,12 @@ class FlowExecutor:
         next step boundary by raising
         :class:`~chainweaver.exceptions.FlowCancelledError` from the iterator —
         its :attr:`~chainweaver.exceptions.FlowCancelledError.result` carries
-        the partial run.  No ``flow_end`` is emitted on cancellation (execution
-        raised before the flow-end hook).  If the consumer stops iterating
-        early, the backing :meth:`execute_flow_async` task is cancelled.
+        the partial run.  A terminal ``flow_end`` event carrying that same
+        partial result is emitted *before* the error is raised (the
+        cancellation path builds the partial via ``_make_result``, which fires
+        the flow-end hook), so a consumer sees ``flow_end`` and then the raised
+        ``FlowCancelledError``.  If the consumer stops iterating early, the
+        backing :meth:`execute_flow_async` task is cancelled.
 
         The async lane's feature support applies (issue #388): composed
         sub-flows, the step cache, and checkpoints work; conditional branching
