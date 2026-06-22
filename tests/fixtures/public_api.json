@@ -41,10 +41,14 @@
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionBudgetExceededError",
     "DecisionCallable",
     "DecisionCallback",
     "DecisionCallbackError",
     "DecisionContext",
+    "DecisionPolicy",
+    "DecisionRecord",
+    "DecisionTimeoutError",
     "DeterminismLevel",
     "DraftFlow",
     "DriftInfo",
@@ -581,6 +585,12 @@
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
     },
+    "DecisionBudgetExceededError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "DecisionBudgetExceededError",
+      "signature": "(flow_name: str, budget: int) -> None"
+    },
     "DecisionCallable": {
       "kind": "_CallableGenericAlias",
       "module": "collections.abc",
@@ -611,6 +621,34 @@
       },
       "module": "chainweaver.decisions",
       "qualname": "DecisionContext"
+    },
+    "DecisionPolicy": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "max_decisions_per_flow": "int | NoneType",
+        "on_timeout": "Literal['error', 'default']",
+        "timeout_s": "float | NoneType"
+      },
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionPolicy"
+    },
+    "DecisionRecord": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "candidates": "list[str]",
+        "chosen": "str",
+        "default_tool_name": "str",
+        "duration_ms": "float",
+        "timed_out": "bool"
+      },
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionRecord"
+    },
+    "DecisionTimeoutError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "DecisionTimeoutError",
+      "signature": "(tool_name: str, step_index: int, timeout_s: float) -> None"
     },
     "DeterminismLevel": {
       "kind": "enum",
@@ -823,7 +861,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, decision_policy: DecisionPolicy | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -1448,6 +1486,7 @@
       "model_fields": {
         "approval": "chainweaver.approvals.ApprovalRecord | NoneType",
         "cached": "bool",
+        "decision": "chainweaver.decisions.DecisionRecord | NoneType",
         "duration_ms": "float",
         "ended_at": "datetime.datetime",
         "error_code": "str | NoneType",

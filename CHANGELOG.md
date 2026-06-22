@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Decision-callback audit trail and policy controls** (#369, #370):
+  guided decision points (#102) are now visible in traces and bounded by
+  opt-in guardrails.
+  - *Audit record* (#369): `StepRecord.decision` carries a new
+    `chainweaver.decisions.DecisionRecord` (`candidates`, `chosen`,
+    `default_tool_name`, `duration_ms`, `timed_out`), populated **exactly
+    when** a registered `DecisionCallback` resolves a step. It round-trips
+    through JSON and is `None` for ordinary steps and for static fallbacks
+    where no callback ran.
+  - *Policy controls* (#370): `FlowExecutor(..., decision_policy=DecisionPolicy(...))`
+    adds a per-decision `timeout_s` (the callback runs on a bounded-join
+    worker thread; `on_timeout="error"` fails the step with the new
+    `DecisionTimeoutError` / `CW-E049`, `on_timeout="default"` falls back to
+    the step's static `tool_name` and records `timed_out=True`) and a
+    per-flow `max_decisions_per_flow` budget (exceeding it aborts the run
+    with `DecisionBudgetExceededError` / `CW-E050`). Sub-flows carry their
+    own independent budget. With `decision_policy=None` (the default),
+    behavior is unchanged.
+
+### Changed
+
+- **Determinism reclassification for decision-bearing flows** (#369,
+  breaking): a linear `Flow` or `DAGFlow` containing any step with non-empty
+  `decision_candidates` now reports `DeterminismLevel.PARTIAL` instead of
+  `FULL` (or `NONE` when `deterministic=False`), matching the existing
+  `branches` precedent — a registered callback can select different tools on
+  different runs, so the executed path is data-dependent. Consumers gating on
+  `FULL` (catalog exporters, governance policies, attestation) will see these
+  flows reclassified; this is the corrected signal.
+
 - **OpenCode integration** (#276, #277, #278, #279, #280, #282): observe →
   suggest → compile → expose for OpenCode, end to end and reversible.
   - *Trace adapter* (#278/#276): `chainweaver.opencode.normalize_opencode_event`

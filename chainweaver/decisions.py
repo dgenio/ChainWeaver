@@ -59,9 +59,9 @@ loud, not silent.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class DecisionContext(BaseModel):
@@ -92,6 +92,87 @@ class DecisionContext(BaseModel):
     default_tool_name: str
     candidates: list[str]
     context: dict[str, Any]
+
+
+class DecisionRecord(BaseModel):
+    """Audit record of a resolved guided decision point (issue #369).
+
+    Populated on a :class:`~chainweaver.executor.StepRecord` **exactly when**
+    a registered :class:`DecisionCallback` resolved the step — i.e. the step
+    declared :attr:`~chainweaver.flow.FlowStep.decision_candidates` *and* a
+    callback was configured.  Steps with no candidates, or candidates but no
+    registered callback (the static-fallback case), carry ``decision=None``.
+
+    Attributes:
+        candidates: The non-empty candidate tool names the callback chose
+            from, in declaration order.
+        chosen: The tool name the callback selected (always one of
+            ``candidates``).  Equals ``default_tool_name`` when the callback
+            re-selected the static default, or when an ``on_timeout="default"``
+            policy fell back after a timeout.
+        default_tool_name: The step's static ``tool_name`` — what would have
+            run with no callback registered.
+        duration_ms: Wall-clock time spent inside the callback, in
+            milliseconds, measured with :func:`time.perf_counter`.
+        timed_out: ``True`` when the callback exceeded
+            :attr:`DecisionPolicy.timeout_s` and an ``on_timeout="default"``
+            policy fell back to ``default_tool_name`` (issue #370).  ``False``
+            for a normal resolution.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    candidates: list[str]
+    chosen: str
+    default_tool_name: str
+    duration_ms: float
+    timed_out: bool = False
+
+
+class DecisionPolicy(BaseModel):
+    """Opt-in guardrails for the decision-callback seam (issue #370).
+
+    Decision callbacks are the one runtime seam where a flow's pace depends
+    on external code — and, via the contextweaver adapter, potentially on a
+    remote routing service.  A :class:`DecisionPolicy` bounds that seam with
+    a per-decision timeout and a per-flow decision budget so a slow or
+    runaway selector cannot stall or dominate a run.
+
+    All controls are opt-in; the executor's default (``decision_policy=None``)
+    leaves decision behavior byte-for-byte unchanged.
+
+    Attributes:
+        timeout_s: Maximum wall-clock seconds a single ``decide`` call may
+            take.  The callback runs on a bounded-join worker thread (so the
+            executor itself adds no network/LLM behavior); a call that
+            overruns is handled per :attr:`on_timeout`.  ``None`` (the
+            default) imposes no per-decision timeout.
+        max_decisions_per_flow: Ceiling on how many decision callbacks a
+            single flow execution may invoke.  Exceeding it aborts the flow
+            with :class:`~chainweaver.exceptions.DecisionBudgetExceededError`.
+            ``None`` (the default) imposes no budget.  Sub-flows run in their
+            own execution scope and so carry their own independent budget.
+        on_timeout: What to do when ``timeout_s`` is exceeded.  ``"error"``
+            (the correctness-first default) fails the step with
+            :class:`~chainweaver.exceptions.DecisionTimeoutError`; ``"default"``
+            falls back to the step's static ``tool_name`` and records the
+            fallback on the :class:`DecisionRecord` (``timed_out=True``).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    timeout_s: float | None = None
+    max_decisions_per_flow: int | None = None
+    on_timeout: Literal["error", "default"] = "error"
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> DecisionPolicy:
+        """Reject non-positive timeouts and budgets at construction time."""
+        if self.timeout_s is not None and self.timeout_s <= 0:
+            raise ValueError("DecisionPolicy.timeout_s must be positive when set.")
+        if self.max_decisions_per_flow is not None and self.max_decisions_per_flow < 1:
+            raise ValueError("DecisionPolicy.max_decisions_per_flow must be >= 1 when set.")
+        return self
 
 
 @runtime_checkable
@@ -191,3 +272,14 @@ def coerce_decision_callback(
         f"decision_callback must implement DecisionCallback or be callable; "
         f"got {type(cb).__name__}."
     )
+
+
+__all__ = [
+    "BaseDecisionCallback",
+    "DecisionCallable",
+    "DecisionCallback",
+    "DecisionContext",
+    "DecisionPolicy",
+    "DecisionRecord",
+    "coerce_decision_callback",
+]

@@ -145,7 +145,7 @@ benchmarks/                  Standalone benchmark scripts (not coverage-gated): 
 
 ### Key entry points
 
-- `FlowExecutor(..., decision_callback=...)` → wire a `DecisionCallback` for guided decision points (#102); steps with `decision_candidates` set call the callback to pick which tool to run.  Either a class with `decide(ctx)` or a bare callable is accepted (coerced via `coerce_decision_callback`).
+- `FlowExecutor(..., decision_callback=...)` → wire a `DecisionCallback` for guided decision points (#102); steps with `decision_candidates` set call the callback to pick which tool to run.  Either a class with `decide(ctx)` or a bare callable is accepted (coerced via `coerce_decision_callback`).  Each resolution is recorded on `StepRecord.decision` (`DecisionRecord`, #369).  Pass `decision_policy=DecisionPolicy(timeout_s=..., max_decisions_per_flow=..., on_timeout=...)` to bound callback latency and per-flow decision count (#370).
 - `KernelBackedExecutor(..., kernel=...)` from `chainweaver.integrations.agent_kernel` (#89) → optional `FlowExecutor` subclass that delegates `DAGFlowStep` instances with `step_type="capability"` through a `KernelProtocol`.  The base `FlowExecutor` rejects capability steps; only this subclass dispatches them.
 - `flow_to_selectable_item(flow, *, capability_id=None, tags=())` from `chainweaver.integrations.weaver_spec` (#107) → project a `Flow` or `DAGFlow` to a weaver-spec `SelectableItem` for contextweaver catalog ingestion.
 - `RoutingDecisionAdapter(client=...)` from `chainweaver.integrations.contextweaver` (#106) → `DecisionCallback` impl that asks a `ContextweaverClient` for a `RoutingDecision` and returns the selected capability id.
@@ -276,6 +276,9 @@ needing the new state must re-fetch via `get_flow`.
 `type[BaseModel] | None`. `determinism_level` is a computed
 `DeterminismLevel` (#8): linear `Flow` → `FULL` (or `NONE` if
 `deterministic=False`); `DAGFlow` with any conditional `branches` → `PARTIAL`.
+Any step (linear or DAG) with non-empty `decision_candidates` (#102) also
+downgrades the flow to `PARTIAL` (#369), since a registered callback can pick
+a different tool per run.
 
 ### `DAGFlowStep` conditional branching (#9)
 

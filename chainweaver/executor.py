@@ -53,17 +53,22 @@ from chainweaver.decisions import (
     DecisionCallable,
     DecisionCallback,
     DecisionContext,
+    DecisionPolicy,
+    DecisionRecord,
     coerce_decision_callback,
 )
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     ApprovalDeniedError,
     AsyncLaneUnsupportedError,
+    ChainWeaverError,
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     CheckpointVersionError,
+    DecisionBudgetExceededError,
     DecisionCallbackError,
+    DecisionTimeoutError,
     FlowCancelledError,
     FlowCompositionError,
     FlowExecutionError,
@@ -181,6 +186,12 @@ class _RunScopedState:
         # for the duration of an ``execute_flow(dynamic_params=...)`` call and
         # inherited by sub-flow recursion like the dry-run markers.
         self.dynamic_params: dict[str, Any] = {}
+        # Decision-budget counter (issue #370): number of decision callbacks
+        # invoked so far in this flow execution.  Compared against
+        # ``DecisionPolicy.max_decisions_per_flow``.  A sub-flow runs in its
+        # own scope (a fresh ``_run_scope``), so it starts its budget at zero
+        # rather than inheriting the parent's count.
+        self.decision_count: int = 0
 
     def copy(self) -> _RunScopedState:
         """Return a shallow per-scope clone (mutable containers duplicated).
@@ -483,6 +494,14 @@ class StepRecord(BaseModel):
             (issue #356), the :class:`~chainweaver.approvals.ApprovalRecord`
             describing the decision.  ``None`` for steps whose effective
             contract did not require approval (the common case).
+        decision: For a step resolved by a guided decision callback (issue
+            #369), the :class:`~chainweaver.decisions.DecisionRecord` capturing
+            the candidate set, the chosen tool, the static default, and the
+            callback latency.  Populated **exactly when** a registered
+            :class:`~chainweaver.decisions.DecisionCallback` resolved the step;
+            ``None`` for ordinary steps and for ``decision_candidates`` steps
+            that fell back to the static ``tool_name`` because no callback was
+            registered.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -507,6 +526,7 @@ class StepRecord(BaseModel):
     flow_name: str | None = None
     sub_result: ExecutionResult | None = None
     approval: ApprovalRecord | None = None
+    decision: DecisionRecord | None = None
 
     @model_validator(mode="after")
     def _fill_error_code(self) -> StepRecord:
@@ -716,6 +736,7 @@ class FlowExecutor:
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
         decision_callback: DecisionCallback | DecisionCallable | None = None,
+        decision_policy: DecisionPolicy | None = None,
         approval_callback: ApprovalCallback | ApprovalCallable | None = None,
         strict_safety: bool = False,
         max_side_effect_level: SideEffectLevel | None = None,
@@ -760,6 +781,10 @@ class FlowExecutor:
         self._decision_callback: DecisionCallback | None = coerce_decision_callback(
             decision_callback
         )
+        # Optional guardrails for the decision-callback seam (issue #370):
+        # a per-decision timeout and a per-flow decision budget.  ``None``
+        # (the default) leaves decision behavior byte-for-byte unchanged.
+        self._decision_policy: DecisionPolicy | None = decision_policy
         # Execution-time safety enforcement (issue #356).  All opt-in:
         # ``approval_callback`` is the seam invoked before a step whose effective
         # ``ToolSafetyContract`` has ``requires_approval=True``; ``strict_safety``
@@ -1031,6 +1056,7 @@ class FlowExecutor:
             checkpointer=self._checkpointer,
             delete_on_success=self._delete_on_success,
             decision_callback=self._decision_callback,
+            decision_policy=self._decision_policy,
             max_composition_depth=self._max_composition_depth,
             max_step_concurrency=self._max_step_concurrency,
         )
@@ -3579,6 +3605,193 @@ class FlowExecutor:
         )
         return record
 
+    def _call_decision_with_timeout(
+        self,
+        callback: DecisionCallback,
+        ctx: DecisionContext,
+        timeout_s: float,
+    ) -> tuple[str, bool]:
+        """Invoke ``callback.decide(ctx)`` with a bounded wall-clock timeout (#370).
+
+        The callback runs on a daemon worker thread joined for at most
+        *timeout_s* seconds — mirroring the threading approach
+        :meth:`stream_flow` already uses — so the executor itself never adds
+        network or LLM behavior and the determinism invariants hold.
+
+        Returns a ``(chosen, timed_out)`` pair.  When the join times out,
+        ``timed_out`` is ``True`` and ``chosen`` is an empty placeholder the
+        caller ignores; the orphaned thread cannot be force-killed and its
+        late return is discarded.  A callback exception is re-raised in the
+        calling thread so the normal :class:`DecisionCallbackError` path
+        handles it.
+        """
+        result_holder: list[str] = []
+        exc_holder: list[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result_holder.append(callback.decide(ctx))
+            except BaseException as exc:  # surfaced in the calling thread below
+                exc_holder.append(exc)
+
+        thread = threading.Thread(
+            target=_runner,
+            name=f"chainweaver-decision-{ctx.flow_name}",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout_s)
+        if thread.is_alive():
+            return "", True
+        if exc_holder:
+            raise exc_holder[0]
+        return result_holder[0], False
+
+    def _resolve_decision(
+        self,
+        step: FlowStep,
+        *,
+        step_index: int,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None,
+        started_at: datetime,
+        perf_start: float,
+    ) -> tuple[FlowStep, DecisionRecord | None, StepRecord | None]:
+        """Resolve a guided decision point (#102), recording it for audit (#369).
+
+        Returns ``(resolved_step, decision_record, failure_record)``:
+
+        * ``resolved_step`` is *step* rebound to the chosen tool (or *step*
+          unchanged when no callback ran or the default was re-selected).
+        * ``decision_record`` is the :class:`DecisionRecord` to stamp on the
+          step's trace — populated **only** when a registered callback
+          actually resolved the step; ``None`` otherwise.
+        * ``failure_record`` is a terminal failed :class:`StepRecord` (already
+          emitted to ``on_step_end``) when the callback raised, returned an
+          out-of-set name, or timed out under ``on_timeout="error"``; the
+          caller returns it immediately.  ``None`` on success.
+
+        Raises:
+            DecisionBudgetExceededError: When a :class:`DecisionPolicy` budget
+                is configured and this decision would exceed it — aborting the
+                whole flow rather than a single step (issue #370).
+        """
+        callback = self._decision_callback
+        if step.decision_candidates is None or callback is None:
+            return step, None, None
+
+        default_name = step.display_name
+        candidates = list(step.decision_candidates)
+        policy = self._decision_policy
+
+        # Per-flow decision budget (issue #370): count every decision attempt
+        # in this execution scope and abort the flow once the ceiling is passed.
+        state = self._local
+        state.decision_count += 1
+        if (
+            policy is not None
+            and policy.max_decisions_per_flow is not None
+            and state.decision_count > policy.max_decisions_per_flow
+        ):
+            raise DecisionBudgetExceededError(flow_name, policy.max_decisions_per_flow)
+
+        def _failed(err: ChainWeaverError) -> StepRecord:
+            log_step_error(_logger, step_index, default_name, err)
+            err_type, err_msg = _exc_to_strings(err)
+            record = StepRecord(
+                step_index=step_index,
+                tool_name=default_name,
+                inputs={},
+                outputs=None,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=_now_utc(),
+                duration_ms=(time.perf_counter() - perf_start) * 1000.0,
+            )
+            self._fire_step_end(
+                StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+            )
+            return record
+
+        ctx = DecisionContext(
+            trace_id=trace_id,
+            flow_name=flow_name,
+            step_index=step_index,
+            step_id=step_id,
+            default_tool_name=default_name,
+            candidates=candidates,
+            context=dict(context),
+        )
+
+        decide_t0 = time.perf_counter()
+        timed_out = False
+        try:
+            if policy is not None and policy.timeout_s is not None:
+                chosen, timed_out = self._call_decision_with_timeout(
+                    callback, ctx, policy.timeout_s
+                )
+            else:
+                chosen = callback.decide(ctx)
+        except Exception as exc:
+            err = DecisionCallbackError(
+                default_name,
+                step_index,
+                f"callback raised {type(exc).__name__}: {exc}",
+            )
+            err.__cause__ = exc
+            return step, None, _failed(err)
+        decide_ms = (time.perf_counter() - decide_t0) * 1000.0
+
+        if timed_out:
+            # ``policy`` is non-None here (timeout only fires when set).
+            assert policy is not None and policy.timeout_s is not None
+            if policy.on_timeout == "error":
+                return (
+                    step,
+                    None,
+                    _failed(DecisionTimeoutError(default_name, step_index, policy.timeout_s)),
+                )
+            # ``on_timeout="default"``: route around the (possibly still-running)
+            # callback to the step's static tool and mark the fallback.
+            decision = DecisionRecord(
+                candidates=candidates,
+                chosen=default_name,
+                default_tool_name=default_name,
+                duration_ms=decide_ms,
+                timed_out=True,
+            )
+            return step, decision, None
+
+        if chosen not in step.decision_candidates:
+            return (
+                step,
+                None,
+                _failed(
+                    DecisionCallbackError(
+                        default_name,
+                        step_index,
+                        f"callback returned '{chosen}' which is not in "
+                        f"decision_candidates={candidates!r}",
+                    )
+                ),
+            )
+
+        decision = DecisionRecord(
+            candidates=candidates,
+            chosen=chosen,
+            default_tool_name=default_name,
+            duration_ms=decide_ms,
+            timed_out=False,
+        )
+        resolved = (
+            step if chosen == default_name else step.model_copy(update={"tool_name": chosen})
+        )
+        return resolved, decision, None
+
     def _execute_step(
         self,
         step_index: int,
@@ -3635,82 +3848,28 @@ class FlowExecutor:
                 deadline=deadline,
                 cancel_token=cancel_token,
             )
-        # Resolve guided decision points (issue #102).  When the step
-        # declares ``decision_candidates`` *and* the executor has a
-        # ``decision_callback`` registered, ask the callback which
-        # candidate to invoke and rebind the step to that tool for the
-        # remainder of this call.  No callback registered → fall back to
-        # the static ``tool_name`` so flows stay runnable without the
-        # integration.  Callback failures fail the step early via
-        # ``DecisionCallbackError`` — silent fall-through would mask
-        # configuration bugs.
-        if step.decision_candidates is not None and self._decision_callback is not None:
-            try:
-                chosen = self._decision_callback.decide(
-                    DecisionContext(
-                        trace_id=trace_id,
-                        flow_name=flow_name,
-                        step_index=step_index,
-                        step_id=step_id,
-                        default_tool_name=step.display_name,
-                        candidates=list(step.decision_candidates),
-                        context=dict(context),
-                    )
-                )
-            except Exception as exc:
-                err = DecisionCallbackError(
-                    step.display_name,
-                    step_index,
-                    f"callback raised {type(exc).__name__}: {exc}",
-                )
-                err.__cause__ = exc
-                log_step_error(_logger, step_index, step.display_name, err)
-                err_type, err_msg = _exc_to_strings(err)
-                now = _now_utc()
-                record = StepRecord(
-                    step_index=step_index,
-                    tool_name=step.display_name,
-                    inputs={},
-                    outputs=None,
-                    error_type=err_type,
-                    error_message=err_msg,
-                    success=False,
-                    started_at=started_at,
-                    ended_at=now,
-                    duration_ms=(time.perf_counter() - t0) * 1000.0,
-                )
-                self._fire_step_end(
-                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
-                )
-                return record
-            if chosen not in step.decision_candidates:
-                err = DecisionCallbackError(
-                    step.display_name,
-                    step_index,
-                    f"callback returned '{chosen}' which is not in "
-                    f"decision_candidates={list(step.decision_candidates)!r}",
-                )
-                log_step_error(_logger, step_index, step.display_name, err)
-                err_type, err_msg = _exc_to_strings(err)
-                now = _now_utc()
-                record = StepRecord(
-                    step_index=step_index,
-                    tool_name=step.display_name,
-                    inputs={},
-                    outputs=None,
-                    error_type=err_type,
-                    error_message=err_msg,
-                    success=False,
-                    started_at=started_at,
-                    ended_at=now,
-                    duration_ms=(time.perf_counter() - t0) * 1000.0,
-                )
-                self._fire_step_end(
-                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
-                )
-                return record
-            if chosen != step.display_name:
-                step = step.model_copy(update={"tool_name": chosen})
+        # Resolve guided decision points (issue #102).  When the step declares
+        # ``decision_candidates`` *and* the executor has a ``decision_callback``
+        # registered, ask the callback which candidate to invoke and rebind the
+        # step to that tool for the remainder of this call.  No callback
+        # registered → fall back to the static ``tool_name`` so flows stay
+        # runnable without the integration.  ``_resolve_decision`` also records
+        # the choice for the audit trail (issue #369) and enforces any
+        # ``DecisionPolicy`` timeout / budget (issue #370); callback failures
+        # fail the step early via a returned record — silent fall-through would
+        # mask configuration bugs.
+        step, decision_record, decision_failure = self._resolve_decision(
+            step,
+            step_index=step_index,
+            context=context,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=step_id,
+            started_at=started_at,
+            perf_start=t0,
+        )
+        if decision_failure is not None:
+            return decision_failure
         # Mutable holder so ``_invoke_tool`` can report how many times the
         # primary tool was actually called.  Threading this through (instead
         # of deriving from ``len(retry_errors)``) keeps ``retry_count``
@@ -3758,6 +3917,7 @@ class FlowExecutor:
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
+                decision=decision_record,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
