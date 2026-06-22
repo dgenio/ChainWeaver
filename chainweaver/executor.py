@@ -1824,15 +1824,14 @@ class FlowExecutor:
 
         Linear and DAG flows are both supported.  The async lane
         preserves middleware, retries, the ``on_error`` policy, and
-        flow-level input/output validation.  It deliberately bypasses
-        the step cache and crash-resume checkpointer for v0.1 — those
-        features are async-unaware today and will be folded into the
-        async lane in a follow-up.
+        flow-level input/output validation.  As of issue #388 it also
+        consults the step cache (#127), writes crash-resume checkpoints
+        (resume via :meth:`resume_flow_async`, #128), and executes composed
+        sub-flow steps (``flow_name``, #75) — at parity with the sync lane.
 
         The async lane does **not** yet honour conditional branching
-        (``branches`` / ``default_next``, #9), decision callbacks
-        (``decision_candidates``, #102), or composed sub-flow steps
-        (``flow_name``, #75).  Flows declaring those features raise
+        (``branches`` / ``default_next``, #9) or decision callbacks
+        (``decision_candidates``, #102).  Flows declaring those features raise
         :class:`AsyncLaneUnsupportedError` up front — listing every
         unsupported construct — rather than executing with the directives
         silently dropped (issue #332); use the synchronous
@@ -1862,8 +1861,9 @@ class FlowExecutor:
 
         Raises:
             AsyncLaneUnsupportedError: When the flow uses conditional
-                branching, decision callbacks, or composed sub-flow steps,
-                which the async lane does not yet support (issue #332).
+                branching or decision callbacks, which the async lane does not
+                yet support (issue #332).  Composed sub-flow steps (#75) are
+                supported as of issue #388.
             FlowCancelledError: When *deadline* has passed or *cancel_token*
                 is cancelled at a step boundary.
         """
@@ -1873,6 +1873,10 @@ class FlowExecutor:
             raise FlowStatusError(flow_name, flow.status.value)
 
         self._assert_async_lane_supported(flow)
+        # Validate sub-flow composition up front (issue #75 / #388): reject
+        # cycles, over-deep nesting, and dangling references before any step
+        # runs — mirroring the synchronous lane.
+        self._validate_composition(flow)
 
         # A scoped copy per call is what makes concurrent ``execute_flow_async``
         # tasks on one event-loop thread safe: each task mutates its own
@@ -1893,25 +1897,19 @@ class FlowExecutor:
     def _assert_async_lane_supported(flow: Any) -> None:
         """Reject flows using execution features the async lane can't honour.
 
-        ``execute_flow_async`` is a v0.1 lane (issue #80).  It does not
-        yet implement the conditional-branching (#9), decision-callback
-        (#102), or composed sub-flow (#75) semantics the synchronous
-        :meth:`execute_flow` supports.  The async DAG path builds a plain
-        tool proxy per step, so those directives would be **silently
-        dropped** — producing a different result than the sync lane for the
-        same flow.  This collects *every* unsupported construct in the flow
-        and raises a single :class:`AsyncLaneUnsupportedError` **before any
-        step runs** (issue #332), so callers see the full set of reasons at
-        once and route such flows through :meth:`execute_flow` until the
-        async lane gains parity.
+        The async lane now supports composed sub-flow steps (#75), the step
+        cache, and checkpoint resume (issue #388), but still does not
+        implement conditional branching (``branches`` / ``default_next``, #9)
+        or guided decision callbacks (``decision_candidates``, #102).  Flows
+        declaring those would have the directives **silently dropped** —
+        producing a different result than the sync lane — so this collects
+        *every* still-unsupported construct and raises a single
+        :class:`AsyncLaneUnsupportedError` **before any step runs** (issue
+        #332).  Route such flows through :meth:`execute_flow` until the async
+        lane gains full parity.
         """
         unsupported: list[str] = []
         for idx, step in enumerate(flow.steps):
-            if getattr(step, "flow_name", None) is not None:
-                unsupported.append(
-                    f"step {idx} ('{step.flow_name}'): composed sub-flow "
-                    "(flow_name) steps (issue #75)"
-                )
             if getattr(step, "decision_candidates", None):
                 unsupported.append(
                     f"step {idx} ('{step.display_name}'): decision_candidates (issue #102)"
@@ -1998,7 +1996,31 @@ class FlowExecutor:
                 perf_start=flow_t0,
                 initial_input=initial_input,
             )
-            record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
+            try:
+                record = await self._execute_step_async(
+                    idx,
+                    step,
+                    context,
+                    flow_name,
+                    trace_id,
+                    deadline=deadline,
+                    cancel_token=cancel_token,
+                )
+            except FlowCancelledError as exc:
+                # Cancellation fired inside a composed sub-flow; re-anchor it to
+                # this parent flow so the parent's partial carries its completed
+                # steps — mirroring the sync lane (issue #388).
+                self._reraise_subflow_cancellation(
+                    exc,
+                    parent_flow_name=flow_name,
+                    step=step,
+                    flat_step_index=idx,
+                    prior_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                )
             log.append(record)
             if not record.success:
                 return self._make_result(
@@ -2024,6 +2046,19 @@ class FlowExecutor:
                 step_name=step.display_name,
                 logger=_logger,
                 output_mapping=step.output_mapping,
+            )
+
+            # Crash-resume checkpoint (issue #128 / #388) — write after every
+            # successful step so a fresh process can resume via
+            # ``resume_flow_async``.
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
             )
 
         if flow.output_schema is not None:
@@ -2075,8 +2110,19 @@ class FlowExecutor:
         Cancellation (issue #142) is checked between levels.
         """
         self._local.active_flow_version = flow.version
-        trace_id = _new_trace_id()
-        flow_started_at = _now_utc()
+        # Resume support (issue #128 / #388): when ``resume_snapshot`` is set,
+        # reuse its trace_id / started_at / context / log and skip the
+        # already-completed DAG levels.
+        resume = self._local.resume_snapshot
+        levels = self._compute_dag_levels(flow)
+        if resume is not None:
+            trace_id = resume.trace_id
+            flow_started_at = resume.started_at
+            start_level = resume.completed_dag_levels
+        else:
+            trace_id = _new_trace_id()
+            flow_started_at = _now_utc()
+            start_level = 0
         flow_t0 = time.perf_counter()
 
         self._fire_flow_start(
@@ -2090,7 +2136,7 @@ class FlowExecutor:
             )
         )
 
-        if flow.input_schema is not None:
+        if resume is None and flow.input_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
                 payload=initial_input,
@@ -2111,15 +2157,21 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        # Seed the context from the validated initial input, then layer any
-        # dynamic params (#316) on top — server-supplied values win over an
-        # LLM-provided key of the same name and are never in input_schema.
-        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
-        log: list[StepRecord] = []
-        flat_index = 0
-        levels = self._compute_dag_levels(flow)
+        if resume is not None:
+            context: dict[str, Any] = dict(resume.context)
+            log: list[StepRecord] = list(resume.execution_log)
+            # The flat step index continues past every step in the completed
+            # levels so resumed records keep their declaration-order indices.
+            flat_index = sum(len(level) for level in levels[:start_level])
+        else:
+            # Seed the context from the validated initial input, then layer any
+            # dynamic params (#316) on top — server-supplied values win over an
+            # LLM-provided key of the same name and are never in input_schema.
+            context = {**initial_input, **self._local.dynamic_params}
+            log = []
+            flat_index = 0
 
-        for level_idx, level_steps in enumerate(levels):
+        for level_idx, level_steps in enumerate(levels[start_level:], start=start_level):
             # Cooperative cancellation between topological levels (issue #142).
             self._check_cancellation(
                 flow_name=flow.name,
@@ -2179,7 +2231,14 @@ class FlowExecutor:
             # order in either case; ``context`` is read-only during the level
             # (outputs are merged only after it completes), so concurrent input
             # resolution is safe.
-            records = await self._run_dag_level_async(indexed_steps, context, flow.name, trace_id)
+            records = await self._run_dag_level_async(
+                indexed_steps,
+                context,
+                flow.name,
+                trace_id,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
 
             # Process results in declaration order: append to the log, abort on
             # the first failure, and reject sibling key collisions — identical
@@ -2252,6 +2311,18 @@ class FlowExecutor:
                 logger=_logger,
             )
 
+            # Crash-resume checkpoint at the level boundary (issue #128 / #388),
+            # mirroring the sync DAG lane's level-granularity snapshots.
+            self._save_dag_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_levels=level_idx + 1,
+            )
+
         if flow.output_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
@@ -2290,6 +2361,9 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> list[StepRecord]:
         """Execute one DAG level's steps, returning records in declaration order.
 
@@ -2304,14 +2378,32 @@ class FlowExecutor:
         merged into it by the caller after the level completes — so concurrent
         execution introduces no shared-state writes on the executor's side.
         Opted-in tools must themselves be safe to run concurrently.
+
+        The per-step proxy carries the step's ``flow_name`` (#75 / #388),
+        contracts, retry, and ``on_error`` so composed sub-flows and per-step
+        policies are honoured on the async lane just like the sync lane;
+        ``deadline`` / ``cancel_token`` flow into recursive sub-flow runs.
         """
 
         async def _run_one(step_index: int, step: Any) -> StepRecord:
             proxy = FlowStep(
-                tool_name=step.display_name,
+                tool_name=step.tool_name,
+                flow_name=step.flow_name,
                 input_mapping=step.input_mapping,
+                input_contract=step.input_contract,
+                output_contract=step.output_contract,
+                retry=step.retry,
+                on_error=step.on_error,
             )
-            return await self._execute_step_async(step_index, proxy, context, flow_name, trace_id)
+            return await self._execute_step_async(
+                step_index,
+                proxy,
+                context,
+                flow_name,
+                trace_id,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
 
         if self._max_step_concurrency <= 1 or len(indexed_steps) <= 1:
             return [await _run_one(idx, step) for idx, step in indexed_steps]
@@ -2333,6 +2425,9 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> StepRecord:
         """Async-native counterpart to :meth:`_execute_step`.
 
@@ -2344,10 +2439,28 @@ class FlowExecutor:
         Retries and middleware hooks (which are sync APIs) are
         applied in the same order as the sync path; ``on_error``
         fallback tools are also dispatched via ``run_async`` so MCP
-        fallbacks compose correctly.
+        fallbacks compose correctly.  Composed sub-flow steps (#75) recurse
+        through :meth:`_execute_subflow_step_async`, and the step cache (#127)
+        is consulted before ``Tool.run_async`` — both mirroring the sync lane
+        (issue #388).  ``deadline`` / ``cancel_token`` are forwarded into
+        recursive sub-flow runs so a composed run shares one budget.
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Composed sub-flow step (issue #75 / #388): recurse into the named
+        # flow on the async lane instead of invoking a tool.
+        if step.flow_name is not None:
+            return await self._execute_subflow_step_async(
+                step_index,
+                step,
+                context,
+                flow_name,
+                trace_id,
+                started_at=started_at,
+                perf_start=t0,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
         tool_attempts = [0]
         # Approval audit record (issue #356); set by the safety gate below.
         approval_record: ApprovalRecord | None = None
@@ -2360,6 +2473,7 @@ class FlowExecutor:
             success: bool,
             skipped: bool,
             retry_errors: list[str],
+            cached: bool = False,
             fallback_used: bool = False,
             fallback_tool_name: str | None = None,
         ) -> StepRecord:
@@ -2379,7 +2493,7 @@ class FlowExecutor:
                 retry_count=retry_count,
                 retry_errors=list(retry_errors),
                 skipped=skipped,
-                cached=False,
+                cached=cached,
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
@@ -2425,6 +2539,30 @@ class FlowExecutor:
                 )
             )
 
+        # Step-level input contract (issue #172) — mirrors the sync lane.
+        if step.input_contract is not None:
+            input_contract_cls = step.resolved_input_contract
+            assert input_contract_cls is not None
+            contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=inputs,
+                contract=input_contract_cls,
+                context_label="step_input_contract",
+            )
+            if contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=[],
+                    )
+                )
+
         self._fire_step_start(
             StepStartContext(
                 trace_id=trace_id,
@@ -2467,6 +2605,66 @@ class FlowExecutor:
                 )
             )
 
+        # Step cache lookup (issue #127 / #388) — mirrors the sync lane.  Hash
+        # the *validated* inputs so equivalent payloads collapse onto one key;
+        # bypass for non-cacheable tools and during replay.
+        cache_key: StepCacheKey | None = None
+        if self._step_cache is not None and tool.cacheable and not self._local.in_replay:
+            try:
+                validated = tool.input_schema.model_validate(inputs)
+            except ValidationError:
+                validated = None  # let the normal path raise
+            if validated is not None:
+                cache_key = StepCacheKey(
+                    tool_name=tool.name,
+                    schema_hash=tool.schema_hash,
+                    input_value_hash=compute_input_value_hash(validated),
+                )
+                cached_output = self._step_cache.get(cache_key)
+                if cached_output is not None:
+                    if step.output_contract is not None:
+                        cached_contract_cls = step.resolved_output_contract
+                        assert cached_contract_cls is not None
+                        cached_contract_err = self._check_step_contract(
+                            step=step,
+                            step_index=step_index,
+                            payload=cached_output,
+                            contract=cached_contract_cls,
+                            context_label="step_output_contract",
+                        )
+                        if cached_contract_err is not None:
+                            log_step_error(
+                                _logger, step_index, step.display_name, cached_contract_err
+                            )
+                            return _finish(
+                                _record(
+                                    inputs=inputs,
+                                    outputs=None,
+                                    error=cached_contract_err,
+                                    success=False,
+                                    skipped=False,
+                                    retry_errors=[],
+                                )
+                            )
+                    log_step_end(
+                        _logger,
+                        step_index,
+                        step.display_name,
+                        cached_output,
+                        redaction=self._redaction_policy,
+                    )
+                    return _finish(
+                        _record(
+                            inputs=inputs,
+                            outputs=cached_output,
+                            error=None,
+                            success=True,
+                            skipped=False,
+                            retry_errors=[],
+                            cached=True,
+                        )
+                    )
+
         retry_errors: list[str] = []
         try:
             outputs = await self._invoke_tool_async(
@@ -2496,6 +2694,36 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
+
+        # Step-level output contract (issue #172) — mirrors the sync lane,
+        # validated before the cache records anything.
+        if step.output_contract is not None:
+            output_contract_cls = step.resolved_output_contract
+            assert output_contract_cls is not None
+            out_contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=outputs,
+                contract=output_contract_cls,
+                context_label="step_output_contract",
+            )
+            if out_contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, out_contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=out_contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=retry_errors,
+                    )
+                )
+
+        # Cache write after the output has been schema-validated by
+        # ``Tool.run_async`` — never store invalid output (issue #388).
+        if cache_key is not None and self._step_cache is not None:
+            self._step_cache.set(cache_key, outputs)
         return _finish(
             _record(
                 inputs=inputs,
@@ -2506,6 +2734,104 @@ class FlowExecutor:
                 retry_errors=retry_errors,
             )
         )
+
+    async def _execute_subflow_step_async(
+        self,
+        step_index: int,
+        step: FlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        *,
+        started_at: datetime,
+        perf_start: float,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+    ) -> StepRecord:
+        """Execute a composed sub-flow step on the async lane (#75 / #388).
+
+        Async-native counterpart to :meth:`_execute_subflow_step`: resolves the
+        step's inputs, recursively ``await``s the named sub-flow via
+        :meth:`execute_flow_async`, and folds the sub-flow's final output back
+        into the parent context.  ``deadline`` / ``cancel_token`` are forwarded
+        so flow-level cancellation and the wall-clock budget are observed
+        *between* the sub-flow's own steps, sharing one budget across the
+        composed run.  Cycles and over-deep nesting are already rejected by
+        :meth:`_validate_composition` before any step runs.
+        """
+        sub_name = step.flow_name
+        assert sub_name is not None  # guaranteed by the caller / FlowStep validator
+        try:
+            sub_input = self._resolve_inputs(step, context, step_index)
+        except InputMappingError as exc:
+            log_step_error(_logger, step_index, sub_name, exc)
+            err_type, err_msg = _exc_to_strings(exc)
+            now = _now_utc()
+            return StepRecord(
+                step_index=step_index,
+                tool_name=sub_name,
+                flow_name=sub_name,
+                inputs={},
+                outputs=None,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=now,
+                duration_ms=(time.perf_counter() - perf_start) * 1000.0,
+            )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=sub_name,
+                inputs=dict(sub_input),
+                started_at=started_at,
+            )
+        )
+
+        saved_version = self._local.active_flow_version
+        try:
+            sub_result = await self.execute_flow_async(
+                sub_name,
+                sub_input,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
+        finally:
+            self._local.active_flow_version = saved_version
+
+        ended_at = _now_utc()
+        duration_ms = (time.perf_counter() - perf_start) * 1000.0
+        error_type: str | None = None
+        error_message: str | None = None
+        if not sub_result.success:
+            error_type = "FlowExecutionError"
+            error_message = f"Sub-flow '{sub_name}' failed."
+        record = StepRecord(
+            step_index=step_index,
+            tool_name=sub_name,
+            flow_name=sub_name,
+            inputs=sub_input,
+            outputs=sub_result.final_output if sub_result.success else None,
+            error_type=error_type,
+            error_message=error_message,
+            success=sub_result.success,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            sub_result=sub_result,
+        )
+        self._fire_step_end(
+            StepEndContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_record=record,
+            )
+        )
+        return record
 
     async def _invoke_tool_async(
         self,
@@ -3090,6 +3416,18 @@ class FlowExecutor:
                 has an incompatible MAJOR component relative to the version
                 this library writes (issue #395).
         """
+        flow, snapshot = self._load_snapshot_for_resume(trace_id)
+        if isinstance(flow, DAGFlow):
+            return self._resume_dag_flow(flow, snapshot)
+        return self._resume_linear_flow(flow, snapshot)
+
+    def _load_snapshot_for_resume(self, trace_id: str) -> tuple[AnyFlow, ExecutionSnapshot]:
+        """Load and drift-check the snapshot for *trace_id* (issue #128).
+
+        Shared by :meth:`resume_flow` and :meth:`resume_flow_async` so the
+        checkpointer-configured / not-found / version / drift guards stay
+        identical across the sync and async resume lanes.
+        """
         if self._checkpointer is None:
             raise CheckpointerNotConfiguredError()
         snapshot = self._checkpointer.load(trace_id)
@@ -3127,10 +3465,42 @@ class FlowExecutor:
                     f"tool '{tool_name}' schema_hash changed: "
                     f"snapshot='{snap_hash}' current='{current.schema_hash}'",
                 )
+        return flow, snapshot
 
-        if isinstance(flow, DAGFlow):
-            return self._resume_dag_flow(flow, snapshot)
-        return self._resume_linear_flow(flow, snapshot)
+    async def resume_flow_async(self, trace_id: str) -> ExecutionResult:
+        """Asynchronously resume an in-flight execution from a snapshot (#388).
+
+        Coroutine counterpart to :meth:`resume_flow`: applies the identical
+        checkpointer / version / drift guards (via
+        :meth:`_load_snapshot_for_resume`) and then continues execution on the
+        async lane — ``await``-ing each remaining step (linear) or DAG level so
+        async-fn tools run natively.  Use this to resume a run originally
+        executed via :meth:`execute_flow_async`.
+
+        Args:
+            trace_id: Trace id of the snapshot to resume.
+
+        Returns:
+            An :class:`ExecutionResult` for the (now-completed) flow.
+
+        Raises:
+            CheckpointerNotConfiguredError: When no checkpointer was configured.
+            CheckpointNotFoundError: When no snapshot exists for *trace_id*.
+            FlowNotFoundError: When the snapshot's flow is no longer registered.
+            CheckpointDriftError: When the flow version or any tool's
+                ``schema_hash`` changed since the snapshot was written.
+            CheckpointVersionError: When the snapshot's ``snapshot_version`` is
+                incompatible with this library's (issue #395).
+            AsyncLaneUnsupportedError: When the snapshot's flow uses features
+                the async lane does not support (branching / decision
+                callbacks).
+        """
+        flow, snapshot = self._load_snapshot_for_resume(trace_id)
+        self._assert_async_lane_supported(flow)
+        with self._run_scope():
+            if isinstance(flow, DAGFlow):
+                return await self._resume_dag_flow_async(flow, snapshot)
+            return await self._resume_linear_flow_async(flow, snapshot)
 
     def _resume_linear_flow(
         self,
@@ -3274,6 +3644,127 @@ class FlowExecutor:
         self._local.resume_snapshot = snapshot
         try:
             return self._execute_dag_flow(flow, dict(snapshot.initial_input))
+        finally:
+            self._local.resume_snapshot = None
+
+    async def _resume_linear_flow_async(
+        self,
+        flow: Any,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Async counterpart to :meth:`_resume_linear_flow` (issue #388).
+
+        Continues a linear execution from ``snapshot.completed_steps``,
+        ``await``-ing each remaining step so async-fn tools run natively.
+        """
+        self._local.active_flow_version = flow.version
+        trace_id = snapshot.trace_id
+        flow_name = snapshot.flow_name
+        flow_started_at = snapshot.started_at
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "Flow '%s' (async) resuming | trace_id=%s | from_step=%d",
+            flow_name,
+            trace_id,
+            snapshot.completed_steps,
+        )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(snapshot.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        context: dict[str, Any] = dict(snapshot.context)
+        log: list[StepRecord] = list(snapshot.execution_log)
+
+        for idx in range(snapshot.completed_steps, len(flow.steps)):
+            step = flow.steps[idx]
+            record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
+            log.append(record)
+
+            if not record.success:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                )
+
+            assert record.outputs is not None  # success guarantees outputs
+            context.update(
+                apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
+
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=snapshot.initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
+
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=flow_output_step_index(flow),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow_name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=dict(snapshot.initial_input),
+        )
+
+    async def _resume_dag_flow_async(
+        self,
+        flow: DAGFlow,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Async counterpart to :meth:`_resume_dag_flow` (issue #388).
+
+        Seeds the resume slot that :meth:`_execute_dag_flow_async` consults to
+        reuse the snapshot's ``trace_id`` / ``started_at`` / context / log and
+        skip the already-completed DAG levels.
+        """
+        self._local.resume_snapshot = snapshot
+        try:
+            return await self._execute_dag_flow_async(flow, dict(snapshot.initial_input))
         finally:
             self._local.resume_snapshot = None
 

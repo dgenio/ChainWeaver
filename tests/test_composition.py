@@ -21,7 +21,6 @@ from chainweaver import (
 )
 from chainweaver.cost import CostProfile
 from chainweaver.exceptions import (
-    AsyncLaneUnsupportedError,
     FlowCancelledError,
     FlowCompositionError,
 )
@@ -368,7 +367,9 @@ class TestDagAndAsync:
         assert result.final_output is not None
         assert result.final_output["b"] == 3
 
-    async def test_async_rejects_subflow_steps(self) -> None:
+    async def test_async_executes_subflow_steps(self) -> None:
+        # Composed sub-flow steps now run on the async lane (issue #388),
+        # with the nested ExecutionResult attached as ``sub_result``.
         executor = _base_executor()
         executor._registry.register_flow(
             Flow(
@@ -378,8 +379,14 @@ class TestDagAndAsync:
                 steps=[FlowStep(flow_name="inc", input_mapping={"n": "n"})],
             )
         )
-        with pytest.raises(AsyncLaneUnsupportedError, match=r"sub-flow"):
-            await executor.execute_flow_async("parent_async", {"n": 1})
+        result = await executor.execute_flow_async("parent_async", {"n": 1})
+        assert result.success is True
+        assert result.final_output is not None
+        assert result.final_output["a"] == 2
+        record = result.execution_log[0]
+        assert record.flow_name == "inc"
+        assert record.sub_result is not None
+        assert record.sub_result.success is True
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Async-lane parity: cache, checkpoint resume, sub-flow composition**
+  (#388): `execute_flow_async` now consults the step cache (records
+  `StepRecord.cached=True` on hits and skips `Tool.run_async`), writes
+  crash-resume checkpoints after each successful step / DAG level, and
+  executes composed `flow_name` sub-flow steps (with `sub_result` populated
+  and `deadline` / `cancel_token` forwarded into the sub-flow). A new
+  `FlowExecutor.resume_flow_async(trace_id)` mirrors `resume_flow` —
+  including `CheckpointDriftError` on schema drift — on the async lane. The
+  async lane still rejects conditional branching (#9) and decision callbacks
+  (#102) up front via `AsyncLaneUnsupportedError`. Sync-lane behavior is
+  unchanged.
+
 - **Decision-callback audit trail and policy controls** (#369, #370):
   guided decision points (#102) are now visible in traces and bounded by
   opt-in guardrails.
