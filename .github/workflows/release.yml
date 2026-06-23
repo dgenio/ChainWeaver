@@ -28,7 +28,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: main
 
@@ -95,7 +95,7 @@ jobs:
           echo "release=true" >> "${GITHUB_OUTPUT}"
           echo "version=${head_ref#release/v}" >> "${GITHUB_OUTPUT}"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: steps.release.outputs.release == 'true'
         with:
           ref: ${{ env.MERGE_SHA }}
