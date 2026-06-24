@@ -29,11 +29,18 @@ Cancellation
 ------------
 
 The sync :meth:`~chainweaver.executor.FlowExecutor.stream_flow`
-generator does **not** cancel in-flight execution when the consumer
-stops iterating: a background worker thread drives the flow to
-completion, then exits.  Document this loudly in any UI you build.
-The async variant (gated on issue #80) is expected to support
-:class:`asyncio.CancelledError`-driven cancellation cleanly.
+generator drives the flow on a background worker thread.  A
+``cancel_token`` / ``deadline`` (issue #389) is honored at step
+boundaries, but the worker still finishes the in-flight tool before
+the stream ends — abandoning the generator does not abort a running
+step.  Document this loudly in any UI you build.
+
+The async-native :meth:`~chainweaver.executor.FlowExecutor.stream_flow_async`
+(issue #389) cancels cooperatively: a ``cancel_token`` or ``deadline``
+ends the stream at the next step boundary by raising
+:class:`~chainweaver.exceptions.FlowCancelledError`, whose ``result``
+carries the partial run.  A terminal ``flow_end`` event is emitted
+before the error is raised.
 """
 
 from __future__ import annotations
@@ -79,7 +86,7 @@ class FlowEvent(BaseModel):
 
     Attributes:
         kind: One of ``"flow_start"`` / ``"step_start"`` /
-            ``"step_end"`` / ``"flow_end"``.
+            ``"step_chunk"`` / ``"step_end"`` / ``"flow_end"``.
         flow_name: Name of the flow being executed.
         trace_id: UUID4 hex string correlating every event in this
             stream with logs and middleware contexts.
