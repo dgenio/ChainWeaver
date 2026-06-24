@@ -29,11 +29,18 @@ Cancellation
 ------------
 
 The sync :meth:`~chainweaver.executor.FlowExecutor.stream_flow`
-generator does **not** cancel in-flight execution when the consumer
-stops iterating: a background worker thread drives the flow to
-completion, then exits.  Document this loudly in any UI you build.
-The async variant (gated on issue #80) is expected to support
-:class:`asyncio.CancelledError`-driven cancellation cleanly.
+generator drives the flow on a background worker thread.  A
+``cancel_token`` / ``deadline`` (issue #389) is honored at step
+boundaries, but the worker still finishes the in-flight tool before
+the stream ends — abandoning the generator does not abort a running
+step.  Document this loudly in any UI you build.
+
+The async-native :meth:`~chainweaver.executor.FlowExecutor.stream_flow_async`
+(issue #389) cancels cooperatively: a ``cancel_token`` or ``deadline``
+ends the stream at the next step boundary by raising
+:class:`~chainweaver.exceptions.FlowCancelledError`, whose ``result``
+carries the partial run.  A terminal ``flow_end`` event is emitted
+before the error is raised.
 """
 
 from __future__ import annotations
@@ -43,11 +50,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from chainweaver.tools import ToolChunk
+
 if TYPE_CHECKING:  # pragma: no cover — import-cycle guard
     from chainweaver.executor import ExecutionResult, StepRecord
 
 
-FlowEventKind = Literal["flow_start", "step_start", "step_end", "flow_end"]
+FlowEventKind = Literal["flow_start", "step_start", "step_chunk", "step_end", "flow_end"]
 
 
 class FlowEvent(BaseModel):
@@ -66,6 +75,8 @@ class FlowEvent(BaseModel):
     +--------------+----------------------------------------------------+
     | step_start   | ``step_index``, ``tool_name``, ``inputs``          |
     +--------------+----------------------------------------------------+
+    | step_chunk   | ``step_index``, ``tool_name``, ``chunk``           |
+    +--------------+----------------------------------------------------+
     | step_end     | ``step_index``, ``tool_name``, ``step_record``     |
     +--------------+----------------------------------------------------+
     | flow_end     | ``result``                                         |
@@ -75,7 +86,7 @@ class FlowEvent(BaseModel):
 
     Attributes:
         kind: One of ``"flow_start"`` / ``"step_start"`` /
-            ``"step_end"`` / ``"flow_end"``.
+            ``"step_chunk"`` / ``"step_end"`` / ``"flow_end"``.
         flow_name: Name of the flow being executed.
         trace_id: UUID4 hex string correlating every event in this
             stream with logs and middleware contexts.
@@ -93,6 +104,8 @@ class FlowEvent(BaseModel):
         step_record: Final :class:`~chainweaver.executor.StepRecord`
             for the step (``step_end`` only) — inspect
             ``step_record.success`` to branch.
+        chunk: The :class:`~chainweaver.tools.ToolChunk` produced by a
+            streaming step (``step_chunk`` only, issue #320).
         result: Full :class:`~chainweaver.executor.ExecutionResult`
             (``flow_end`` only).
     """
@@ -110,6 +123,7 @@ class FlowEvent(BaseModel):
     tool_name: str | None = None
     inputs: dict[str, Any] | None = None
     step_record: StepRecord | None = None
+    chunk: ToolChunk | None = None
     result: ExecutionResult | None = None
 
 

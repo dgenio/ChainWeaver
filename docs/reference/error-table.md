@@ -66,6 +66,8 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E046` | `RateLimitExceededError` | A `FlowServer` rate limiter declined the call. |
 | `CW-E047` | `FlowAuthorizationError` | A `FlowServer` authorization callback denied the call (client-safe reason code only). |
 | `CW-E048` | `OpenCodeAdapterError` | An OpenCode plugin payload could not be normalized into a trace event, or a flow name has no name-safe characters. |
+| `CW-E049` | `DecisionTimeoutError` | A decision callback exceeded the `DecisionPolicy.timeout_s` budget while `on_timeout="error"` was in effect. |
+| `CW-E050` | `DecisionBudgetExceededError` | A flow exceeded its `DecisionPolicy.max_decisions_per_flow` budget. |
 
 ## Catching strategy
 

@@ -657,8 +657,14 @@ class Flow(BaseModel):
 
         Linear :class:`Flow` instances are :class:`DeterminismLevel.FULL`
         by definition — every step always runs, in declared order — *unless*
-        the flow author explicitly opts out by setting ``deterministic=False``,
-        in which case the level is :class:`DeterminismLevel.NONE`.
+        the flow author explicitly opts out by setting ``deterministic=False``
+        (which yields :class:`DeterminismLevel.NONE`), or a step carries a
+        non-empty :attr:`FlowStep.decision_candidates` list, which downgrades
+        the flow to :class:`DeterminismLevel.PARTIAL` (issue #369).  Guided
+        decision points (#102) let a registered callback pick which candidate
+        tool runs, so the executed path is data-dependent at runtime even
+        though the step sequence is fixed — the same reason :class:`DAGFlow`
+        downgrades for ``branches``.
 
         This property reflects flow *structure* only.  Tool-level safety
         contracts are not consulted here because the flow does not have
@@ -669,6 +675,8 @@ class Flow(BaseModel):
         """
         if not self.deterministic:
             return DeterminismLevel.NONE
+        if any(step.decision_candidates for step in self.steps):
+            return DeterminismLevel.PARTIAL
         return DeterminismLevel.FULL
 
     @property
@@ -1009,13 +1017,16 @@ class DAGFlow(BaseModel):
         :class:`DeterminismLevel.PARTIAL` whenever **any** step carries a
         non-empty :attr:`DAGFlowStep.branches` list — branches make the
         executed path data-dependent at runtime, even though the graph
-        itself is fixed.  A DAG with no branches is
-        :class:`DeterminismLevel.FULL`, and any flow that explicitly opts
-        out via ``deterministic=False`` is :class:`DeterminismLevel.NONE`.
+        itself is fixed — or a non-empty
+        :attr:`DAGFlowStep.decision_candidates` list, where a registered
+        decision callback picks the tool at runtime (issue #369).  A DAG with
+        neither is :class:`DeterminismLevel.FULL`, and any flow that
+        explicitly opts out via ``deterministic=False`` is
+        :class:`DeterminismLevel.NONE`.
         """
         if not self.deterministic:
             return DeterminismLevel.NONE
-        if any(step.branches for step in self.steps):
+        if any(step.branches or step.decision_candidates for step in self.steps):
             return DeterminismLevel.PARTIAL
         return DeterminismLevel.FULL
 

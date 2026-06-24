@@ -96,6 +96,8 @@ from chainweaver.decisions import (
     DecisionCallable,
     DecisionCallback,
     DecisionContext,
+    DecisionPolicy,
+    DecisionRecord,
     coerce_decision_callback,
 )
 from chainweaver.decorators import tool
@@ -113,7 +115,9 @@ from chainweaver.exceptions import (
     ContribError,
     CostProfileError,
     DAGDefinitionError,
+    DecisionBudgetExceededError,
     DecisionCallbackError,
+    DecisionTimeoutError,
     FlowAlreadyExistsError,
     FlowAuthenticationError,
     FlowAuthorizationError,
@@ -192,6 +196,7 @@ from chainweaver.middleware import (
     FlowEndContext,
     FlowExecutorMiddleware,
     FlowStartContext,
+    StepChunkContext,
     StepEndContext,
     StepStartContext,
 )
@@ -255,7 +260,7 @@ from chainweaver.service import (
 from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
-from chainweaver.tools import Tool
+from chainweaver.tools import StreamingTool, Tool, ToolChunk
 from chainweaver.traces import (
     AgentTraceEvent,
     BacktestMismatch,
@@ -341,10 +346,14 @@ __all__ = [
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionBudgetExceededError",
     "DecisionCallable",
     "DecisionCallback",
     "DecisionCallbackError",
     "DecisionContext",
+    "DecisionPolicy",
+    "DecisionRecord",
+    "DecisionTimeoutError",
     "DeterminismLevel",
     "DraftFlow",
     "DriftInfo",
@@ -436,15 +445,18 @@ __all__ = [
     "StabilityLevel",
     "StepCache",
     "StepCacheKey",
+    "StepChunkContext",
     "StepDiff",
     "StepEndContext",
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StreamingTool",
     "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
+    "ToolChunk",
     "ToolDefinitionError",
     "ToolDescriptionProposal",
     "ToolNotFoundError",

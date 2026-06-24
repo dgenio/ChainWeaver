@@ -10,6 +10,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming tool output propagation** (#320): a new
+  `chainweaver.StreamingTool` (a `Tool` subclass) produces its output as a
+  stream of `chainweaver.ToolChunk` objects via an async `run_streaming`
+  generator — zero or more intermediate chunks followed by one terminal
+  `is_final=True` chunk whose data is the schema-validated assembled output.
+  `stream_flow_async` surfaces each chunk as a new `FlowEvent(kind="step_chunk",
+  chunk=...)`, interleaved between `step_start` and `step_end`, so real-time
+  pipelines (voice, A2A, SSE) can consume partial output as it is produced.
+  Streaming tools are fully backward compatible: on the non-streaming paths
+  (`run` / `run_async` / sync `execute_flow` / non-streamed
+  `execute_flow_async`) they transparently drain to the assembled output and
+  behave like any other tool. A new optional `on_step_chunk` middleware hook
+  (with a `StepChunkContext`) receives chunks; it is additive and dispatched
+  only to middleware that define it, so existing middleware are unaffected.
+
+- **`stream_flow_async` and streamed-run cancellation** (#389): a new
+  `FlowExecutor.stream_flow_async(...)` async generator yields the same
+  `flow_start → (step_start → step_end)* → flow_end` `FlowEvent` sequence as
+  `stream_flow`, driving `execute_flow_async` directly on the calling loop
+  (no worker thread). A `cancel_token` / `deadline` ends the stream promptly
+  at the next step boundary, raising `FlowCancelledError` with the partial run
+  on `.result`; abandoning the iterator cancels the backing task. The sync
+  `stream_flow` also gains optional `cancel_token` / `deadline` parameters,
+  checked at step boundaries on the worker thread (the in-flight step still
+  completes). Event ordering and the "observability never aborts a flow"
+  contract are unchanged.
+
+- **Async-lane parity: cache, checkpoint resume, sub-flow composition**
+  (#388): `execute_flow_async` now consults the step cache (records
+  `StepRecord.cached=True` on hits and skips `Tool.run_async`), writes
+  crash-resume checkpoints after each successful step / DAG level, and
+  executes composed `flow_name` sub-flow steps (with `sub_result` populated
+  and `deadline` / `cancel_token` forwarded into the sub-flow). A new
+  `FlowExecutor.resume_flow_async(trace_id)` mirrors `resume_flow` —
+  including `CheckpointDriftError` on schema drift — on the async lane. The
+  async lane still rejects conditional branching (#9) and decision callbacks
+  (#102) up front via `AsyncLaneUnsupportedError`. Sync-lane behavior is
+  unchanged.
+
+- **Decision-callback audit trail and policy controls** (#369, #370):
+  guided decision points (#102) are now visible in traces and bounded by
+  opt-in guardrails.
+  - *Audit record* (#369): `StepRecord.decision` carries a new
+    `chainweaver.decisions.DecisionRecord` (`candidates`, `chosen`,
+    `default_tool_name`, `duration_ms`, `timed_out`), populated **exactly
+    when** a registered `DecisionCallback` resolves a step. It round-trips
+    through JSON and is `None` for ordinary steps and for static fallbacks
+    where no callback ran.
+  - *Policy controls* (#370): `FlowExecutor(..., decision_policy=DecisionPolicy(...))`
+    adds a per-decision `timeout_s` (the callback runs on a bounded-join
+    worker thread; `on_timeout="error"` fails the step with the new
+    `DecisionTimeoutError` / `CW-E049`, `on_timeout="default"` falls back to
+    the step's static `tool_name` and records `timed_out=True`) and a
+    per-flow `max_decisions_per_flow` budget (exceeding it aborts the run
+    with `DecisionBudgetExceededError` / `CW-E050`). Sub-flows carry their
+    own independent budget. With `decision_policy=None` (the default),
+    behavior is unchanged.
+
+### Changed
+
+- **Determinism reclassification for decision-bearing flows** (#369,
+  breaking): a linear `Flow` or `DAGFlow` containing any step with non-empty
+  `decision_candidates` now reports `DeterminismLevel.PARTIAL` instead of
+  `FULL` (or `NONE` when `deterministic=False`), matching the existing
+  `branches` precedent — a registered callback can select different tools on
+  different runs, so the executed path is data-dependent. Consumers gating on
+  `FULL` (catalog exporters, governance policies, attestation) will see these
+  flows reclassified; this is the corrected signal.
+
 - **OpenCode integration** (#276, #277, #278, #279, #280, #282): observe →
   suggest → compile → expose for OpenCode, end to end and reversible.
   - *Trace adapter* (#278/#276): `chainweaver.opencode.normalize_opencode_event`

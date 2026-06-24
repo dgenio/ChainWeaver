@@ -29,13 +29,13 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from chainweaver.compat import schema_fingerprint
 from chainweaver.contracts import ToolSafetyContract, merge_safety
@@ -76,6 +76,32 @@ def _is_async_callable(fn: Callable[..., Any]) -> bool:
     if bound is None:
         bound = inspect.getattr_static(type(fn), "__call__", None)
     return bound is not None and inspect.iscoroutinefunction(bound)
+
+
+class ToolChunk(BaseModel):
+    """One streamed increment of a :class:`StreamingTool`'s output (issue #320).
+
+    A streaming tool yields a sequence of ``ToolChunk`` objects: zero or more
+    intermediate chunks (``is_final=False``) carrying partial data — tokens, an
+    A2A artifact, an SSE event — followed by exactly one terminal chunk
+    (``is_final=True``) whose :attr:`data` is the assembled output ``dict`` that
+    is validated against the tool's ``output_schema`` and merged into the flow
+    context.
+
+    Attributes:
+        data: The chunk payload.  For intermediate chunks this is arbitrary
+            partial data; for the terminal chunk it must be a ``dict``
+            compatible with the tool's ``output_schema``.  Must be
+            JSON-serializable so the chunk round-trips inside a
+            :class:`~chainweaver.events.FlowEvent`.
+        is_final: ``True`` for the single terminal chunk that carries the
+            assembled output; ``False`` for intermediate chunks.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    data: Any
+    is_final: bool = False
 
 
 class Tool:
@@ -630,6 +656,140 @@ class Tool:
         )
         wrapped._safety_declared = safety_declared
         return wrapped
+
+
+class StreamingTool(Tool):
+    """A :class:`Tool` that streams its output as a sequence of chunks (#320).
+
+    Where a plain tool returns a fully-collected ``dict``, a streaming tool
+    yields :class:`ToolChunk` objects as they are produced — LLM tokens, A2A
+    streaming events, SSE deltas — so downstream consumers (a UI, a TTS step)
+    can start working before the whole output is ready.
+
+    The streaming function is an ``async`` generator taking the validated
+    input model and yielding :class:`ToolChunk`; it must end with exactly one
+    ``is_final=True`` chunk whose ``data`` is the assembled output ``dict``.
+
+    Backwards compatibility: a ``StreamingTool`` is still a ``Tool``.  When run
+    through a non-streaming path (``run`` / ``run_async`` / the sync executor,
+    or ``execute_flow_async`` without streaming consumption) it transparently
+    drains the stream and returns the terminal chunk's assembled output, so it
+    produces the same final output as an ordinary tool.  Only
+    :meth:`~chainweaver.executor.FlowExecutor.stream_flow_async` surfaces the
+    intermediate chunks as ``step_chunk`` events.
+
+    Streaming-step semantics (intentional, see
+    :meth:`~chainweaver.executor.FlowExecutor.execute_flow_async`): the tool's
+    ``timeout_seconds`` bounds the whole stream, but the executor's step cache
+    is bypassed and step-level ``retry`` is not applied to a streaming step —
+    a partially emitted stream cannot be safely memoised or replayed.
+
+    Example::
+
+        async def _tokens(inp: Query) -> AsyncIterator[ToolChunk]:
+            text = ""
+            for token in ("hel", "lo"):
+                text += token
+                yield ToolChunk(data={"delta": token})
+            yield ToolChunk(data={"text": text}, is_final=True)
+
+        tool = StreamingTool(
+            name="generate",
+            description="Stream a completion.",
+            input_schema=Query,
+            output_schema=Completion,
+            stream_fn=_tokens,
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        input_schema: type[BaseModel],
+        output_schema: type[BaseModel],
+        stream_fn: Callable[[Any], AsyncIterator[ToolChunk]],
+        timeout_seconds: float | None = None,
+        max_output_size: int | None = None,
+        schema_version: str = "0.0.0",
+        cacheable: bool | None = None,
+        safety: ToolSafetyContract | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.stream_fn = stream_fn
+
+        async def _drain(validated_input: BaseModel) -> dict[str, Any]:
+            # Non-streaming dispatch path: consume the stream and return the
+            # terminal chunk's assembled output so the tool behaves like any
+            # other tool under ``run`` / ``run_async`` / the sync executor.
+            # Enforce the streaming contract: exactly one terminal chunk, and
+            # it must be the last one emitted.
+            final: dict[str, Any] | None = None
+            seen_final = False
+            async for chunk in stream_fn(validated_input):
+                if seen_final:
+                    raise ToolDefinitionError(
+                        name,
+                        "streaming tool yielded a chunk after its terminal "
+                        "(is_final=True) chunk; the terminal chunk must be last.",
+                    )
+                if chunk.is_final:
+                    seen_final = True
+                    final = chunk.data
+            if not seen_final:
+                raise ToolDefinitionError(
+                    name, "streaming tool produced no terminal (is_final=True) chunk."
+                )
+            assert final is not None
+            return final
+
+        super().__init__(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            fn=_drain,
+            timeout_seconds=timeout_seconds,
+            max_output_size=max_output_size,
+            schema_version=schema_version,
+            cacheable=cacheable,
+            safety=safety,
+            metadata=metadata,
+        )
+
+    async def run_streaming(self, raw_inputs: dict[str, Any]) -> AsyncIterator[ToolChunk]:
+        """Validate *raw_inputs* and yield the tool's :class:`ToolChunk` stream.
+
+        Intermediate chunks are yielded verbatim; the terminal
+        (``is_final=True``) chunk's ``data`` is validated against the tool's
+        ``output_schema`` (and size cap) before being yielded, so a streaming
+        tool can never emit an invalid assembled output.
+
+        Enforces the streaming contract: exactly one terminal chunk, and it
+        must be the last one emitted.  A chunk after the terminal chunk, or no
+        terminal chunk at all, raises
+        :class:`~chainweaver.exceptions.ToolDefinitionError`.
+        """
+        validated_input = self.input_schema.model_validate(raw_inputs)
+        seen_final = False
+        async for chunk in self.stream_fn(validated_input):
+            if seen_final:
+                raise ToolDefinitionError(
+                    self.name,
+                    "streaming tool yielded a chunk after its terminal "
+                    "(is_final=True) chunk; the terminal chunk must be last.",
+                )
+            if chunk.is_final:
+                seen_final = True
+                validated = self._validate_output(chunk.data)
+                yield ToolChunk(data=validated, is_final=True)
+            else:
+                yield chunk
+        if not seen_final:
+            raise ToolDefinitionError(
+                self.name, "streaming tool produced no terminal (is_final=True) chunk."
+            )
 
 
 def _terminal_step(flow: Flow | DAGFlow) -> FlowStep:

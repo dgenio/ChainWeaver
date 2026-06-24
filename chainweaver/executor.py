@@ -20,7 +20,7 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -53,17 +53,22 @@ from chainweaver.decisions import (
     DecisionCallable,
     DecisionCallback,
     DecisionContext,
+    DecisionPolicy,
+    DecisionRecord,
     coerce_decision_callback,
 )
 from chainweaver.events import FlowEvent
 from chainweaver.exceptions import (
     ApprovalDeniedError,
     AsyncLaneUnsupportedError,
+    ChainWeaverError,
     CheckpointDriftError,
     CheckpointerNotConfiguredError,
     CheckpointNotFoundError,
     CheckpointVersionError,
+    DecisionBudgetExceededError,
     DecisionCallbackError,
+    DecisionTimeoutError,
     FlowCancelledError,
     FlowCompositionError,
     FlowExecutionError,
@@ -73,6 +78,7 @@ from chainweaver.exceptions import (
     PredicateSyntaxError,
     SafetyCeilingError,
     SchemaValidationError,
+    ToolDefinitionError,
     ToolNotFoundError,
     ToolOutputSizeError,
     ToolTimeoutError,
@@ -99,13 +105,14 @@ from chainweaver.middleware import (
     FlowEndContext,
     FlowExecutorMiddleware,
     FlowStartContext,
+    StepChunkContext,
     StepEndContext,
     StepStartContext,
 )
 from chainweaver.observation import TraceRecorder
 from chainweaver.registry import AnyFlow, FlowRegistry
 from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
-from chainweaver.tools import Tool
+from chainweaver.tools import StreamingTool, Tool
 
 _logger = get_logger("chainweaver.executor")
 _middleware_logger = get_logger("chainweaver.middleware")
@@ -181,6 +188,12 @@ class _RunScopedState:
         # for the duration of an ``execute_flow(dynamic_params=...)`` call and
         # inherited by sub-flow recursion like the dry-run markers.
         self.dynamic_params: dict[str, Any] = {}
+        # Decision-budget counter (issue #370): number of decision callbacks
+        # invoked so far in this flow execution.  Compared against
+        # ``DecisionPolicy.max_decisions_per_flow``.  A sub-flow runs in its
+        # own scope (a fresh ``_run_scope``), so it starts its budget at zero
+        # rather than inheriting the parent's count.
+        self.decision_count: int = 0
 
     def copy(self) -> _RunScopedState:
         """Return a shallow per-scope clone (mutable containers duplicated).
@@ -204,15 +217,19 @@ class _RunScopedState:
 class _StreamCollectorMiddleware(BaseMiddleware):
     """Per-call middleware that pushes lifecycle events onto a queue.
 
-    Used by :meth:`FlowExecutor.stream_flow` to bridge the lifecycle
-    hook surface to a generator yielding :class:`FlowEvent` payloads.
+    Used by :meth:`FlowExecutor.stream_flow` (sync, thread-backed queue) and
+    :meth:`FlowExecutor.stream_flow_async` (asyncio queue) to bridge the
+    lifecycle hook surface to a generator yielding :class:`FlowEvent`
+    payloads.  *emit* is the queue's enqueue callable —
+    :meth:`queue.Queue.put` for the sync variant, :meth:`asyncio.Queue.put_nowait`
+    for the async one (the queues are unbounded, so neither blocks).
     """
 
-    def __init__(self, events: queue.Queue[FlowEvent | _StreamSentinel]) -> None:
-        self._events = events
+    def __init__(self, emit: Callable[[FlowEvent], None]) -> None:
+        self._emit = emit
 
     def on_flow_start(self, ctx: FlowStartContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="flow_start",
                 flow_name=ctx.flow_name,
@@ -225,7 +242,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
         )
 
     def on_step_start(self, ctx: StepStartContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="step_start",
                 flow_name=ctx.flow_name,
@@ -237,8 +254,21 @@ class _StreamCollectorMiddleware(BaseMiddleware):
             )
         )
 
+    def on_step_chunk(self, ctx: StepChunkContext) -> None:
+        self._emit(
+            FlowEvent(
+                kind="step_chunk",
+                flow_name=ctx.flow_name,
+                trace_id=ctx.trace_id,
+                timestamp=_now_utc(),
+                step_index=ctx.step_index,
+                tool_name=ctx.tool_name,
+                chunk=ctx.chunk,
+            )
+        )
+
     def on_step_end(self, ctx: StepEndContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="step_end",
                 flow_name=ctx.flow_name,
@@ -251,7 +281,7 @@ class _StreamCollectorMiddleware(BaseMiddleware):
         )
 
     def on_flow_end(self, ctx: FlowEndContext) -> None:
-        self._events.put(
+        self._emit(
             FlowEvent(
                 kind="flow_end",
                 flow_name=ctx.flow_name,
@@ -483,6 +513,14 @@ class StepRecord(BaseModel):
             (issue #356), the :class:`~chainweaver.approvals.ApprovalRecord`
             describing the decision.  ``None`` for steps whose effective
             contract did not require approval (the common case).
+        decision: For a step resolved by a guided decision callback (issue
+            #369), the :class:`~chainweaver.decisions.DecisionRecord` capturing
+            the candidate set, the chosen tool, the static default, and the
+            callback latency.  Populated **exactly when** a registered
+            :class:`~chainweaver.decisions.DecisionCallback` resolved the step;
+            ``None`` for ordinary steps and for ``decision_candidates`` steps
+            that fell back to the static ``tool_name`` because no callback was
+            registered.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -507,6 +545,7 @@ class StepRecord(BaseModel):
     flow_name: str | None = None
     sub_result: ExecutionResult | None = None
     approval: ApprovalRecord | None = None
+    decision: DecisionRecord | None = None
 
     @model_validator(mode="after")
     def _fill_error_code(self) -> StepRecord:
@@ -716,6 +755,7 @@ class FlowExecutor:
         checkpointer: Checkpointer | None = None,
         delete_on_success: bool = True,
         decision_callback: DecisionCallback | DecisionCallable | None = None,
+        decision_policy: DecisionPolicy | None = None,
         approval_callback: ApprovalCallback | ApprovalCallable | None = None,
         strict_safety: bool = False,
         max_side_effect_level: SideEffectLevel | None = None,
@@ -760,6 +800,10 @@ class FlowExecutor:
         self._decision_callback: DecisionCallback | None = coerce_decision_callback(
             decision_callback
         )
+        # Optional guardrails for the decision-callback seam (issue #370):
+        # a per-decision timeout and a per-flow decision budget.  ``None``
+        # (the default) leaves decision behavior byte-for-byte unchanged.
+        self._decision_policy: DecisionPolicy | None = decision_policy
         # Execution-time safety enforcement (issue #356).  All opt-in:
         # ``approval_callback`` is the seam invoked before a step whose effective
         # ``ToolSafetyContract`` has ``requires_approval=True``; ``strict_safety``
@@ -861,7 +905,11 @@ class FlowExecutor:
     def _fire_hook(
         self,
         hook: str,
-        ctx: FlowStartContext | StepStartContext | StepEndContext | FlowEndContext,
+        ctx: FlowStartContext
+        | StepStartContext
+        | StepChunkContext
+        | StepEndContext
+        | FlowEndContext,
     ) -> None:
         """Dispatch *hook* to every registered middleware, catching exceptions.
 
@@ -958,6 +1006,9 @@ class FlowExecutor:
     def _fire_step_end(self, ctx: StepEndContext) -> None:
         self._fire_hook("on_step_end", ctx)
 
+    def _fire_step_chunk(self, ctx: StepChunkContext) -> None:
+        self._fire_hook("on_step_chunk", ctx)
+
     def _fire_flow_end(self, ctx: FlowEndContext) -> None:
         self._fire_hook("on_flow_end", ctx)
 
@@ -1031,6 +1082,7 @@ class FlowExecutor:
             checkpointer=self._checkpointer,
             delete_on_success=self._delete_on_success,
             decision_callback=self._decision_callback,
+            decision_policy=self._decision_policy,
             max_composition_depth=self._max_composition_depth,
             max_step_concurrency=self._max_step_concurrency,
         )
@@ -1798,15 +1850,14 @@ class FlowExecutor:
 
         Linear and DAG flows are both supported.  The async lane
         preserves middleware, retries, the ``on_error`` policy, and
-        flow-level input/output validation.  It deliberately bypasses
-        the step cache and crash-resume checkpointer for v0.1 — those
-        features are async-unaware today and will be folded into the
-        async lane in a follow-up.
+        flow-level input/output validation.  As of issue #388 it also
+        consults the step cache (#127), writes crash-resume checkpoints
+        (resume via :meth:`resume_flow_async`, #128), and executes composed
+        sub-flow steps (``flow_name``, #75) — at parity with the sync lane.
 
         The async lane does **not** yet honour conditional branching
-        (``branches`` / ``default_next``, #9), decision callbacks
-        (``decision_candidates``, #102), or composed sub-flow steps
-        (``flow_name``, #75).  Flows declaring those features raise
+        (``branches`` / ``default_next``, #9) or decision callbacks
+        (``decision_candidates``, #102).  Flows declaring those features raise
         :class:`AsyncLaneUnsupportedError` up front — listing every
         unsupported construct — rather than executing with the directives
         silently dropped (issue #332); use the synchronous
@@ -1836,8 +1887,9 @@ class FlowExecutor:
 
         Raises:
             AsyncLaneUnsupportedError: When the flow uses conditional
-                branching, decision callbacks, or composed sub-flow steps,
-                which the async lane does not yet support (issue #332).
+                branching or decision callbacks, which the async lane does not
+                yet support (issue #332).  Composed sub-flow steps (#75) are
+                supported as of issue #388.
             FlowCancelledError: When *deadline* has passed or *cancel_token*
                 is cancelled at a step boundary.
         """
@@ -1847,6 +1899,10 @@ class FlowExecutor:
             raise FlowStatusError(flow_name, flow.status.value)
 
         self._assert_async_lane_supported(flow)
+        # Validate sub-flow composition up front (issue #75 / #388): reject
+        # cycles, over-deep nesting, and dangling references before any step
+        # runs — mirroring the synchronous lane.
+        self._validate_composition(flow)
 
         # A scoped copy per call is what makes concurrent ``execute_flow_async``
         # tasks on one event-loop thread safe: each task mutates its own
@@ -1867,25 +1923,19 @@ class FlowExecutor:
     def _assert_async_lane_supported(flow: Any) -> None:
         """Reject flows using execution features the async lane can't honour.
 
-        ``execute_flow_async`` is a v0.1 lane (issue #80).  It does not
-        yet implement the conditional-branching (#9), decision-callback
-        (#102), or composed sub-flow (#75) semantics the synchronous
-        :meth:`execute_flow` supports.  The async DAG path builds a plain
-        tool proxy per step, so those directives would be **silently
-        dropped** — producing a different result than the sync lane for the
-        same flow.  This collects *every* unsupported construct in the flow
-        and raises a single :class:`AsyncLaneUnsupportedError` **before any
-        step runs** (issue #332), so callers see the full set of reasons at
-        once and route such flows through :meth:`execute_flow` until the
-        async lane gains parity.
+        The async lane now supports composed sub-flow steps (#75), the step
+        cache, and checkpoint resume (issue #388), but still does not
+        implement conditional branching (``branches`` / ``default_next``, #9)
+        or guided decision callbacks (``decision_candidates``, #102).  Flows
+        declaring those would have the directives **silently dropped** —
+        producing a different result than the sync lane — so this collects
+        *every* still-unsupported construct and raises a single
+        :class:`AsyncLaneUnsupportedError` **before any step runs** (issue
+        #332).  Route such flows through :meth:`execute_flow` until the async
+        lane gains full parity.
         """
         unsupported: list[str] = []
         for idx, step in enumerate(flow.steps):
-            if getattr(step, "flow_name", None) is not None:
-                unsupported.append(
-                    f"step {idx} ('{step.flow_name}'): composed sub-flow "
-                    "(flow_name) steps (issue #75)"
-                )
             if getattr(step, "decision_candidates", None):
                 unsupported.append(
                     f"step {idx} ('{step.display_name}'): decision_candidates (issue #102)"
@@ -1972,7 +2022,31 @@ class FlowExecutor:
                 perf_start=flow_t0,
                 initial_input=initial_input,
             )
-            record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
+            try:
+                record = await self._execute_step_async(
+                    idx,
+                    step,
+                    context,
+                    flow_name,
+                    trace_id,
+                    deadline=deadline,
+                    cancel_token=cancel_token,
+                )
+            except FlowCancelledError as exc:
+                # Cancellation fired inside a composed sub-flow; re-anchor it to
+                # this parent flow so the parent's partial carries its completed
+                # steps — mirroring the sync lane (issue #388).
+                self._reraise_subflow_cancellation(
+                    exc,
+                    parent_flow_name=flow_name,
+                    step=step,
+                    flat_step_index=idx,
+                    prior_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=initial_input,
+                )
             log.append(record)
             if not record.success:
                 return self._make_result(
@@ -1998,6 +2072,19 @@ class FlowExecutor:
                 step_name=step.display_name,
                 logger=_logger,
                 output_mapping=step.output_mapping,
+            )
+
+            # Crash-resume checkpoint (issue #128 / #388) — write after every
+            # successful step so a fresh process can resume via
+            # ``resume_flow_async``.
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
             )
 
         if flow.output_schema is not None:
@@ -2049,8 +2136,19 @@ class FlowExecutor:
         Cancellation (issue #142) is checked between levels.
         """
         self._local.active_flow_version = flow.version
-        trace_id = _new_trace_id()
-        flow_started_at = _now_utc()
+        # Resume support (issue #128 / #388): when ``resume_snapshot`` is set,
+        # reuse its trace_id / started_at / context / log and skip the
+        # already-completed DAG levels.
+        resume = self._local.resume_snapshot
+        levels = self._compute_dag_levels(flow)
+        if resume is not None:
+            trace_id = resume.trace_id
+            flow_started_at = resume.started_at
+            start_level = resume.completed_dag_levels
+        else:
+            trace_id = _new_trace_id()
+            flow_started_at = _now_utc()
+            start_level = 0
         flow_t0 = time.perf_counter()
 
         self._fire_flow_start(
@@ -2064,7 +2162,7 @@ class FlowExecutor:
             )
         )
 
-        if flow.input_schema is not None:
+        if resume is None and flow.input_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
                 payload=initial_input,
@@ -2085,15 +2183,21 @@ class FlowExecutor:
                     tool_step_count=0,
                 )
 
-        # Seed the context from the validated initial input, then layer any
-        # dynamic params (#316) on top — server-supplied values win over an
-        # LLM-provided key of the same name and are never in input_schema.
-        context: dict[str, Any] = {**initial_input, **self._local.dynamic_params}
-        log: list[StepRecord] = []
-        flat_index = 0
-        levels = self._compute_dag_levels(flow)
+        if resume is not None:
+            context: dict[str, Any] = dict(resume.context)
+            log: list[StepRecord] = list(resume.execution_log)
+            # The flat step index continues past every step in the completed
+            # levels so resumed records keep their declaration-order indices.
+            flat_index = sum(len(level) for level in levels[:start_level])
+        else:
+            # Seed the context from the validated initial input, then layer any
+            # dynamic params (#316) on top — server-supplied values win over an
+            # LLM-provided key of the same name and are never in input_schema.
+            context = {**initial_input, **self._local.dynamic_params}
+            log = []
+            flat_index = 0
 
-        for level_idx, level_steps in enumerate(levels):
+        for level_idx, level_steps in enumerate(levels[start_level:], start=start_level):
             # Cooperative cancellation between topological levels (issue #142).
             self._check_cancellation(
                 flow_name=flow.name,
@@ -2153,7 +2257,14 @@ class FlowExecutor:
             # order in either case; ``context`` is read-only during the level
             # (outputs are merged only after it completes), so concurrent input
             # resolution is safe.
-            records = await self._run_dag_level_async(indexed_steps, context, flow.name, trace_id)
+            records = await self._run_dag_level_async(
+                indexed_steps,
+                context,
+                flow.name,
+                trace_id,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
 
             # Process results in declaration order: append to the log, abort on
             # the first failure, and reject sibling key collisions — identical
@@ -2226,6 +2337,18 @@ class FlowExecutor:
                 logger=_logger,
             )
 
+            # Crash-resume checkpoint at the level boundary (issue #128 / #388),
+            # mirroring the sync DAG lane's level-granularity snapshots.
+            self._save_dag_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_levels=level_idx + 1,
+            )
+
         if flow.output_schema is not None:
             validation_record = self._validate_flow_schema(
                 flow_name=flow.name,
@@ -2264,6 +2387,9 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> list[StepRecord]:
         """Execute one DAG level's steps, returning records in declaration order.
 
@@ -2278,14 +2404,32 @@ class FlowExecutor:
         merged into it by the caller after the level completes — so concurrent
         execution introduces no shared-state writes on the executor's side.
         Opted-in tools must themselves be safe to run concurrently.
+
+        The per-step proxy carries the step's ``flow_name`` (#75 / #388),
+        contracts, retry, and ``on_error`` so composed sub-flows and per-step
+        policies are honoured on the async lane just like the sync lane;
+        ``deadline`` / ``cancel_token`` flow into recursive sub-flow runs.
         """
 
         async def _run_one(step_index: int, step: Any) -> StepRecord:
             proxy = FlowStep(
-                tool_name=step.display_name,
+                tool_name=step.tool_name,
+                flow_name=step.flow_name,
                 input_mapping=step.input_mapping,
+                input_contract=step.input_contract,
+                output_contract=step.output_contract,
+                retry=step.retry,
+                on_error=step.on_error,
             )
-            return await self._execute_step_async(step_index, proxy, context, flow_name, trace_id)
+            return await self._execute_step_async(
+                step_index,
+                proxy,
+                context,
+                flow_name,
+                trace_id,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
 
         if self._max_step_concurrency <= 1 or len(indexed_steps) <= 1:
             return [await _run_one(idx, step) for idx, step in indexed_steps]
@@ -2307,6 +2451,9 @@ class FlowExecutor:
         context: dict[str, Any],
         flow_name: str,
         trace_id: str,
+        *,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> StepRecord:
         """Async-native counterpart to :meth:`_execute_step`.
 
@@ -2318,10 +2465,28 @@ class FlowExecutor:
         Retries and middleware hooks (which are sync APIs) are
         applied in the same order as the sync path; ``on_error``
         fallback tools are also dispatched via ``run_async`` so MCP
-        fallbacks compose correctly.
+        fallbacks compose correctly.  Composed sub-flow steps (#75) recurse
+        through :meth:`_execute_subflow_step_async`, and the step cache (#127)
+        is consulted before ``Tool.run_async`` — both mirroring the sync lane
+        (issue #388).  ``deadline`` / ``cancel_token`` are forwarded into
+        recursive sub-flow runs so a composed run shares one budget.
         """
         started_at = _now_utc()
         t0 = time.perf_counter()
+        # Composed sub-flow step (issue #75 / #388): recurse into the named
+        # flow on the async lane instead of invoking a tool.
+        if step.flow_name is not None:
+            return await self._execute_subflow_step_async(
+                step_index,
+                step,
+                context,
+                flow_name,
+                trace_id,
+                started_at=started_at,
+                perf_start=t0,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
         tool_attempts = [0]
         # Approval audit record (issue #356); set by the safety gate below.
         approval_record: ApprovalRecord | None = None
@@ -2334,6 +2499,7 @@ class FlowExecutor:
             success: bool,
             skipped: bool,
             retry_errors: list[str],
+            cached: bool = False,
             fallback_used: bool = False,
             fallback_tool_name: str | None = None,
         ) -> StepRecord:
@@ -2353,7 +2519,7 @@ class FlowExecutor:
                 retry_count=retry_count,
                 retry_errors=list(retry_errors),
                 skipped=skipped,
-                cached=False,
+                cached=cached,
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
@@ -2399,6 +2565,30 @@ class FlowExecutor:
                 )
             )
 
+        # Step-level input contract (issue #172) — mirrors the sync lane.
+        if step.input_contract is not None:
+            input_contract_cls = step.resolved_input_contract
+            assert input_contract_cls is not None
+            contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=inputs,
+                contract=input_contract_cls,
+                context_label="step_input_contract",
+            )
+            if contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=[],
+                    )
+                )
+
         self._fire_step_start(
             StepStartContext(
                 trace_id=trace_id,
@@ -2441,6 +2631,85 @@ class FlowExecutor:
                 )
             )
 
+        # Streaming tool (issue #320): consume the chunk stream, emitting a
+        # ``step_chunk`` event per chunk (surfaced by ``stream_flow_async``),
+        # and use the terminal chunk's assembled — already output-schema
+        # validated — data as the step output.  The step cache is bypassed
+        # (streaming tools are I/O-bound and typically non-deterministic).
+        if isinstance(tool, StreamingTool):
+            return _finish(
+                await self._run_streaming_step_async(
+                    tool=tool,
+                    step=step,
+                    step_index=step_index,
+                    inputs=inputs,
+                    flow_name=flow_name,
+                    trace_id=trace_id,
+                    tool_attempts=tool_attempts,
+                    record_fn=_record,
+                )
+            )
+
+        # Step cache lookup (issue #127 / #388) — mirrors the sync lane.  Hash
+        # the *validated* inputs so equivalent payloads collapse onto one key;
+        # bypass for non-cacheable tools and during replay.
+        cache_key: StepCacheKey | None = None
+        if self._step_cache is not None and tool.cacheable and not self._local.in_replay:
+            try:
+                validated = tool.input_schema.model_validate(inputs)
+            except ValidationError:
+                validated = None  # let the normal path raise
+            if validated is not None:
+                cache_key = StepCacheKey(
+                    tool_name=tool.name,
+                    schema_hash=tool.schema_hash,
+                    input_value_hash=compute_input_value_hash(validated),
+                )
+                cached_output = self._step_cache.get(cache_key)
+                if cached_output is not None:
+                    if step.output_contract is not None:
+                        cached_contract_cls = step.resolved_output_contract
+                        assert cached_contract_cls is not None
+                        cached_contract_err = self._check_step_contract(
+                            step=step,
+                            step_index=step_index,
+                            payload=cached_output,
+                            contract=cached_contract_cls,
+                            context_label="step_output_contract",
+                        )
+                        if cached_contract_err is not None:
+                            log_step_error(
+                                _logger, step_index, step.display_name, cached_contract_err
+                            )
+                            return _finish(
+                                _record(
+                                    inputs=inputs,
+                                    outputs=None,
+                                    error=cached_contract_err,
+                                    success=False,
+                                    skipped=False,
+                                    retry_errors=[],
+                                )
+                            )
+                    log_step_end(
+                        _logger,
+                        step_index,
+                        step.display_name,
+                        cached_output,
+                        redaction=self._redaction_policy,
+                    )
+                    return _finish(
+                        _record(
+                            inputs=inputs,
+                            outputs=cached_output,
+                            error=None,
+                            success=True,
+                            skipped=False,
+                            retry_errors=[],
+                            cached=True,
+                        )
+                    )
+
         retry_errors: list[str] = []
         try:
             outputs = await self._invoke_tool_async(
@@ -2470,6 +2739,36 @@ class FlowExecutor:
             outputs,
             redaction=self._redaction_policy,
         )
+
+        # Step-level output contract (issue #172) — mirrors the sync lane,
+        # validated before the cache records anything.
+        if step.output_contract is not None:
+            output_contract_cls = step.resolved_output_contract
+            assert output_contract_cls is not None
+            out_contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=outputs,
+                contract=output_contract_cls,
+                context_label="step_output_contract",
+            )
+            if out_contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, out_contract_err)
+                return _finish(
+                    _record(
+                        inputs=inputs,
+                        outputs=None,
+                        error=out_contract_err,
+                        success=False,
+                        skipped=False,
+                        retry_errors=retry_errors,
+                    )
+                )
+
+        # Cache write after the output has been schema-validated by
+        # ``Tool.run_async`` — never store invalid output (issue #388).
+        if cache_key is not None and self._step_cache is not None:
+            self._step_cache.set(cache_key, outputs)
         return _finish(
             _record(
                 inputs=inputs,
@@ -2480,6 +2779,220 @@ class FlowExecutor:
                 retry_errors=retry_errors,
             )
         )
+
+    async def _run_streaming_step_async(
+        self,
+        *,
+        tool: StreamingTool,
+        step: FlowStep,
+        step_index: int,
+        inputs: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        tool_attempts: list[int],
+        record_fn: Callable[..., StepRecord],
+    ) -> StepRecord:
+        """Drive a :class:`StreamingTool`, emitting per-chunk events (#320).
+
+        Consumes :meth:`StreamingTool.run_streaming`, firing an
+        ``on_step_chunk`` hook per :class:`ToolChunk`, and returns the step's
+        :class:`StepRecord` built from the terminal chunk's assembled output.
+        Tool failures route through the same async ``on_error`` machinery as a
+        normal step (fail / skip / fallback).
+
+        The tool's ``timeout_seconds`` bounds the *whole* stream via
+        :func:`asyncio.wait_for` (a stalled stream cannot hang the loop
+        indefinitely); a breach surfaces as
+        :class:`~chainweaver.exceptions.ToolTimeoutError`, matching the
+        non-streaming path.  By design the step cache is bypassed and
+        ``step.retry`` is not applied to a streaming step: a partially consumed
+        stream (whose chunks have already been emitted downstream) cannot be
+        safely replayed or memoised.  Those semantics are intentional, not an
+        oversight.
+        """
+        tool_attempts[0] += 1
+        retry_errors: list[str] = []
+
+        async def _consume() -> dict[str, Any] | None:
+            collected: dict[str, Any] | None = None
+            async for chunk in tool.run_streaming(inputs):
+                self._fire_step_chunk(
+                    StepChunkContext(
+                        trace_id=trace_id,
+                        flow_name=flow_name,
+                        step_index=step_index,
+                        tool_name=step.display_name,
+                        chunk=chunk,
+                    )
+                )
+                if chunk.is_final:
+                    collected = chunk.data
+            return collected
+
+        try:
+            if tool.timeout_seconds is not None:
+                try:
+                    final_output: dict[str, Any] | None = await asyncio.wait_for(
+                        _consume(), timeout=tool.timeout_seconds
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise ToolTimeoutError(tool.name, tool.timeout_seconds) from exc
+            else:
+                final_output = await _consume()
+            if final_output is None:
+                # ``run_streaming`` already enforces a terminal chunk; this guards
+                # the type and any future stream source that bypasses it.
+                raise ToolDefinitionError(
+                    tool.name, "streaming tool produced no terminal (is_final=True) chunk."
+                )
+        except Exception as exc:
+            wrapped = self._wrap_tool_exception(step, step_index, exc)
+            log_step_error(_logger, step_index, step.display_name, wrapped)
+            return await self._apply_on_error_async(
+                step=step,
+                step_index=step_index,
+                inputs=inputs,
+                wrapped_error=wrapped,
+                retry_errors=retry_errors,
+                make_record=record_fn,
+            )
+
+        log_step_end(
+            _logger,
+            step_index,
+            step.display_name,
+            final_output,
+            redaction=self._redaction_policy,
+        )
+
+        # Step-level output contract (issue #172) — mirrors the non-streaming path.
+        if step.output_contract is not None:
+            output_contract_cls = step.resolved_output_contract
+            assert output_contract_cls is not None
+            out_contract_err = self._check_step_contract(
+                step=step,
+                step_index=step_index,
+                payload=final_output,
+                contract=output_contract_cls,
+                context_label="step_output_contract",
+            )
+            if out_contract_err is not None:
+                log_step_error(_logger, step_index, step.display_name, out_contract_err)
+                return record_fn(
+                    inputs=inputs,
+                    outputs=None,
+                    error=out_contract_err,
+                    success=False,
+                    skipped=False,
+                    retry_errors=retry_errors,
+                )
+
+        return record_fn(
+            inputs=inputs,
+            outputs=final_output,
+            error=None,
+            success=True,
+            skipped=False,
+            retry_errors=retry_errors,
+        )
+
+    async def _execute_subflow_step_async(
+        self,
+        step_index: int,
+        step: FlowStep,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        *,
+        started_at: datetime,
+        perf_start: float,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+    ) -> StepRecord:
+        """Execute a composed sub-flow step on the async lane (#75 / #388).
+
+        Async-native counterpart to :meth:`_execute_subflow_step`: resolves the
+        step's inputs, recursively ``await``s the named sub-flow via
+        :meth:`execute_flow_async`, and folds the sub-flow's final output back
+        into the parent context.  ``deadline`` / ``cancel_token`` are forwarded
+        so flow-level cancellation and the wall-clock budget are observed
+        *between* the sub-flow's own steps, sharing one budget across the
+        composed run.  Cycles and over-deep nesting are already rejected by
+        :meth:`_validate_composition` before any step runs.
+        """
+        sub_name = step.flow_name
+        assert sub_name is not None  # guaranteed by the caller / FlowStep validator
+        try:
+            sub_input = self._resolve_inputs(step, context, step_index)
+        except InputMappingError as exc:
+            log_step_error(_logger, step_index, sub_name, exc)
+            err_type, err_msg = _exc_to_strings(exc)
+            now = _now_utc()
+            return StepRecord(
+                step_index=step_index,
+                tool_name=sub_name,
+                flow_name=sub_name,
+                inputs={},
+                outputs=None,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=now,
+                duration_ms=(time.perf_counter() - perf_start) * 1000.0,
+            )
+
+        self._fire_step_start(
+            StepStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_index=step_index,
+                tool_name=sub_name,
+                inputs=dict(sub_input),
+                started_at=started_at,
+            )
+        )
+
+        saved_version = self._local.active_flow_version
+        try:
+            sub_result = await self.execute_flow_async(
+                sub_name,
+                sub_input,
+                deadline=deadline,
+                cancel_token=cancel_token,
+            )
+        finally:
+            self._local.active_flow_version = saved_version
+
+        ended_at = _now_utc()
+        duration_ms = (time.perf_counter() - perf_start) * 1000.0
+        error_type: str | None = None
+        error_message: str | None = None
+        if not sub_result.success:
+            error_type = "FlowExecutionError"
+            error_message = f"Sub-flow '{sub_name}' failed."
+        record = StepRecord(
+            step_index=step_index,
+            tool_name=sub_name,
+            flow_name=sub_name,
+            inputs=sub_input,
+            outputs=sub_result.final_output if sub_result.success else None,
+            error_type=error_type,
+            error_message=error_message,
+            success=sub_result.success,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            sub_result=sub_result,
+        )
+        self._fire_step_end(
+            StepEndContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                step_record=record,
+            )
+        )
+        return record
 
     async def _invoke_tool_async(
         self,
@@ -2617,6 +3130,8 @@ class FlowExecutor:
         initial_input: dict[str, Any],
         *,
         force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> Iterator[FlowEvent]:
         """Execute a flow and yield :class:`FlowEvent` lifecycle events (#134).
 
@@ -2634,17 +3149,23 @@ class FlowExecutor:
         The flow runs on a background worker thread; events are delivered
         through a synchronized queue.
 
-        **Cancellation is not supported** for the sync variant.  If the
-        consumer breaks out of the iteration (or otherwise lets the
+        **Consumer-driven cancellation is limited** for the sync variant.
+        If the consumer breaks out of the iteration (or otherwise lets the
         generator be garbage-collected), the generator's ``finally``
         block blocks on ``thread.join()`` until the background flow
         finishes — for a 10-step flow with a long step 3 that means
         the caller's "stop iterating" intent is silently translated
         into "block here until everything completes".  A ``WARNING``
         is logged via the ``chainweaver.executor`` logger when this
-        happens so the behavior shows up in production traces.  For
-        proper cancellation use the async variant once issue #80
-        lands.
+        happens so the behavior shows up in production traces.
+
+        A ``deadline`` / ``cancel_token`` *can* be supplied (issue #389):
+        they are forwarded to the underlying :meth:`execute_flow` and
+        checked at step boundaries on the worker thread, so an in-flight
+        tool always finishes but the flow stops before the next step —
+        the same cooperative contract as :meth:`execute_flow`.  For
+        cancellation that also stops the consumer's ``await`` promptly,
+        use :meth:`stream_flow_async`.
 
         Hook exceptions and middleware exceptions still follow the
         catch-and-log contract from :class:`FlowExecutorMiddleware`: a
@@ -2656,6 +3177,12 @@ class FlowExecutor:
                 step.
             force: When ``True``, bypass the status guard and execute
                 even if the flow is ``NEEDS_REVIEW`` or ``DISABLED``.
+            deadline: Optional wall-clock deadline (issue #142 / #389),
+                forwarded to :meth:`execute_flow` and checked between steps
+                on the worker thread.
+            cancel_token: Optional :class:`CancellationToken` (issue #142 /
+                #389), forwarded and checked between steps on the worker
+                thread.
 
         Yields:
             :class:`~chainweaver.events.FlowEvent` instances in the order
@@ -2669,7 +3196,7 @@ class FlowExecutor:
                 *force* is ``False``.  Same re-raise behavior.
         """
         events: queue.Queue[FlowEvent | _StreamSentinel] = queue.Queue()
-        collector = _StreamCollectorMiddleware(events)
+        collector = _StreamCollectorMiddleware(events.put)
         exc_holder: list[BaseException] = []
 
         # Register the event collector as *run-scoped* middleware on the worker
@@ -2681,7 +3208,13 @@ class FlowExecutor:
         def _worker() -> None:
             try:
                 with self._scoped_middleware(collector):
-                    self.execute_flow(flow_name, initial_input, force=force)
+                    self.execute_flow(
+                        flow_name,
+                        initial_input,
+                        force=force,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
             except BaseException as exc:
                 exc_holder.append(exc)
             finally:
@@ -2717,6 +3250,104 @@ class FlowExecutor:
             # No cleanup needed: the collector lived on the worker thread's
             # run-scoped middleware slot (issue #336) and was popped when the
             # worker's ``_scoped_middleware`` context exited.
+
+    async def stream_flow_async(
+        self,
+        flow_name: str,
+        initial_input: dict[str, Any],
+        *,
+        force: bool = False,
+        deadline: float | None = None,
+        cancel_token: CancellationToken | None = None,
+    ) -> AsyncIterator[FlowEvent]:
+        """Async-native streaming counterpart to :meth:`stream_flow` (#389).
+
+        Drives :meth:`execute_flow_async` directly on the calling event loop —
+        no worker thread — and yields the same lifecycle events in the same
+        order::
+
+            flow_start
+            (step_start, step_end)*       # one pair per executed step
+            flow_end                       # on normal completion
+
+        Steps that fail before input resolution (tool-not-found, input-mapping)
+        emit ``step_end`` without a preceding ``step_start`` — the same
+        middleware contract as the sync variant.
+
+        Unlike :meth:`stream_flow`, cancellation is prompt and cooperative:
+        passing a ``cancel_token`` (or a ``deadline``) ends the stream at the
+        next step boundary by raising
+        :class:`~chainweaver.exceptions.FlowCancelledError` from the iterator —
+        its :attr:`~chainweaver.exceptions.FlowCancelledError.result` carries
+        the partial run.  A terminal ``flow_end`` event carrying that same
+        partial result is emitted *before* the error is raised (the
+        cancellation path builds the partial via ``_make_result``, which fires
+        the flow-end hook), so a consumer sees ``flow_end`` and then the raised
+        ``FlowCancelledError``.  If the consumer stops iterating early, the
+        backing :meth:`execute_flow_async` task is cancelled.
+
+        The async lane's feature support applies (issue #388): composed
+        sub-flows, the step cache, and checkpoints work; conditional branching
+        and decision callbacks raise :class:`AsyncLaneUnsupportedError` before
+        any event is emitted.
+
+        Args:
+            flow_name: Name of the flow to execute.
+            initial_input: Initial key/value context passed to the first step.
+            force: When ``True``, bypass the status guard.
+            deadline: Optional wall-clock deadline (issue #142); checked
+                between steps / DAG levels.
+            cancel_token: Optional :class:`CancellationToken` (issue #142);
+                checked between steps / DAG levels.
+
+        Yields:
+            :class:`~chainweaver.events.FlowEvent` instances in the order above.
+
+        Raises:
+            FlowCancelledError: When *deadline* has passed or *cancel_token* is
+                cancelled at a step boundary.
+            AsyncLaneUnsupportedError: When the flow uses async-unsupported
+                features (raised before any event is yielded).
+        """
+        events: asyncio.Queue[FlowEvent | _StreamSentinel] = asyncio.Queue()
+        collector = _StreamCollectorMiddleware(events.put_nowait)
+        exc_holder: list[BaseException] = []
+
+        async def _runner() -> None:
+            # Register the collector as run-scoped middleware on this task's
+            # context (issue #336): ``execute_flow_async`` inherits it through
+            # its own ``_run_scope`` copy, so concurrent streams never see each
+            # other's events and the shared middleware list is never mutated.
+            try:
+                with self._scoped_middleware(collector):
+                    await self.execute_flow_async(
+                        flow_name,
+                        initial_input,
+                        force=force,
+                        deadline=deadline,
+                        cancel_token=cancel_token,
+                    )
+            except BaseException as exc:  # surfaced from the consumer below
+                exc_holder.append(exc)
+            finally:
+                events.put_nowait(_STREAM_SENTINEL)
+
+        task = asyncio.create_task(_runner())
+        try:
+            while True:
+                item = await events.get()
+                if isinstance(item, _StreamSentinel):
+                    if exc_holder:
+                        raise exc_holder[0]
+                    return
+                yield item
+        finally:
+            # Consumer stopped early (``break`` / ``aclose``) or an event was
+            # re-raised: cancel the backing run so it cannot outlive the stream.
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -3064,6 +3695,18 @@ class FlowExecutor:
                 has an incompatible MAJOR component relative to the version
                 this library writes (issue #395).
         """
+        flow, snapshot = self._load_snapshot_for_resume(trace_id)
+        if isinstance(flow, DAGFlow):
+            return self._resume_dag_flow(flow, snapshot)
+        return self._resume_linear_flow(flow, snapshot)
+
+    def _load_snapshot_for_resume(self, trace_id: str) -> tuple[AnyFlow, ExecutionSnapshot]:
+        """Load and drift-check the snapshot for *trace_id* (issue #128).
+
+        Shared by :meth:`resume_flow` and :meth:`resume_flow_async` so the
+        checkpointer-configured / not-found / version / drift guards stay
+        identical across the sync and async resume lanes.
+        """
         if self._checkpointer is None:
             raise CheckpointerNotConfiguredError()
         snapshot = self._checkpointer.load(trace_id)
@@ -3101,10 +3744,42 @@ class FlowExecutor:
                     f"tool '{tool_name}' schema_hash changed: "
                     f"snapshot='{snap_hash}' current='{current.schema_hash}'",
                 )
+        return flow, snapshot
 
-        if isinstance(flow, DAGFlow):
-            return self._resume_dag_flow(flow, snapshot)
-        return self._resume_linear_flow(flow, snapshot)
+    async def resume_flow_async(self, trace_id: str) -> ExecutionResult:
+        """Asynchronously resume an in-flight execution from a snapshot (#388).
+
+        Coroutine counterpart to :meth:`resume_flow`: applies the identical
+        checkpointer / version / drift guards (via
+        :meth:`_load_snapshot_for_resume`) and then continues execution on the
+        async lane — ``await``-ing each remaining step (linear) or DAG level so
+        async-fn tools run natively.  Use this to resume a run originally
+        executed via :meth:`execute_flow_async`.
+
+        Args:
+            trace_id: Trace id of the snapshot to resume.
+
+        Returns:
+            An :class:`ExecutionResult` for the (now-completed) flow.
+
+        Raises:
+            CheckpointerNotConfiguredError: When no checkpointer was configured.
+            CheckpointNotFoundError: When no snapshot exists for *trace_id*.
+            FlowNotFoundError: When the snapshot's flow is no longer registered.
+            CheckpointDriftError: When the flow version or any tool's
+                ``schema_hash`` changed since the snapshot was written.
+            CheckpointVersionError: When the snapshot's ``snapshot_version`` is
+                incompatible with this library's (issue #395).
+            AsyncLaneUnsupportedError: When the snapshot's flow uses features
+                the async lane does not support (branching / decision
+                callbacks).
+        """
+        flow, snapshot = self._load_snapshot_for_resume(trace_id)
+        self._assert_async_lane_supported(flow)
+        with self._run_scope():
+            if isinstance(flow, DAGFlow):
+                return await self._resume_dag_flow_async(flow, snapshot)
+            return await self._resume_linear_flow_async(flow, snapshot)
 
     def _resume_linear_flow(
         self,
@@ -3248,6 +3923,127 @@ class FlowExecutor:
         self._local.resume_snapshot = snapshot
         try:
             return self._execute_dag_flow(flow, dict(snapshot.initial_input))
+        finally:
+            self._local.resume_snapshot = None
+
+    async def _resume_linear_flow_async(
+        self,
+        flow: Any,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Async counterpart to :meth:`_resume_linear_flow` (issue #388).
+
+        Continues a linear execution from ``snapshot.completed_steps``,
+        ``await``-ing each remaining step so async-fn tools run natively.
+        """
+        self._local.active_flow_version = flow.version
+        trace_id = snapshot.trace_id
+        flow_name = snapshot.flow_name
+        flow_started_at = snapshot.started_at
+        flow_t0 = time.perf_counter()
+        _logger.info(
+            "Flow '%s' (async) resuming | trace_id=%s | from_step=%d",
+            flow_name,
+            trace_id,
+            snapshot.completed_steps,
+        )
+        self._fire_flow_start(
+            FlowStartContext(
+                trace_id=trace_id,
+                flow_name=flow_name,
+                flow_version=flow.version,
+                initial_input=dict(snapshot.initial_input),
+                started_at=flow_started_at,
+                total_steps=len(flow.steps),
+            )
+        )
+
+        context: dict[str, Any] = dict(snapshot.context)
+        log: list[StepRecord] = list(snapshot.execution_log)
+
+        for idx in range(snapshot.completed_steps, len(flow.steps)):
+            step = flow.steps[idx]
+            record = await self._execute_step_async(idx, step, context, flow_name, trace_id)
+            log.append(record)
+
+            if not record.success:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=log,
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                )
+
+            assert record.outputs is not None  # success guarantees outputs
+            context.update(
+                apply_output_mapping(
+                    record.outputs,
+                    step.output_mapping,
+                    tool_name=step.display_name,
+                    step_index=idx,
+                )
+            )
+
+            self._save_linear_snapshot(
+                trace_id=trace_id,
+                flow=flow,
+                initial_input=snapshot.initial_input,
+                started_at=flow_started_at,
+                context=context,
+                log=log,
+                completed_steps=idx + 1,
+            )
+
+        if flow.output_schema is not None:
+            validation_record = self._validate_flow_schema(
+                flow_name=flow_name,
+                payload=context,
+                schema=flow.output_schema,
+                step_index=flow_output_step_index(flow),
+                context_label="flow_output",
+            )
+            if validation_record is not None:
+                return self._make_result(
+                    flow_name=flow_name,
+                    success=False,
+                    final_output=None,
+                    execution_log=[*log, validation_record],
+                    trace_id=trace_id,
+                    started_at=flow_started_at,
+                    perf_start=flow_t0,
+                    initial_input=dict(snapshot.initial_input),
+                    tool_step_count=len(log),
+                )
+
+        return self._make_result(
+            flow_name=flow_name,
+            success=True,
+            final_output=context,
+            execution_log=log,
+            trace_id=trace_id,
+            started_at=flow_started_at,
+            perf_start=flow_t0,
+            initial_input=dict(snapshot.initial_input),
+        )
+
+    async def _resume_dag_flow_async(
+        self,
+        flow: DAGFlow,
+        snapshot: ExecutionSnapshot,
+    ) -> ExecutionResult:
+        """Async counterpart to :meth:`_resume_dag_flow` (issue #388).
+
+        Seeds the resume slot that :meth:`_execute_dag_flow_async` consults to
+        reuse the snapshot's ``trace_id`` / ``started_at`` / context / log and
+        skip the already-completed DAG levels.
+        """
+        self._local.resume_snapshot = snapshot
+        try:
+            return await self._execute_dag_flow_async(flow, dict(snapshot.initial_input))
         finally:
             self._local.resume_snapshot = None
 
@@ -3579,6 +4375,193 @@ class FlowExecutor:
         )
         return record
 
+    def _call_decision_with_timeout(
+        self,
+        callback: DecisionCallback,
+        ctx: DecisionContext,
+        timeout_s: float,
+    ) -> tuple[str, bool]:
+        """Invoke ``callback.decide(ctx)`` with a bounded wall-clock timeout (#370).
+
+        The callback runs on a daemon worker thread joined for at most
+        *timeout_s* seconds — mirroring the threading approach
+        :meth:`stream_flow` already uses — so the executor itself never adds
+        network or LLM behavior and the determinism invariants hold.
+
+        Returns a ``(chosen, timed_out)`` pair.  When the join times out,
+        ``timed_out`` is ``True`` and ``chosen`` is an empty placeholder the
+        caller ignores; the orphaned thread cannot be force-killed and its
+        late return is discarded.  A callback exception is re-raised in the
+        calling thread so the normal :class:`DecisionCallbackError` path
+        handles it.
+        """
+        result_holder: list[str] = []
+        exc_holder: list[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result_holder.append(callback.decide(ctx))
+            except BaseException as exc:  # surfaced in the calling thread below
+                exc_holder.append(exc)
+
+        thread = threading.Thread(
+            target=_runner,
+            name=f"chainweaver-decision-{ctx.flow_name}",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout_s)
+        if thread.is_alive():
+            return "", True
+        if exc_holder:
+            raise exc_holder[0]
+        return result_holder[0], False
+
+    def _resolve_decision(
+        self,
+        step: FlowStep,
+        *,
+        step_index: int,
+        context: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None,
+        started_at: datetime,
+        perf_start: float,
+    ) -> tuple[FlowStep, DecisionRecord | None, StepRecord | None]:
+        """Resolve a guided decision point (#102), recording it for audit (#369).
+
+        Returns ``(resolved_step, decision_record, failure_record)``:
+
+        * ``resolved_step`` is *step* rebound to the chosen tool (or *step*
+          unchanged when no callback ran or the default was re-selected).
+        * ``decision_record`` is the :class:`DecisionRecord` to stamp on the
+          step's trace — populated **only** when a registered callback
+          actually resolved the step; ``None`` otherwise.
+        * ``failure_record`` is a terminal failed :class:`StepRecord` (already
+          emitted to ``on_step_end``) when the callback raised, returned an
+          out-of-set name, or timed out under ``on_timeout="error"``; the
+          caller returns it immediately.  ``None`` on success.
+
+        Raises:
+            DecisionBudgetExceededError: When a :class:`DecisionPolicy` budget
+                is configured and this decision would exceed it — aborting the
+                whole flow rather than a single step (issue #370).
+        """
+        callback = self._decision_callback
+        if step.decision_candidates is None or callback is None:
+            return step, None, None
+
+        default_name = step.display_name
+        candidates = list(step.decision_candidates)
+        policy = self._decision_policy
+
+        # Per-flow decision budget (issue #370): count every decision attempt
+        # in this execution scope and abort the flow once the ceiling is passed.
+        state = self._local
+        state.decision_count += 1
+        if (
+            policy is not None
+            and policy.max_decisions_per_flow is not None
+            and state.decision_count > policy.max_decisions_per_flow
+        ):
+            raise DecisionBudgetExceededError(flow_name, policy.max_decisions_per_flow)
+
+        def _failed(err: ChainWeaverError) -> StepRecord:
+            log_step_error(_logger, step_index, default_name, err)
+            err_type, err_msg = _exc_to_strings(err)
+            record = StepRecord(
+                step_index=step_index,
+                tool_name=default_name,
+                inputs={},
+                outputs=None,
+                error_type=err_type,
+                error_message=err_msg,
+                success=False,
+                started_at=started_at,
+                ended_at=_now_utc(),
+                duration_ms=(time.perf_counter() - perf_start) * 1000.0,
+            )
+            self._fire_step_end(
+                StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
+            )
+            return record
+
+        ctx = DecisionContext(
+            trace_id=trace_id,
+            flow_name=flow_name,
+            step_index=step_index,
+            step_id=step_id,
+            default_tool_name=default_name,
+            candidates=candidates,
+            context=dict(context),
+        )
+
+        decide_t0 = time.perf_counter()
+        timed_out = False
+        try:
+            if policy is not None and policy.timeout_s is not None:
+                chosen, timed_out = self._call_decision_with_timeout(
+                    callback, ctx, policy.timeout_s
+                )
+            else:
+                chosen = callback.decide(ctx)
+        except Exception as exc:
+            err = DecisionCallbackError(
+                default_name,
+                step_index,
+                f"callback raised {type(exc).__name__}: {exc}",
+            )
+            err.__cause__ = exc
+            return step, None, _failed(err)
+        decide_ms = (time.perf_counter() - decide_t0) * 1000.0
+
+        if timed_out:
+            # ``policy`` is non-None here (timeout only fires when set).
+            assert policy is not None and policy.timeout_s is not None
+            if policy.on_timeout == "error":
+                return (
+                    step,
+                    None,
+                    _failed(DecisionTimeoutError(default_name, step_index, policy.timeout_s)),
+                )
+            # ``on_timeout="default"``: route around the (possibly still-running)
+            # callback to the step's static tool and mark the fallback.
+            decision = DecisionRecord(
+                candidates=candidates,
+                chosen=default_name,
+                default_tool_name=default_name,
+                duration_ms=decide_ms,
+                timed_out=True,
+            )
+            return step, decision, None
+
+        if chosen not in step.decision_candidates:
+            return (
+                step,
+                None,
+                _failed(
+                    DecisionCallbackError(
+                        default_name,
+                        step_index,
+                        f"callback returned '{chosen}' which is not in "
+                        f"decision_candidates={candidates!r}",
+                    )
+                ),
+            )
+
+        decision = DecisionRecord(
+            candidates=candidates,
+            chosen=chosen,
+            default_tool_name=default_name,
+            duration_ms=decide_ms,
+            timed_out=False,
+        )
+        resolved = (
+            step if chosen == default_name else step.model_copy(update={"tool_name": chosen})
+        )
+        return resolved, decision, None
+
     def _execute_step(
         self,
         step_index: int,
@@ -3635,82 +4618,28 @@ class FlowExecutor:
                 deadline=deadline,
                 cancel_token=cancel_token,
             )
-        # Resolve guided decision points (issue #102).  When the step
-        # declares ``decision_candidates`` *and* the executor has a
-        # ``decision_callback`` registered, ask the callback which
-        # candidate to invoke and rebind the step to that tool for the
-        # remainder of this call.  No callback registered → fall back to
-        # the static ``tool_name`` so flows stay runnable without the
-        # integration.  Callback failures fail the step early via
-        # ``DecisionCallbackError`` — silent fall-through would mask
-        # configuration bugs.
-        if step.decision_candidates is not None and self._decision_callback is not None:
-            try:
-                chosen = self._decision_callback.decide(
-                    DecisionContext(
-                        trace_id=trace_id,
-                        flow_name=flow_name,
-                        step_index=step_index,
-                        step_id=step_id,
-                        default_tool_name=step.display_name,
-                        candidates=list(step.decision_candidates),
-                        context=dict(context),
-                    )
-                )
-            except Exception as exc:
-                err = DecisionCallbackError(
-                    step.display_name,
-                    step_index,
-                    f"callback raised {type(exc).__name__}: {exc}",
-                )
-                err.__cause__ = exc
-                log_step_error(_logger, step_index, step.display_name, err)
-                err_type, err_msg = _exc_to_strings(err)
-                now = _now_utc()
-                record = StepRecord(
-                    step_index=step_index,
-                    tool_name=step.display_name,
-                    inputs={},
-                    outputs=None,
-                    error_type=err_type,
-                    error_message=err_msg,
-                    success=False,
-                    started_at=started_at,
-                    ended_at=now,
-                    duration_ms=(time.perf_counter() - t0) * 1000.0,
-                )
-                self._fire_step_end(
-                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
-                )
-                return record
-            if chosen not in step.decision_candidates:
-                err = DecisionCallbackError(
-                    step.display_name,
-                    step_index,
-                    f"callback returned '{chosen}' which is not in "
-                    f"decision_candidates={list(step.decision_candidates)!r}",
-                )
-                log_step_error(_logger, step_index, step.display_name, err)
-                err_type, err_msg = _exc_to_strings(err)
-                now = _now_utc()
-                record = StepRecord(
-                    step_index=step_index,
-                    tool_name=step.display_name,
-                    inputs={},
-                    outputs=None,
-                    error_type=err_type,
-                    error_message=err_msg,
-                    success=False,
-                    started_at=started_at,
-                    ended_at=now,
-                    duration_ms=(time.perf_counter() - t0) * 1000.0,
-                )
-                self._fire_step_end(
-                    StepEndContext(trace_id=trace_id, flow_name=flow_name, step_record=record)
-                )
-                return record
-            if chosen != step.display_name:
-                step = step.model_copy(update={"tool_name": chosen})
+        # Resolve guided decision points (issue #102).  When the step declares
+        # ``decision_candidates`` *and* the executor has a ``decision_callback``
+        # registered, ask the callback which candidate to invoke and rebind the
+        # step to that tool for the remainder of this call.  No callback
+        # registered → fall back to the static ``tool_name`` so flows stay
+        # runnable without the integration.  ``_resolve_decision`` also records
+        # the choice for the audit trail (issue #369) and enforces any
+        # ``DecisionPolicy`` timeout / budget (issue #370); callback failures
+        # fail the step early via a returned record — silent fall-through would
+        # mask configuration bugs.
+        step, decision_record, decision_failure = self._resolve_decision(
+            step,
+            step_index=step_index,
+            context=context,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=step_id,
+            started_at=started_at,
+            perf_start=t0,
+        )
+        if decision_failure is not None:
+            return decision_failure
         # Mutable holder so ``_invoke_tool`` can report how many times the
         # primary tool was actually called.  Threading this through (instead
         # of deriving from ``len(retry_errors)``) keeps ``retry_count``
@@ -3758,6 +4687,7 @@ class FlowExecutor:
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
                 approval=approval_record,
+                decision=decision_record,
             )
 
         def _finish(record: StepRecord) -> StepRecord:

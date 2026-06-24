@@ -743,6 +743,56 @@ class DecisionCallbackError(ChainWeaverError):
         )
 
 
+class DecisionTimeoutError(ChainWeaverError):
+    """Raised when a decision callback overruns its timeout (issue #370).
+
+    Only raised when a :class:`~chainweaver.decisions.DecisionPolicy` with
+    ``on_timeout="error"`` is active and the callback's ``decide`` call
+    exceeds :attr:`~chainweaver.decisions.DecisionPolicy.timeout_s`.  Under
+    ``on_timeout="default"`` the executor falls back to the step's static
+    ``tool_name`` instead of raising.
+
+    The orphaned callback thread cannot be force-killed and may complete in
+    the background; its late return is discarded.
+
+    Attributes:
+        tool_name: The step's static ``tool_name`` at the decision point.
+        step_index: Zero-based position of the step inside the flow.
+        timeout_s: The configured per-decision timeout, in seconds.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, timeout_s: float) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.timeout_s = timeout_s
+        super().__init__(
+            f"Decision callback for step {step_index} (default tool '{tool_name}') "
+            f"exceeded the {timeout_s}s timeout."
+        )
+
+
+class DecisionBudgetExceededError(ChainWeaverError):
+    """Raised when a flow exceeds its decision budget (issue #370).
+
+    Raised when a :class:`~chainweaver.decisions.DecisionPolicy` sets
+    ``max_decisions_per_flow`` and the running flow attempts more decision
+    callbacks than that ceiling allows.  Unlike a callback failure (which
+    aborts a single step), exceeding the budget aborts the whole flow run.
+
+    Attributes:
+        flow_name: Name of the flow that exhausted its decision budget.
+        budget: The configured ``max_decisions_per_flow`` ceiling.
+    """
+
+    def __init__(self, flow_name: str, budget: int) -> None:
+        self.flow_name = flow_name
+        self.budget = budget
+        super().__init__(
+            f"Flow '{flow_name}' exceeded its decision budget of {budget} "
+            f"decision callback(s) per execution."
+        )
+
+
 class KernelInvocationError(ChainWeaverError):
     """Raised when a :class:`~chainweaver.integrations.agent_kernel.KernelBackedExecutor`
     cannot dispatch a capability step (issue #89).
@@ -985,6 +1035,8 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     FlowAuthenticationError: "CW-E045",
     RateLimitExceededError: "CW-E046",
     FlowAuthorizationError: "CW-E047",
+    DecisionTimeoutError: "CW-E049",
+    DecisionBudgetExceededError: "CW-E050",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

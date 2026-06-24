@@ -283,57 +283,46 @@ class TestExecuteFlowAsyncUnsupportedFeatures:
         with pytest.raises(AsyncLaneUnsupportedError, match="default_next"):
             await executor.execute_flow_async("routed", {"n": 1})
 
-    async def test_subflow_step_rejected(self) -> None:
-        registry = FlowRegistry()
-        leaf = Flow(
-            name="leaf",
-            version="1.0.0",
-            description="",
-            steps=[FlowStep(tool_name="async_increment", input_mapping={"n": "n"})],
-        )
-        parent = Flow(
-            name="parent",
-            version="1.0.0",
-            description="",
-            steps=[FlowStep(flow_name="leaf", input_mapping={"n": "n"})],
-        )
-        registry.register_flow(leaf)
-        registry.register_flow(parent)
-        executor = FlowExecutor(registry=registry)
-        with pytest.raises(AsyncLaneUnsupportedError, match="sub-flow"):
-            await executor.execute_flow_async("parent", {"n": 1})
-
     async def test_error_lists_all_unsupported_constructs(self) -> None:
+        # Two *still*-unsupported families on the async lane (issue #388 added
+        # sub-flow support but branching and decision callbacks remain): a
+        # decision_candidates step and a branches step are both reported in one
+        # error, before any step runs.
         registry = FlowRegistry()
-        flow = Flow(
+        dag = DAGFlow(
             name="multi",
             version="1.0.0",
             description="",
             steps=[
-                FlowStep(
+                DAGFlowStep(
+                    step_id="a",
                     tool_name="async_increment",
                     input_mapping={"n": "n"},
                     decision_candidates=["async_increment", "async_double_value"],
                 ),
-                FlowStep(flow_name="leaf", input_mapping={"n": "n"}),
+                DAGFlowStep(
+                    step_id="b",
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    depends_on=["a"],
+                    branches=[ConditionalEdge(target_step_id="c", predicate="n > 0")],
+                ),
+                DAGFlowStep(
+                    step_id="c",
+                    tool_name="async_increment",
+                    input_mapping={"n": "n"},
+                    depends_on=["b"],
+                ),
             ],
         )
-        leaf = Flow(
-            name="leaf",
-            version="1.0.0",
-            description="",
-            steps=[FlowStep(tool_name="async_increment", input_mapping={"n": "n"})],
-        )
-        registry.register_flow(leaf)
-        registry.register_flow(flow)
+        registry.register_flow(dag)
         executor = FlowExecutor(registry=registry)
         with pytest.raises(AsyncLaneUnsupportedError) as exc_info:
             await executor.execute_flow_async("multi", {"n": 1})
-        # Both unsupported constructs are reported in one error, before any step.
         assert len(exc_info.value.unsupported) == 2
         message = str(exc_info.value)
         assert "decision_candidates" in message
-        assert "sub-flow" in message
+        assert "conditional branches" in message
 
 
 class TestExecuteFlowAsyncFallback:

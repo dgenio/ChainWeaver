@@ -41,10 +41,14 @@
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DecisionBudgetExceededError",
     "DecisionCallable",
     "DecisionCallback",
     "DecisionCallbackError",
     "DecisionContext",
+    "DecisionPolicy",
+    "DecisionRecord",
+    "DecisionTimeoutError",
     "DeterminismLevel",
     "DraftFlow",
     "DriftInfo",
@@ -142,15 +146,18 @@
     "StabilityLevel",
     "StepCache",
     "StepCacheKey",
+    "StepChunkContext",
     "StepDiff",
     "StepEndContext",
     "StepPlan",
     "StepRecord",
     "StepStartContext",
+    "StreamingTool",
     "StructuredLLMFn",
     "Suggestion",
     "Tool",
     "ToolChain",
+    "ToolChunk",
     "ToolDefinitionError",
     "ToolDescriptionProposal",
     "ToolNotFoundError",
@@ -581,6 +588,12 @@
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
     },
+    "DecisionBudgetExceededError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "DecisionBudgetExceededError",
+      "signature": "(flow_name: str, budget: int) -> None"
+    },
     "DecisionCallable": {
       "kind": "_CallableGenericAlias",
       "module": "collections.abc",
@@ -611,6 +624,34 @@
       },
       "module": "chainweaver.decisions",
       "qualname": "DecisionContext"
+    },
+    "DecisionPolicy": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "max_decisions_per_flow": "int | NoneType",
+        "on_timeout": "Literal['error', 'default']",
+        "timeout_s": "float | NoneType"
+      },
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionPolicy"
+    },
+    "DecisionRecord": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "candidates": "list[str]",
+        "chosen": "str",
+        "default_tool_name": "str",
+        "duration_ms": "float",
+        "timed_out": "bool"
+      },
+      "module": "chainweaver.decisions",
+      "qualname": "DecisionRecord"
+    },
+    "DecisionTimeoutError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "DecisionTimeoutError",
+      "signature": "(tool_name: str, step_index: int, timeout_s: float) -> None"
     },
     "DeterminismLevel": {
       "kind": "enum",
@@ -797,11 +838,12 @@
     "FlowEvent": {
       "kind": "pydantic-model",
       "model_fields": {
+        "chunk": "chainweaver.tools.ToolChunk | NoneType",
         "flow_name": "str",
         "flow_version": "str | NoneType",
         "initial_input": "dict[str, Any] | NoneType",
         "inputs": "dict[str, Any] | NoneType",
-        "kind": "Literal['flow_start', 'step_start', 'step_end', 'flow_end']",
+        "kind": "Literal['flow_start', 'step_start', 'step_chunk', 'step_end', 'flow_end']",
         "result": "chainweaver.executor.ExecutionResult | NoneType",
         "step_index": "int | NoneType",
         "step_record": "chainweaver.executor.StepRecord | NoneType",
@@ -823,7 +865,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, decision_policy: DecisionPolicy | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -1407,6 +1449,18 @@
       "module": "chainweaver.cache",
       "qualname": "StepCacheKey"
     },
+    "StepChunkContext": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "chunk": "chainweaver.tools.ToolChunk",
+        "flow_name": "str",
+        "step_index": "int",
+        "tool_name": "str",
+        "trace_id": "str"
+      },
+      "module": "chainweaver.middleware",
+      "qualname": "StepChunkContext"
+    },
     "StepDiff": {
       "kind": "pydantic-model",
       "model_fields": {
@@ -1448,6 +1502,7 @@
       "model_fields": {
         "approval": "chainweaver.approvals.ApprovalRecord | NoneType",
         "cached": "bool",
+        "decision": "chainweaver.decisions.DecisionRecord | NoneType",
         "duration_ms": "float",
         "ended_at": "datetime.datetime",
         "error_code": "str | NoneType",
@@ -1483,6 +1538,12 @@
       "module": "chainweaver.middleware",
       "qualname": "StepStartContext"
     },
+    "StreamingTool": {
+      "kind": "class",
+      "module": "chainweaver.tools",
+      "qualname": "StreamingTool",
+      "signature": "(*, name: str, description: str, input_schema: type[BaseModel], output_schema: type[BaseModel], stream_fn: Callable[[Any], AsyncIterator[ToolChunk]], timeout_seconds: float | None = None, max_output_size: int | None = None, schema_version: str = '0.0.0', cacheable: bool | None = None, safety: ToolSafetyContract | None = None, metadata: dict[str, Any] | None = None) -> None"
+    },
     "StructuredLLMFn": {
       "kind": "class",
       "module": "chainweaver.proposals",
@@ -1511,6 +1572,15 @@
       "kind": "GenericAlias",
       "module": "builtins",
       "qualname": "tuple"
+    },
+    "ToolChunk": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "data": "Any",
+        "is_final": "bool"
+      },
+      "module": "chainweaver.tools",
+      "qualname": "ToolChunk"
     },
     "ToolDefinitionError": {
       "kind": "class",
