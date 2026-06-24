@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781771100621,
+  "lastUpdate": 1782307977204,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3312,6 +3312,78 @@ window.BENCHMARK_DATA = {
             "value": 0.8406010000072683,
             "unit": "ms",
             "extra": "min=0.83ms max=0.87ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "547d0e081fc632c714f9d745173ac6d5575431d8",
+          "message": "Merge pull request #471 from dgenio/claude/github-issue-triage-rle6rj\n\nfeat(executor): async/streaming execution-path parity + decision-callback controls (#388, #389, #320, #369, #370)",
+          "timestamp": "2026-06-24T14:31:28+01:00",
+          "tree_id": "f91ef417312b9943603d43882961958f895c4e5f",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/547d0e081fc632c714f9d745173ac6d5575431d8"
+        },
+        "date": 1782307976864,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.2989509999906659,
+            "unit": "ms",
+            "extra": "min=0.27ms max=0.47ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.22098399995229556,
+            "unit": "ms",
+            "extra": "min=0.21ms max=0.35ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.3813150000269161,
+            "unit": "ms",
+            "extra": "min=0.38ms max=0.45ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.27576400003681556,
+            "unit": "ms",
+            "extra": "min=0.27ms max=0.33ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.21977800000559,
+            "unit": "ms",
+            "extra": "min=102.13ms max=102.36ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.7533979999720941,
+            "unit": "ms",
+            "extra": "min=0.71ms max=0.94ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.62011800000528,
+            "unit": "ms",
+            "extra": "min=251.62ms max=251.84ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.6304510000063601,
+            "unit": "ms",
+            "extra": "min=0.62ms max=0.67ms repeats=5"
           }
         ]
       }
