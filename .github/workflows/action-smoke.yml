@@ -22,7 +22,7 @@ jobs:
     name: annotate.py unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
@@ -37,7 +37,7 @@ jobs:
     name: valid flows pass
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run action against the bundled valid flow
         id: cw
         uses: ./.github/actions/chainweaver
@@ -54,7 +54,7 @@ jobs:
     name: invalid flow fails with annotation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Create an invalid flow fixture
         run: |
           mkdir -p "${RUNNER_TEMP}/flows"

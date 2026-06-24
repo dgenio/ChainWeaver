@@ -28,7 +28,7 @@ jobs:
     env:
       MCP_PUBLISHER_VERSION: "1.7.9"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.event.workflow_run.head_sha }}
           fetch-depth: 0
