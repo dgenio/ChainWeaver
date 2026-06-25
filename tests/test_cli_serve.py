@@ -122,6 +122,7 @@ class TestServeCommandWiring:
             transport=cli.ServeTransport.SSE,
             name="chainweaver",
             prefix="",
+            schema_ref_allow=[],
         )
         assert fake.served_transport == "sse"
         err = capsys.readouterr().err

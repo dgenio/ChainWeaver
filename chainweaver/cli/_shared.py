@@ -18,7 +18,7 @@ from chainweaver.exceptions import (
     FlowSerializationError,
 )
 from chainweaver.executor import ExecutionResult
-from chainweaver.flow import DAGFlow, Flow
+from chainweaver.flow import DAGFlow, Flow, SchemaRefAllowlist, set_schema_ref_policy
 from chainweaver.observer import ChainObserver
 from chainweaver.plugins import discover_flows
 from chainweaver.registry import FlowRegistry
@@ -392,6 +392,27 @@ _RUN_TOOLS_OPTION = typer.Option(
         "(e.g. 'my_pkg.tools'). Repeatable."
     ),
 )
+_SCHEMA_REF_ALLOW_OPTION = typer.Option(
+    [],
+    "--schema-ref-allow",
+    help=(
+        "Restrict schema-ref module resolution to the given module prefix(es); "
+        "repeatable. When set, a flow referencing a non-allowlisted module fails "
+        "before the module is imported (issue #345). "
+        "Example: '--schema-ref-allow myapp.schemas' (no trailing dot)."
+    ),
+)
+
+
+def apply_schema_ref_allow(prefixes: list[str]) -> None:
+    """Install a :class:`SchemaRefAllowlist` policy for this CLI process.
+
+    A no-op when *prefixes* is empty, preserving the permissive default.  CLI
+    processes are short-lived, so a process-wide policy is the simplest seam
+    that covers both load-time and execution-time ref resolution.
+    """
+    if prefixes:
+        set_schema_ref_policy(SchemaRefAllowlist(prefixes))
 
 
 def _load_execution_result(path: Path) -> ExecutionResult:

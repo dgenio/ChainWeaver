@@ -144,6 +144,7 @@ from chainweaver.exceptions import (
     PromptBudgetExceededError,
     RateLimitExceededError,
     SafetyCeilingError,
+    SchemaRefPolicyError,
     SchemaValidationError,
     ToolDefinitionError,
     ToolNotFoundError,
@@ -171,6 +172,11 @@ from chainweaver.flow import (
     FlowStatus,
     FlowStep,
     RetryPolicy,
+    SchemaRefAllowlist,
+    SchemaRefPolicy,
+    get_schema_ref_policy,
+    schema_ref_policy,
+    set_schema_ref_policy,
     validate_dag_topology,
 )
 from chainweaver.fuzz import (
@@ -242,6 +248,8 @@ from chainweaver.routing import (
 )
 from chainweaver.schemas import flow_schema_json
 from chainweaver.serialization import (
+    DEFAULT_PARSE_LIMITS,
+    FlowParseLimits,
     flow_from_dict,
     flow_from_json,
     flow_from_yaml,
@@ -300,6 +308,7 @@ __version__ = "0.13.0"
 
 __all__ = [
     "BUILTIN_PROPERTIES",
+    "DEFAULT_PARSE_LIMITS",
     "FLOW_INPUT_STEP_INDEX",
     "OPENCODE_OBSERVE_PLUGIN_FILENAME",
     "OPENCODE_TOOL_PREFIX",
@@ -382,6 +391,7 @@ __all__ = [
     "FlowGovernance",
     "FlowLifecycle",
     "FlowNotFoundError",
+    "FlowParseLimits",
     "FlowProperty",
     "FlowRegistry",
     "FlowSerializationError",
@@ -436,6 +446,9 @@ __all__ = [
     "RoutingEvalResult",
     "SafetyCeilingError",
     "SafetyLevel",
+    "SchemaRefAllowlist",
+    "SchemaRefPolicy",
+    "SchemaRefPolicyError",
     "SchemaValidationError",
     "ServiceConfig",
     "ServiceEvent",
@@ -497,6 +510,7 @@ __all__ = [
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "get_schema_ref_policy",
     "llm_propose_flows",
     "load_agent_trace",
     "lookup_price",
@@ -515,7 +529,9 @@ __all__ = [
     "result_to_mermaid",
     "safe_macro_tool_name",
     "schema_fingerprint",
+    "schema_ref_policy",
     "score_candidate",
+    "set_schema_ref_policy",
     "side_effect_exceeds",
     "suggest_optimizations",
     "tool",
