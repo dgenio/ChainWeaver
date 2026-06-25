@@ -70,19 +70,17 @@ jobs:
           RUNS: ${{ github.event.inputs.runs || '200' }}
         run: |
           set -euo pipefail
-          seed="${SEED}"
-          runs="${RUNS}"
-          echo "::notice::Fuzzing with seed=${seed} runs=${runs}"
+          echo "::notice::Fuzzing with seed=${SEED} runs=${RUNS}"
           echo "Reproduce locally with:"
           echo "  PYTHONPATH=. chainweaver fuzz examples/fuzzable_linear.flow.yaml \\"
           echo "    --tools examples.simple_linear_flow \\"
           echo "    --property examples.fuzz_properties:gracefully_handles_input \\"
-          echo "    --runs ${runs} --seed ${seed}"
+          echo "    --runs ${RUNS} --seed ${SEED}"
           chainweaver fuzz examples/fuzzable_linear.flow.yaml \
             --tools examples.simple_linear_flow \
             --property examples.fuzz_properties:gracefully_handles_input \
-            --runs "${runs}" \
-            --seed "${seed}" \
+            --runs "${RUNS}" \
+            --seed "${SEED}" \
             --minimize \
             --save-failures fuzz-failures
 
