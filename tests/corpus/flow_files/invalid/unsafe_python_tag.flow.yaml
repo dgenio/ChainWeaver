@@ -1,0 +1,2 @@
+type: Flow
+name: !!python/object/apply:os.system ["echo hi"]

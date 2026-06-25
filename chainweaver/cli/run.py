@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from chainweaver.cli._shared import (
     _RUN_FILE_ARG,
     _RUN_TOOLS_OPTION,
+    _SCHEMA_REF_ALLOW_OPTION,
     OutputFormat,
     _emit_json,
     _error_line,
@@ -33,6 +34,7 @@ from chainweaver.cli._shared import (
     _require_existing_file,
     _run_result_to_table,
     app,
+    apply_schema_ref_allow,
 )
 
 _RUN_INPUT_OPTION = typer.Option(
@@ -69,6 +71,7 @@ def run_command(
     input_file: Path | None = _RUN_INPUT_FILE_OPTION,
     output_format: OutputFormat = _RUN_FORMAT_OPTION,
     quiet: bool = _RUN_QUIET_OPTION,
+    schema_ref_allow: list[str] = _SCHEMA_REF_ALLOW_OPTION,
 ) -> None:
     """Execute a flow loaded from disk and print its result.
 
@@ -84,6 +87,7 @@ def run_command(
     - ``2`` — flow file or tools module not found / not importable.
     """
     _require_existing_file(flow_file)
+    apply_schema_ref_allow(schema_ref_allow)
 
     try:
         flow = _load_flow_file(flow_file)
@@ -290,6 +294,7 @@ def serve_command(
     transport: ServeTransport = _SERVE_TRANSPORT_OPTION,
     name: str = _SERVE_NAME_OPTION,
     prefix: str = _SERVE_PREFIX_OPTION,
+    schema_ref_allow: list[str] = _SCHEMA_REF_ALLOW_OPTION,
 ) -> None:
     """Expose compiled flow tools over MCP (issues #72, #230, #279).
 
@@ -309,6 +314,7 @@ def serve_command(
     Exit codes: ``1`` = malformed flow file or missing ``mcp`` extra,
     ``2`` = flow file not found or tools module not importable.
     """
+    apply_schema_ref_allow(schema_ref_allow)
     server = _build_flow_server(flow_file, tools, name=name, server_prefix=prefix)
     typer.echo(
         f"chainweaver: serving {len(server.registered_tool_names)} flow tool(s) "

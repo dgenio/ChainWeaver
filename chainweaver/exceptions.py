@@ -977,6 +977,32 @@ class PredicateSyntaxError(ChainWeaverError):
         super().__init__(f"Invalid predicate '{predicate}': {detail}")
 
 
+class SchemaRefPolicyError(ChainWeaverError):
+    """Raised when a schema/exception class ref is rejected by the active policy.
+
+    Schema refs (``Flow.input_schema_ref`` etc.) and retry-error refs resolve a
+    ``"module:qualname"`` string by importing the module half (issue #345).
+    Importing a module runs its top-level code, so deployments that load flow
+    files from semi-trusted sources can install an allowlist policy via
+    :func:`chainweaver.flow.set_schema_ref_policy` /
+    :func:`chainweaver.flow.schema_ref_policy`.  When a ref's module path fails
+    that policy this is raised **before** any import is attempted.
+
+    Attributes:
+        module_path: The module half of the rejected ref.
+        ref: The full ``"module:qualname"`` ref that was rejected.
+        detail: Human-readable explanation of why the ref was rejected.
+    """
+
+    def __init__(self, module_path: str, ref: str, detail: str | None = None) -> None:
+        self.module_path = module_path
+        self.ref = ref
+        self.detail = detail or (
+            f"Module '{module_path}' is not permitted by the active schema-ref policy"
+        )
+        super().__init__(f"Schema ref '{ref}' rejected: {self.detail}.")
+
+
 # ---------------------------------------------------------------------------
 # Stable diagnostic codes (issue #390)
 # ---------------------------------------------------------------------------
@@ -1037,6 +1063,7 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     FlowAuthorizationError: "CW-E047",
     DecisionTimeoutError: "CW-E049",
     DecisionBudgetExceededError: "CW-E050",
+    SchemaRefPolicyError: "CW-E051",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

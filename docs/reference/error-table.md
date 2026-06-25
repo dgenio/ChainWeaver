@@ -68,6 +68,7 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E048` | `OpenCodeAdapterError` | An OpenCode plugin payload could not be normalized into a trace event, or a flow name has no name-safe characters. |
 | `CW-E049` | `DecisionTimeoutError` | A decision callback exceeded the `DecisionPolicy.timeout_s` budget while `on_timeout="error"` was in effect. |
 | `CW-E050` | `DecisionBudgetExceededError` | A flow exceeded its `DecisionPolicy.max_decisions_per_flow` budget. |
+| `CW-E051` | `SchemaRefPolicyError` | The active schema-ref policy rejected a `"module:qualname"` ref's module path before importing it (`set_schema_ref_policy` / `SchemaRefAllowlist`). |
 
 ## Catching strategy
 
