@@ -9,6 +9,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/chainweaver)](https://pypi.org/project/chainweaver/)
 [![License](https://img.shields.io/github/license/dgenio/ChainWeaver)](LICENSE)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/ChainWeaver/blob/main/notebooks/quickstart.ipynb)
+[![Read the Weaver Stack overview on Towards AI](https://img.shields.io/badge/Read_the_overview-Towards_AI-black?logo=medium&logoColor=white)](https://pub.towardsai.net/the-weaver-stack-one-contract-layer-for-safe-llm-agents-7f733cad5eac)
 
 <p align="center">
   <img src="docs/assets/quickstart.svg" alt="ChainWeaver quick start: pip install, run a flow, and see the LLM-free step log" width="760">
