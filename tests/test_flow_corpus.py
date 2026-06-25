@@ -50,9 +50,9 @@ _CASE_IDS = [case["file"] for case in _CASES]
 
 
 def test_corpus_has_at_least_25_cases() -> None:
-    # Acceptance criterion (#400): >= 25 corpus cases.  Committed files plus the
-    # five generated resource cases below comfortably clear the bar.
-    assert len(_CASES) >= 20
+    # Acceptance criterion (#400): >= 25 corpus cases, satisfied by the committed
+    # manifest alone (the generated resource cases below are additional).
+    assert len(_CASES) >= 25
 
 
 @pytest.mark.parametrize("case", _CASES, ids=_CASE_IDS)

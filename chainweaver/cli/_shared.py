@@ -398,8 +398,8 @@ _SCHEMA_REF_ALLOW_OPTION = typer.Option(
     help=(
         "Restrict schema-ref module resolution to the given module prefix(es); "
         "repeatable. When set, a flow referencing a non-allowlisted module fails "
-        "before the module is imported (issue #345). Example: "
-        "--schema-ref-allow myapp.schemas."
+        "before the module is imported (issue #345). "
+        "Example: '--schema-ref-allow myapp.schemas' (no trailing dot)."
     ),
 )
 
