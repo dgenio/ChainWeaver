@@ -52,7 +52,7 @@ They are non-negotiable.
 Network I/O and randomness are allowed in **tool functions** — the executor
 only manages the data flow between tools.
 
-### Automated enforcement (since #354)
+### Automated enforcement (since #354; dynamic-import hardening #430)
 
 The three hard invariants are mechanically enforced by
 `tests/test_executor_import_contract.py`, which runs as part of the normal
@@ -65,13 +65,19 @@ The three hard invariants are mechanically enforced by
   the in-repo modules already marked "banned from executor.py" in the repo map
   (`compiler_llm`, `optimizer`, `observer`, `traces`, `lessons`, `service`,
   `_offline_llm`).
+- **Literal dynamic import patterns** — the same execution modules reject
+  reviewable bypasses such as `__import__("random")`,
+  `importlib.import_module("openai")`, and simple aliases when the target is
+  a string literal. The check intentionally does not evaluate runtime-built
+  strings; those should not appear in executor code.
 - **Transitive in-repo reach** — following `chainweaver.*` imports out of the
   execution modules, none of the deterministic-execution closure may reach a
   banned in-repo module, so a helper cannot smuggle an LLM proposer onto the
   execution path indirectly.
 
-A PR that adds `import random` (or any banned import) to the execution modules
-fails this test with a message pointing back at this document.
+A PR that adds `import random`, `__import__("random")`, or any banned import
+to the execution modules fails this test with a message pointing back at this
+document.
 
 **Carve-outs:** `uuid` is the single reviewed exception, for the trace-id
 carve-out above. It is kept deliberately *off* the banned list (rather than
