@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Executor determinism import-contract hardening** (#430): the guard in
+  `tests/test_executor_import_contract.py` now rejects obvious literal dynamic
+  import patterns (`__import__("random")`,
+  `importlib.import_module("openai")`, including simple aliases) in
+  `executor.py` and `chainweaver/_execution/`, closing a bypass around the
+  existing #354 direct-import and import-closure checks.
+
 - **Run-scoped state is now isolated per asyncio task** (#336): the executor's
   run-scoped markers (injected `dynamic_params`, `active_flow_version`, the
   replay/resume flags, and the `stream_flow` event collector) moved from a
