@@ -70,6 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Flow model package split** (#396): `chainweaver/flow.py` is now a focused
+  `chainweaver/flow/` package covering definitions, steps, DAG topology,
+  governance, drift, and class-reference resolution. The historical
+  `chainweaver.flow` imports, public symbol metadata, serialized references,
+  and runtime behavior are unchanged.
+
 - **Determinism reclassification for decision-bearing flows** (#369,
   breaking): a linear `Flow` or `DAGFlow` containing any step with non-empty
   `decision_candidates` now reports `DeterminismLevel.PARTIAL` instead of

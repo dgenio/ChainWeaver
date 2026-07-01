@@ -41,6 +41,7 @@ python -m pytest tests/ -v
 | `distribution-check.yml` | Successful `publish.yml` run or manual dispatch | Verify PyPI propagation, tag/SHA, manifest, action pin, and released Action smoke |
 | `action-smoke.yml` | Action/workflow changes | Exercise action code against the latest already-published package before release |
 | `bench.yml` | Push/PR to `main` | Run the benchmark for every change; alert at 200% only when executor-path or benchmark files changed |
+| `fuzz.yml` | Weekly `schedule` + `workflow_dispatch` (issue #340) | Run `chainweaver fuzz` over `examples/fuzzable_linear.flow.yaml` against the `gracefully_handles_input` invariant; seed = run id (echoed for repro); upload the minimized counterexample on failure. Scheduled-only — kept off the PR-blocking path |
 
 ---
 
@@ -108,6 +109,13 @@ and reruns never move an existing release tag.
   the seed is preserved in CI logs for repro. Strategy modules import
   helpers from `tests/helpers.py` via the bare module name — do not
   generate arbitrary Pydantic schemas at runtime.
+- **Adversarial flow-file corpus (issue #400):** malformed/hostile flow
+  files live under `tests/corpus/flow_files/invalid/` with a `manifest.json`
+  pinning the expected `FlowSerializationError` substring per file;
+  `tests/test_flow_corpus.py` drives every entry through the library loaders
+  and `chainweaver validate`, plus generated resource-shaped cases for the
+  parse guardrails (issue #416). Pin exception **types** and substrings, never
+  full message text. See `tests/corpus/flow_files/README.md` to add a case.
 
 ---
 

@@ -1,0 +1,147 @@
+[
+  {
+    "file": "invalid/top_level_list.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/top_level_string.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/top_level_number.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/top_level_null.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/top_level_list.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/top_level_scalar.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Expected a mapping at the top level"
+  },
+  {
+    "file": "invalid/trailing_comma.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Invalid JSON"
+  },
+  {
+    "file": "invalid/truncated.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Invalid JSON"
+  },
+  {
+    "file": "invalid/bom_prefixed.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Invalid JSON"
+  },
+  {
+    "file": "invalid/unclosed_sequence.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Invalid YAML"
+  },
+  {
+    "file": "invalid/tab_indentation.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Invalid YAML"
+  },
+  {
+    "file": "invalid/unsafe_python_tag.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Invalid YAML"
+  },
+  {
+    "file": "invalid/empty.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "YAML payload is empty"
+  },
+  {
+    "file": "invalid/missing_type.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Missing or invalid 'type' discriminator"
+  },
+  {
+    "file": "invalid/unknown_type.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Missing or invalid 'type' discriminator"
+  },
+  {
+    "file": "invalid/missing_type.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Missing or invalid 'type' discriminator"
+  },
+  {
+    "file": "invalid/future_format_version.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Unsupported flow file format_version"
+  },
+  {
+    "file": "invalid/missing_required_fields.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/steps_not_a_list.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/steps_null.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/name_wrong_type.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/version_wrong_type.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/step_missing_tool_name.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/step_not_an_object.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/step_input_mapping_scalar.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/dag_missing_version.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/dag_step_missing_id.flow.json",
+    "format": "json",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/steps_scalar.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  },
+  {
+    "file": "invalid/missing_required_fields.flow.yaml",
+    "format": "yaml",
+    "expect_detail_substring": "Validation failed while reconstructing"
+  }
+]

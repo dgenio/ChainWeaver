@@ -27,7 +27,13 @@ and tools, the same flow produces the same output every time.
 | `contracts.py` | `ToolSafetyContract`, `SideEffectLevel`, `StabilityLevel`, `DeterminismLevel`, `merge_safety()`, `evaluate_predicate()` — determinism + operational safety vocabulary (#19, #125, #293, #9, #8) | Pure module: enums + frozen Pydantic model + AST-based predicate evaluator. Safety metadata is descriptive; enforcement belongs to a host/policy surface such as `FlowServer`. |
 | `decorators.py` | `@tool` decorator for zero-boilerplate tool definition | Returns a `Tool` subclass; introspects type hints |
 | `tools.py` | Define `Tool`: name + callable + Pydantic I/O schemas + `schema_hash` + `safety` contract (#19); `Tool.from_flow()` adapter (#24) with `merge_safety` derivation (#125) | Tool functions must be `fn(BaseModel) -> dict[str, Any]`; `from_flow` reuses the same contract — its closure dispatches `FlowExecutor.execute_flow` and surfaces inner failures as `FlowExecutionError` |
-| `flow.py` | Define `FlowStep`, `Flow`, `DAGFlowStep`, `DAGFlow`, `FlowStatus`, `FlowLifecycle`, `FlowGovernance`, `DriftInfo`, `ConditionalEdge` (#9), `validate_dag_topology` | Pure data definitions + topology/lifecycle-transition validation + structural `determinism_level` inference; governance lifecycle stays separate from the executor's operational `FlowStatus`. |
+| `flow/__init__.py` | Re-export the stable `chainweaver.flow` surface | Facade only; preserves historical module-qualified and pickle references. |
+| `flow/definitions.py` | Define `Flow`, `FlowStatus`, `ConditionalEdge` (#9), and `ContextCollisionPolicy` | Core linear-flow definitions; operational `FlowStatus` stays separate from governance lifecycle. |
+| `flow/steps.py` | Define `FlowStep` and `RetryPolicy` | Shared by linear and DAG flows; no topology logic. |
+| `flow/dag.py` | Define `DAGFlowStep`, `DAGFlow`, and `validate_dag_topology` | DAG-only models, structural `determinism_level` inference, and topology validation. |
+| `flow/governance.py` | Define `FlowLifecycle` and `FlowGovernance` | Review/promotion lifecycle only; never controls executor admission. |
+| `flow/drift.py` | Define `DriftInfo` | Immutable drift record only. |
+| `flow/refs.py` | Resolve schema/exception class refs and enforce the opt-in module allowlist policy (#345) | Imports referenced modules only after the active policy permits them. |
 | `step_index.py` | Named sentinels for synthetic flow input/output validation records (#339) | Pure helper module; keeps validation-record sentinel values out of executor call sites. |
 | `registry.py` | Store and retrieve `Flow`/`DAGFlow` by `(name, version)`; status filtering; multi-version support | Delegates persistence to a `RegistryStore`; defaults to `InMemoryStore` |
 | `storage.py` | `RegistryStore` Protocol + `InMemoryStore` (default) + `FileStore` (one JSON file per flow) | Filenames are `{name}@{version}.flow.json`; concurrent multi-process access not coordinated |

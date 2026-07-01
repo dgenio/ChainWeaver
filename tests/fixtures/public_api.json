@@ -41,6 +41,7 @@
     "DAGDefinitionError",
     "DAGFlow",
     "DAGFlowStep",
+    "DEFAULT_PARSE_LIMITS",
     "DecisionBudgetExceededError",
     "DecisionCallable",
     "DecisionCallback",
@@ -78,6 +79,7 @@
     "FlowGovernance",
     "FlowLifecycle",
     "FlowNotFoundError",
+    "FlowParseLimits",
     "FlowProperty",
     "FlowRegistry",
     "FlowSerializationError",
@@ -137,6 +139,9 @@
     "RoutingEvalResult",
     "SafetyCeilingError",
     "SafetyLevel",
+    "SchemaRefAllowlist",
+    "SchemaRefPolicy",
+    "SchemaRefPolicyError",
     "SchemaValidationError",
     "ServiceConfig",
     "ServiceEvent",
@@ -198,6 +203,7 @@
     "flow_to_json",
     "flow_to_mermaid",
     "flow_to_yaml",
+    "get_schema_ref_policy",
     "llm_propose_flows",
     "load_agent_trace",
     "lookup_price",
@@ -216,7 +222,9 @@
     "result_to_mermaid",
     "safe_macro_tool_name",
     "schema_fingerprint",
+    "schema_ref_policy",
     "score_candidate",
+    "set_schema_ref_policy",
     "side_effect_exceeds",
     "suggest_optimizations",
     "tool",
@@ -588,6 +596,11 @@
       "module": "chainweaver.flow",
       "qualname": "DAGFlowStep"
     },
+    "DEFAULT_PARSE_LIMITS": {
+      "kind": "FlowParseLimits",
+      "module": "chainweaver.serialization",
+      "qualname": null
+    },
     "DecisionBudgetExceededError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -903,6 +916,12 @@
       "module": "chainweaver.exceptions",
       "qualname": "FlowNotFoundError",
       "signature": "(flow_name: str, *, version: str | None = None) -> None"
+    },
+    "FlowParseLimits": {
+      "kind": "class",
+      "module": "chainweaver.serialization",
+      "qualname": "FlowParseLimits",
+      "signature": "(max_bytes: int | None = 5242880, max_nodes: int | None = 100000, max_depth: int | None = 64, max_string_length: int | None = 100000, max_steps: int | None = 1000) -> None"
     },
     "FlowProperty": {
       "kind": "class",
@@ -1368,6 +1387,23 @@
       "module": "chainweaver.traces",
       "qualname": "SafetyLevel"
     },
+    "SchemaRefAllowlist": {
+      "kind": "class",
+      "module": "chainweaver.flow",
+      "qualname": "SchemaRefAllowlist",
+      "signature": "(prefixes: Sequence[str]) -> None"
+    },
+    "SchemaRefPolicy": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
+    },
+    "SchemaRefPolicyError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "SchemaRefPolicyError",
+      "signature": "(module_path: str, ref: str, detail: str | None = None) -> None"
+    },
     "SchemaValidationError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1761,19 +1797,19 @@
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_dict",
-      "signature": "(data: dict[str, Any], *, source: str | None = None) -> AnyFlow"
+      "signature": "(data: dict[str, Any], *, source: str | None = None, limits: FlowParseLimits = FlowParseLimits(max_bytes=5242880, max_nodes=100000, max_depth=64, max_string_length=100000, max_steps=1000)) -> AnyFlow"
     },
     "flow_from_json": {
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_json",
-      "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
+      "signature": "(data: str, *, source: str | None = None, limits: FlowParseLimits = FlowParseLimits(max_bytes=5242880, max_nodes=100000, max_depth=64, max_string_length=100000, max_steps=1000)) -> AnyFlow"
     },
     "flow_from_yaml": {
       "kind": "function",
       "module": "chainweaver.serialization",
       "qualname": "flow_from_yaml",
-      "signature": "(data: str, *, source: str | None = None) -> AnyFlow"
+      "signature": "(data: str, *, source: str | None = None, limits: FlowParseLimits = FlowParseLimits(max_bytes=5242880, max_nodes=100000, max_depth=64, max_string_length=100000, max_steps=1000)) -> AnyFlow"
     },
     "flow_output_step_index": {
       "kind": "function",
@@ -1828,6 +1864,12 @@
       "module": "chainweaver.serialization",
       "qualname": "flow_to_yaml",
       "signature": "(flow: AnyFlow) -> str"
+    },
+    "get_schema_ref_policy": {
+      "kind": "function",
+      "module": "chainweaver.flow",
+      "qualname": "get_schema_ref_policy",
+      "signature": "() -> SchemaRefPolicy | None"
     },
     "llm_propose_flows": {
       "kind": "function",
@@ -1937,11 +1979,23 @@
       "qualname": "schema_fingerprint",
       "signature": "(model: type[BaseModel]) -> str"
     },
+    "schema_ref_policy": {
+      "kind": "function",
+      "module": "chainweaver.flow",
+      "qualname": "schema_ref_policy",
+      "signature": "(policy: SchemaRefPolicy | None) -> Iterator[None]"
+    },
     "score_candidate": {
       "kind": "function",
       "module": "chainweaver.traces",
       "qualname": "score_candidate",
       "signature": "(events: Sequence[AgentTraceEvent], sequence: Sequence[str]) -> CandidateScore"
+    },
+    "set_schema_ref_policy": {
+      "kind": "function",
+      "module": "chainweaver.flow",
+      "qualname": "set_schema_ref_policy",
+      "signature": "(policy: SchemaRefPolicy | None) -> None"
     },
     "side_effect_exceeds": {
       "kind": "function",

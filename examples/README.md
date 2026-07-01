@@ -99,6 +99,12 @@ Some scripts need an optional extra (noted inline) — e.g. MCP examples need
 |--------|---------------|
 | [`skdr_policy_eval_flow.py`](skdr_policy_eval_flow.py) | Offline policy-evaluation workflow using skdr-eval artifacts ([cookbook](../docs/cookbook/policy-eval-skdr.md)). |
 
+## Testing & fuzzing
+
+| Script | What it shows |
+|--------|---------------|
+| [`fuzz_properties.py`](fuzz_properties.py) | A custom `FlowProperty` (`gracefully_handles_input`) used by the scheduled fuzz workflow (`.github/workflows/fuzz.yml`) against [`fuzzable_linear.flow.yaml`](fuzzable_linear.flow.yaml). |
+
 ## Multi-file examples
 
 These live in their own subdirectories:
