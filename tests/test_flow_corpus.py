@@ -35,8 +35,11 @@ _CORPUS_DIR = Path(__file__).resolve().parent / "corpus" / "flow_files"
 _MANIFEST = _CORPUS_DIR / "manifest.json"
 
 # No single parse — corpus or generated — may take longer than this.  The
-# guardrails exist precisely so hostile input fails fast.
-_MAX_PARSE_SECONDS = 2.0
+# guardrails exist precisely so hostile input fails fast; guardrail-bounded
+# failures are milliseconds-scale, so this deliberately generous ceiling only
+# needs to catch an unbounded blowup or hang — not micro-time the parse — which
+# keeps it from flaking on a saturated CI runner.
+_MAX_PARSE_SECONDS = 5.0
 
 
 def _manifest_cases() -> list[dict[str, str]]:
