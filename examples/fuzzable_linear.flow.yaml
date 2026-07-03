@@ -1,0 +1,28 @@
+# Fuzzable flow fixture for the scheduled fuzz workflow (issue #340).
+#
+# Unlike double_add_format.flow.yaml this declares an `input_schema_ref`, so
+# `chainweaver fuzz` generates schema-valid inputs ({"number": <int>}) instead
+# of arbitrary payloads. The tools (double, add_ten, format_result, in
+# examples/simple_linear_flow.py) succeed for every integer, so the builtin
+# `flow_succeeds` / `final_output_present` properties hold for all generated
+# cases — the fuzz job is green unless a real regression is introduced.
+#
+#     chainweaver fuzz examples/fuzzable_linear.flow.yaml \
+#         --tools examples.simple_linear_flow --runs 200 --seed 1
+#
+# Reading `.flow.yaml` files requires the YAML extra: pip install 'chainweaver[yaml]'
+type: Flow
+name: fuzzable_linear
+version: "0.1.0"
+description: Doubles a number, adds 10, and formats the result (schema-typed input).
+input_schema_ref: examples.simple_linear_flow:NumberInput
+steps:
+  - tool_name: double
+    input_mapping:
+      number: number
+  - tool_name: add_ten
+    input_mapping:
+      value: value
+  - tool_name: format_result
+    input_mapping:
+      value: value

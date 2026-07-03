@@ -131,6 +131,51 @@ assert result.dry_run is True
   writes real state, and `ExecutionResult.dry_run` is set so a dry-run trace can
   never be confused with a real run.  Composed sub-flows inherit the mode.
 
+## Loading flow files from untrusted sources (#345, #416)
+
+Flow files (`.flow.yaml` / `.flow.json`) are the primary **untrusted input
+surface**: they arrive from repositories, contributor PRs validated by the
+GitHub Action, and generated drafts. Two independent hardening layers apply.
+
+### Parse-size and structural guardrails (#416)
+
+Every deserialization entry point (`flow_from_json`, `flow_from_yaml`,
+`flow_from_dict`, and the CLI loaders) applies conservative
+`FlowParseLimits` — a maximum input size, node count, nesting depth, string
+length, and step count. A file that exceeds any limit fails fast with a
+`FlowSerializationError` naming the limit, *before* the structure is fully
+realized, so a hostile file (a giant string, deeply nested mapping, or YAML
+alias/anchor expansion) cannot exhaust memory or CPU. The defaults are well
+above realistic flows; override with `limits=` (or `FlowParseLimits.unlimited()`
+for fully trusted input):
+
+```python
+from chainweaver import FlowParseLimits, flow_from_yaml
+
+flow = flow_from_yaml(text, limits=FlowParseLimits(max_bytes=1_000_000))
+```
+
+### Schema-ref module-resolution allowlist (#345)
+
+Schema refs (`input_schema_ref`, `output_schema_ref`, `context_schema_ref`) and
+`RetryPolicy.retryable_errors` resolve `"module:qualname"` strings by importing
+the module half — and **importing a module runs its top-level code**. Install an
+allowlist so a flow from a semi-trusted source can only reference modules you
+permit; a rejected ref raises `SchemaRefPolicyError` **before** any import:
+
+```python
+from chainweaver import SchemaRefAllowlist, schema_ref_policy, flow_from_yaml
+
+with schema_ref_policy(SchemaRefAllowlist(["myapp.schemas"])):
+    flow = flow_from_yaml(text)            # resolving a non-allowlisted ref raises
+```
+
+`set_schema_ref_policy(...)` installs a process-wide policy (the `chainweaver
+run` / `serve` CLIs expose this as `--schema-ref-allow PREFIX`); the default is
+permissive for backward compatibility. The policy is held in a `ContextVar`, so
+it is isolated per thread / async task. Even with an allowlist, treat untrusted
+flow payloads with the same caution as untrusted `pickle` input.
+
 ## Trusting MCP-imported tool metadata (#358, #359, #371)
 
 Tools wrapped from a remote MCP server arrive as **untrusted input**: their
