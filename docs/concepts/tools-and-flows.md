@@ -107,7 +107,22 @@ schema before its callable runs.
 registered, every mapped target must exist on its input schema, required
 fields must be supplied, and mapped types must be compatible. These are
 blocking compilation errors because the fallback would deterministically fail
-whenever recovery was needed.
+whenever recovery was needed. The checks apply to both linear `Flow`s and
+`DAGFlow`s — a DAG step's available context is the union of its transitive
+`depends_on` ancestors' outputs, not list order.
+
+`compile_flow()` also checks the fallback's **output** shape, because the
+fallback's outputs merge into the context through the step's `output_mapping`
+exactly like the primary's:
+
+- If the step has an `output_mapping`, a fallback that does not produce a
+  mapped `output_key` is a **blocking error**
+  (`fallback_output_missing_mapped_key`) — the merge would raise
+  `OutputMappingError` at runtime.
+- Otherwise, a fallback whose produced key set or per-key types diverge from
+  the primary's is a **warning** (`fallback_output_shape_divergence` /
+  `fallback_output_type_mismatch`): the merged context shape depends on which
+  tool ran, which downstream consumers may or may not tolerate.
 
 In the execution trace, `StepRecord.tool_name` remains the primary tool so a
 step keeps one stable identity across runs. `fallback_used=True` records that

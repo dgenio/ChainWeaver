@@ -1744,7 +1744,7 @@
       "kind": "function",
       "module": "chainweaver.compiler",
       "qualname": "compile_flow",
-      "signature": "(flow: Flow, tools: dict[str, Tool]) -> CompilationResult"
+      "signature": "(flow: Flow | DAGFlow, tools: dict[str, Tool]) -> CompilationResult"
     },
     "description_proposal_schema": {
       "kind": "function",
