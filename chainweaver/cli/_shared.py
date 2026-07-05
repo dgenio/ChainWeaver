@@ -407,12 +407,12 @@ _SCHEMA_REF_ALLOW_OPTION = typer.Option(
 def apply_schema_ref_allow(prefixes: list[str]) -> None:
     """Install a :class:`SchemaRefAllowlist` policy for this CLI process.
 
-    A no-op when *prefixes* is empty, preserving the permissive default.  CLI
+    Clears any previously installed policy when *prefixes* is empty, so the
+    permissive default holds regardless of prior in-process state.  CLI
     processes are short-lived, so a process-wide policy is the simplest seam
     that covers both load-time and execution-time ref resolution.
     """
-    if prefixes:
-        set_schema_ref_policy(SchemaRefAllowlist(prefixes))
+    set_schema_ref_policy(SchemaRefAllowlist(prefixes) if prefixes else None)
 
 
 def _load_execution_result(path: Path) -> ExecutionResult:

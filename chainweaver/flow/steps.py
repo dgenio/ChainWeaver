@@ -67,6 +67,8 @@ class RetryPolicy(BaseModel):
         """Resolve ``retryable_errors`` ref strings to a tuple of exception classes.
 
         Raises:
+            SchemaRefPolicyError: When an active schema-ref policy (issue
+                #345) rejects a ref's module path.
             FlowSerializationError: When any ref cannot be resolved or does
                 not point to a :class:`BaseException` subclass.
         """
