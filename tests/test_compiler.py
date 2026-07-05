@@ -7,7 +7,7 @@ from typing import Any, Union
 from pydantic import BaseModel
 
 from chainweaver.compiler import CompilationResult, compile_flow
-from chainweaver.flow import Flow, FlowStep
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
 from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
@@ -618,3 +618,448 @@ class TestFallbackInputCompatibility:
             "fallback_unknown_target_key",
             "fallback_missing_required_input",
         }
+
+
+class TestFallbackOutputCompatibility:
+    """Fallback output-schema compatibility checks (issue #457)."""
+
+    def test_compatible_fallback_output_compiles(self) -> None:
+        # double and add_ten both declare ValueOutput(value: int); reusing
+        # double as its own fallback keeps the output shape identical.
+        tools = _make_tools()
+        flow = Flow(
+            name="fb_out_ok",
+            description="Fallback with an identical output shape.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:double",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        assert result.success is True
+        assert not any(w.issue_type.startswith("fallback_output_") for w in result.warnings)
+
+    def test_fallback_output_shape_divergence_warns(self) -> None:
+        tools = _make_tools()
+        tools["double_alt"] = Tool(
+            name="double_alt",
+            description="Same input, different output key.",
+            input_schema=NumberInput,
+            output_schema=FormattedOutput,  # produces 'result', not 'value'
+            fn=lambda inp: {"result": str(inp.number)},
+        )
+        flow = Flow(
+            name="fb_out_diverge",
+            description="Fallback output shape diverges from the primary.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:double_alt",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        # No output_mapping -> divergence is advisory, not blocking.
+        assert result.success is True
+        warning = next(
+            w for w in result.warnings if w.issue_type == "fallback_output_shape_divergence"
+        )
+        assert warning.tool_name == "double_alt"
+        assert warning.field_name == "value"
+
+    def test_fallback_output_missing_mapped_key_is_error(self) -> None:
+        tools = _make_tools()
+        tools["double_alt"] = Tool(
+            name="double_alt",
+            description="Same input, but lacks the mapped output key.",
+            input_schema=NumberInput,
+            output_schema=FormattedOutput,  # lacks 'value'
+            fn=lambda inp: {"result": str(inp.number)},
+        )
+        flow = Flow(
+            name="fb_out_missing_mapped",
+            description="Fallback misses a mapped output key.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_mapping={"doubled": "value"},  # needs output key 'value'
+                    on_error="fallback:double_alt",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        # A mapped output key the fallback cannot produce is a deterministic
+        # runtime OutputMappingError -> blocking error.
+        error = next(
+            e for e in result.errors if e.issue_type == "fallback_output_missing_mapped_key"
+        )
+        assert result.success is False
+        assert error.tool_name == "double_alt"
+        assert error.field_name == "value"
+
+    def test_fallback_output_type_mismatch_warns(self) -> None:
+        class StrValueOutput(BaseModel):
+            value: str
+
+        tools = _make_tools()
+        tools["double_str"] = Tool(
+            name="double_str",
+            description="Same output key, different type.",
+            input_schema=NumberInput,
+            output_schema=StrValueOutput,  # value: str vs primary value: int
+            fn=lambda inp: {"value": str(inp.number)},
+        )
+        flow = Flow(
+            name="fb_out_type",
+            description="Fallback output type diverges from the primary.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    on_error="fallback:double_str",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        assert result.success is True
+        warning = next(
+            w for w in result.warnings if w.issue_type == "fallback_output_type_mismatch"
+        )
+        assert warning.tool_name == "double_str"
+        assert warning.field_name == "value"
+
+    def test_mapped_fallback_output_type_mismatch_warns(self) -> None:
+        # With an output_mapping, a fallback that *does* produce the mapped key
+        # but types it differently is still only advisory (the mapping renames;
+        # it does not coerce), so a warning — not an error — is expected.
+        class StrValueOutput(BaseModel):
+            value: str
+
+        tools = _make_tools()
+        tools["double_str"] = Tool(
+            name="double_str",
+            description="Mapped key present, different type.",
+            input_schema=NumberInput,
+            output_schema=StrValueOutput,  # value: str vs primary value: int
+            fn=lambda inp: {"value": str(inp.number)},
+        )
+        flow = Flow(
+            name="fb_out_mapped_type",
+            description="Mapped fallback output type diverges.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    output_mapping={"doubled": "value"},
+                    on_error="fallback:double_str",
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(flow, tools)
+
+        assert result.success is True
+        assert not any(e.issue_type == "fallback_output_missing_mapped_key" for e in result.errors)
+        warning = next(
+            w for w in result.warnings if w.issue_type == "fallback_output_type_mismatch"
+        )
+        assert warning.field_name == "value"
+
+
+class TestDAGFallbackCompatibility:
+    """Fallback compile-time checks extended to the DAG path (issue #456)."""
+
+    def test_compatible_dag_fallback_compiles(self) -> None:
+        tools = _make_tools()
+        dag = DAGFlow(
+            name="dag_fb_ok",
+            version="1.0.0",
+            description="Compatible DAG fallback.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="double",
+                    step_id="A",
+                    depends_on=[],
+                    input_mapping={"number": "number"},
+                ),
+                DAGFlowStep(
+                    tool_name="add_ten",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"value": "value"},
+                    on_error="fallback:add_ten",
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        assert result.success is True
+        assert not any(e.issue_type.startswith("fallback_") for e in result.errors)
+
+    def test_dag_missing_fallback_tool_is_error(self) -> None:
+        dag = DAGFlow(
+            name="dag_fb_missing",
+            version="1.0.0",
+            description="Missing DAG fallback tool.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="double",
+                    step_id="A",
+                    depends_on=[],
+                    input_mapping={"number": "number"},
+                    on_error="fallback:missing",
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, _make_tools())
+
+        assert result.success is False
+        assert any(
+            e.issue_type == "missing_fallback_tool" and e.tool_name == "missing"
+            for e in result.errors
+        )
+
+    def test_dag_fallback_type_mismatch_is_error(self) -> None:
+        class TextNumberInput(BaseModel):
+            number: str
+
+        tools = _make_tools()
+        tools["backup"] = Tool(
+            name="backup",
+            description="Requires text.",
+            input_schema=TextNumberInput,
+            output_schema=ValueOutput,
+            fn=lambda inp: {"value": len(inp.number)},
+        )
+        dag = DAGFlow(
+            name="dag_fb_type",
+            version="1.0.0",
+            description="DAG fallback type mismatch.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="double",
+                    step_id="A",
+                    depends_on=[],
+                    input_mapping={"number": "number"},
+                    on_error="fallback:backup",
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        error = next(e for e in result.errors if e.issue_type == "fallback_type_mismatch")
+        assert result.success is False
+        assert error.tool_name == "backup"
+        assert error.field_name == "number"
+
+    def test_dag_fallback_sees_ancestor_not_sibling_context(self) -> None:
+        # Diamond A -> B, A -> C. C's fallback requires a key produced only by
+        # its *sibling* B, which is not an ancestor of C, so the DAG-aware
+        # context must report it missing (a linear list-order model would not).
+        class AOut(BaseModel):
+            a_val: int
+
+        class BOut(BaseModel):
+            b_val: int
+
+        class AValInput(BaseModel):
+            a_val: int
+
+        class BValInput(BaseModel):
+            b_val: int
+
+        tools = {
+            "produce_a": Tool(
+                name="produce_a",
+                description="Produces a_val.",
+                input_schema=NumberInput,
+                output_schema=AOut,
+                fn=lambda inp: {"a_val": inp.number},
+            ),
+            "produce_b": Tool(
+                name="produce_b",
+                description="Produces b_val.",
+                input_schema=AValInput,
+                output_schema=BOut,
+                fn=lambda inp: {"b_val": inp.a_val},
+            ),
+            "consume_a": Tool(
+                name="consume_a",
+                description="Consumes a_val.",
+                input_schema=AValInput,
+                output_schema=ValueOutput,
+                fn=lambda inp: {"value": inp.a_val},
+            ),
+            "needs_b": Tool(
+                name="needs_b",
+                description="Fallback requiring b_val.",
+                input_schema=BValInput,
+                output_schema=ValueOutput,
+                fn=lambda inp: {"value": inp.b_val},
+            ),
+        }
+        dag = DAGFlow(
+            name="dag_fb_ancestor",
+            version="1.0.0",
+            description="Fallback sees ancestor, not sibling, context.",
+            steps=[
+                DAGFlowStep(tool_name="produce_a", step_id="A", depends_on=[]),
+                DAGFlowStep(tool_name="produce_b", step_id="B", depends_on=["A"]),
+                DAGFlowStep(
+                    tool_name="consume_a",
+                    step_id="C",
+                    depends_on=["A"],
+                    on_error="fallback:needs_b",
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        assert result.success is False
+        assert any(
+            e.issue_type == "fallback_missing_required_input" and e.field_name == "b_val"
+            for e in result.errors
+        )
+
+    def test_dag_fallback_satisfied_by_ancestor_context(self) -> None:
+        # Same diamond, but C's fallback requires a_val — produced by ancestor
+        # A — so the DAG-aware context satisfies it and compilation is clean.
+        class AOut(BaseModel):
+            a_val: int
+
+        class BOut(BaseModel):
+            b_val: int
+
+        class AValInput(BaseModel):
+            a_val: int
+
+        tools = {
+            "produce_a": Tool(
+                name="produce_a",
+                description="Produces a_val.",
+                input_schema=NumberInput,
+                output_schema=AOut,
+                fn=lambda inp: {"a_val": inp.number},
+            ),
+            "produce_b": Tool(
+                name="produce_b",
+                description="Produces b_val.",
+                input_schema=AValInput,
+                output_schema=BOut,
+                fn=lambda inp: {"b_val": inp.a_val},
+            ),
+            "consume_a": Tool(
+                name="consume_a",
+                description="Consumes a_val.",
+                input_schema=AValInput,
+                output_schema=ValueOutput,
+                fn=lambda inp: {"value": inp.a_val},
+            ),
+            "needs_a": Tool(
+                name="needs_a",
+                description="Fallback requiring a_val.",
+                input_schema=AValInput,
+                output_schema=ValueOutput,
+                fn=lambda inp: {"value": inp.a_val},
+            ),
+        }
+        dag = DAGFlow(
+            name="dag_fb_ancestor_ok",
+            version="1.0.0",
+            description="Fallback satisfied by ancestor context.",
+            steps=[
+                DAGFlowStep(tool_name="produce_a", step_id="A", depends_on=[]),
+                DAGFlowStep(tool_name="produce_b", step_id="B", depends_on=["A"]),
+                DAGFlowStep(
+                    tool_name="consume_a",
+                    step_id="C",
+                    depends_on=["A"],
+                    on_error="fallback:needs_a",
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        assert result.success is True
+        assert not any(e.issue_type.startswith("fallback_") for e in result.errors)
+
+    def test_dag_with_cycle_degrades_without_raising(self) -> None:
+        # Topology errors (cycles) are reported by validate_dag_topology, not
+        # the compiler; compile_flow must degrade to list order rather than
+        # raise, so per-step wiring results are still returned.
+        tools = _make_tools()
+        dag = DAGFlow(
+            name="dag_cycle",
+            version="1.0.0",
+            description="Cyclic DAG (A <-> B).",
+            steps=[
+                DAGFlowStep(
+                    tool_name="double",
+                    step_id="A",
+                    depends_on=["B"],
+                    input_mapping={"number": "number"},
+                ),
+                DAGFlowStep(
+                    tool_name="add_ten",
+                    step_id="B",
+                    depends_on=["A"],
+                    input_mapping={"value": "value"},
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        assert isinstance(result, CompilationResult)
+
+    def test_dag_unknown_dependency_is_skipped_gracefully(self) -> None:
+        # A depends_on referencing a non-existent step id is a topology error
+        # owned by validate_dag_topology; the compiler must not raise on it.
+        tools = _make_tools()
+        dag = DAGFlow(
+            name="dag_unknown_dep",
+            version="1.0.0",
+            description="Step depends on an unknown id.",
+            steps=[
+                DAGFlowStep(
+                    tool_name="double",
+                    step_id="A",
+                    depends_on=["ghost"],
+                    input_mapping={"number": "number"},
+                ),
+            ],
+            input_schema_ref=DAGFlow.schema_ref_from(NumberInput),
+        )
+
+        result = compile_flow(dag, tools)
+
+        assert isinstance(result, CompilationResult)

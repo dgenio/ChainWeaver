@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Compile-time fallback validation for DAG flows and fallback output shapes**
+  (#456, #457): `compile_flow()` now accepts a `DAGFlow` as well as a linear
+  `Flow`. For a DAG, each step is validated against the union of its transitive
+  `depends_on` ancestors' outputs (plus the flow input) rather than list order,
+  so the fallback-compatibility checks introduced in #338 (`missing_fallback_tool`,
+  `fallback_unknown_target_key`, `fallback_type_mismatch`,
+  `fallback_missing_required_input`) now apply to DAG steps too. `compile_flow()`
+  additionally validates a fallback tool's **output** shape against the primary:
+  a fallback that cannot produce a key required by the step's `output_mapping` is
+  a blocking `fallback_output_missing_mapped_key` error (the merge would raise
+  `OutputMappingError` at runtime), while a diverging produced-key set or per-key
+  type is a `fallback_output_shape_divergence` / `fallback_output_type_mismatch`
+  warning. Malformed DAG topology remains the responsibility of
+  `validate_dag_topology`; `compile_flow()` degrades gracefully instead of raising.
+
 - **Streaming tool output propagation** (#320): a new
   `chainweaver.StreamingTool` (a `Tool` subclass) produces its output as a
   stream of `chainweaver.ToolChunk` objects via an async `run_streaming`

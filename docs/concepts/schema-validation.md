@@ -67,12 +67,16 @@ governance pattern.
 ## Compile-time validation
 
 `compile_flow(flow, tools)` performs **all** of the above checks statically — before any
-tool function runs:
+tool function runs. It accepts both a linear `Flow` and a `DAGFlow`; for a DAG each
+step is validated against the union of its transitive `depends_on` ancestors' outputs
+(plus the flow input) rather than list order.
 
 - Every `tool_name` in the flow resolves to a registered tool.
 - Every `input_mapping` key resolves to either a literal, a key in the initial-input
   schema, or a field in an upstream step's output schema.
 - Type compatibility between mapped fields (basic Python types + Pydantic models).
+- `on_error="fallback:<tool_name>"` targets are validated for input **and** output
+  compatibility (see [Fallback semantics](tools-and-flows.md#fallback-semantics)).
 - Optional warning for shadowed context keys.
 
 ```python
