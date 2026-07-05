@@ -17,6 +17,9 @@ The check has three layers:
 2. **Literal dynamic imports** — obvious bypasses such as
    ``__import__("random")`` and ``importlib.import_module("openai")`` are
    rejected when the target is a string literal, including simple aliases.
+   Relative ``importlib.import_module(".optimizer", package="chainweaver")``
+   literals are resolved against their literal ``package`` argument before
+   classification, so a leading dot cannot hide a banned in-repo module.
 3. **Transitive in-repo reach** — following ``chainweaver.*`` imports from the
    execution modules, none of the deterministic-execution closure may reach a
    banned in-repo source of nondeterminism / LLM behavior (``compiler_llm``,
@@ -238,12 +241,57 @@ def _literal_import_name(node: ast.Call) -> str | None:
     return None
 
 
+def _literal_package_name(node: ast.Call) -> str | None:
+    """Return the literal ``package`` argument to a relative dynamic import call."""
+    if (
+        len(node.args) > 1
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        return node.args[1].value
+    for keyword in node.keywords:
+        if (
+            keyword.arg == "package"
+            and isinstance(keyword.value, ast.Constant)
+            and isinstance(keyword.value.value, str)
+        ):
+            return keyword.value.value
+    return None
+
+
+def _resolve_relative_literal(name: str, package: str | None) -> str | None:
+    """Resolve a relative ``importlib.import_module`` literal to its absolute form.
+
+    Mirrors :func:`importlib._bootstrap._resolve_name`: the leading dots on
+    *name* are resolved against *package* the same way Python resolves them at
+    runtime, so a relative literal (``".optimizer"`` with
+    ``package="chainweaver"``) cannot dodge classification by hiding the banned
+    module name behind a dot. Returns ``None`` when *package* is missing or the
+    relative reference climbs above the top-level package — both are
+    unresolvable, so there is nothing to classify.
+    """
+    level = len(name) - len(name.lstrip("."))
+    if level == 0:
+        return name
+    if not package:
+        return None
+    remainder = name[level:]
+    bits = package.rsplit(".", level - 1)
+    if len(bits) < level:
+        return None
+    base = bits[0]
+    return f"{base}.{remainder}" if remainder else base
+
+
 def _collect_dynamic_imports(tree: ast.AST) -> tuple[set[str], set[str]]:
     """Return literal dynamic import targets found in *tree*.
 
     The contract intentionally covers reviewable, AST-visible bypasses only:
     ``__import__("random")``, ``importlib.import_module("openai")``, and simple
-    aliases of those helpers. It does not try to evaluate runtime-built strings.
+    aliases of those helpers. Relative ``importlib.import_module`` literals
+    (e.g. ``".optimizer"`` with ``package="chainweaver"``) are resolved to
+    their absolute dotted form before classification. It does not try to
+    evaluate runtime-built strings.
     """
     aliases = _dynamic_import_aliases(tree)
     external: set[str] = set()
@@ -261,6 +309,10 @@ def _collect_dynamic_imports(tree: ast.AST) -> tuple[set[str], set[str]]:
         module = _literal_import_name(node)
         if module is None:
             continue
+        if module.startswith(".") and call_name == "importlib.import_module":
+            module = _resolve_relative_literal(module, _literal_package_name(node))
+            if module is None:
+                continue
         external_root, inrepo_module = _classify_import_target(module)
         if external_root is not None:
             external.add(external_root)
@@ -363,6 +415,9 @@ builtin_import("chainweaver.optimizer")
 load_module(name="chainweaver.compiler_llm.helpers")
 module_name = "secrets"
 __import__(module_name)
+load_module(".optimizer", package="chainweaver")
+load_module(name=".compiler_llm", package="chainweaver")
+load_module("..observer", package="chainweaver.sub")
 """
     )
 
@@ -373,6 +428,22 @@ __import__(module_name)
     assert "chainweaver.optimizer" in inrepo
     assert "chainweaver.compiler_llm.helpers" in inrepo
     assert _matches_banned_inrepo("chainweaver.compiler_llm.helpers")
+    # Relative importlib.import_module literals resolve against `package` instead
+    # of leaking through as a spurious external root (see PR #482 review).
+    assert "chainweaver.optimizer" in inrepo
+    assert "chainweaver.compiler_llm" in inrepo
+    assert "chainweaver.observer" in inrepo
+    assert "" not in external
+
+
+def test_resolve_relative_literal_matches_importlib_semantics() -> None:
+    """Directly exercise the relative-literal resolver against known cases."""
+    assert _resolve_relative_literal("random", None) == "random"
+    assert _resolve_relative_literal(".optimizer", "chainweaver") == "chainweaver.optimizer"
+    assert _resolve_relative_literal("..observer", "chainweaver.sub") == "chainweaver.observer"
+    assert _resolve_relative_literal(".", "chainweaver") == "chainweaver"
+    assert _resolve_relative_literal(".optimizer", None) is None
+    assert _resolve_relative_literal("...too.deep", "chainweaver") is None
 
 
 def test_banned_lists_are_documented_and_consistent() -> None:

@@ -68,8 +68,11 @@ The three hard invariants are mechanically enforced by
 - **Literal dynamic import patterns** — the same execution modules reject
   reviewable bypasses such as `__import__("random")`,
   `importlib.import_module("openai")`, and simple aliases when the target is
-  a string literal. The check intentionally does not evaluate runtime-built
-  strings; those should not appear in executor code.
+  a string literal. Relative `importlib.import_module(".optimizer",
+  package="chainweaver")` literals are resolved against their literal
+  `package` argument before classification, so a leading dot cannot hide a
+  banned in-repo module. The check intentionally does not evaluate
+  runtime-built strings; those should not appear in executor code.
 - **Transitive in-repo reach** — following `chainweaver.*` imports out of the
   execution modules, none of the deterministic-execution closure may reach a
   banned in-repo module, so a helper cannot smuggle an LLM proposer onto the
