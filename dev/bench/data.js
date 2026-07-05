@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783037281994,
+  "lastUpdate": 1783275504769,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3528,6 +3528,78 @@ window.BENCHMARK_DATA = {
             "value": 0.7176370000081533,
             "unit": "ms",
             "extra": "min=0.56ms max=0.82ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9d4ae541ae4f5cc68796019246b01a23029f1d51",
+          "message": "Merge pull request #484 from dgenio/refactor/396-split-flow-package\n\nrefactor: split flow models into a package",
+          "timestamp": "2026-07-05T19:17:02+01:00",
+          "tree_id": "cb643a5e075dabef4741ec332a016143ca29324a",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/9d4ae541ae4f5cc68796019246b01a23029f1d51"
+        },
+        "date": 1783275504258,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.32633199998599594,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.65ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.25221399994279636,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.33ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.4673700000239478,
+            "unit": "ms",
+            "extra": "min=0.45ms max=0.51ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.32816299994919973,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.37ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.54306600006657,
+            "unit": "ms",
+            "extra": "min=102.50ms max=102.70ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8764300000621006,
+            "unit": "ms",
+            "extra": "min=0.85ms max=1.05ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.81099199994605,
+            "unit": "ms",
+            "extra": "min=251.77ms max=251.95ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7356069999104875,
+            "unit": "ms",
+            "extra": "min=0.72ms max=0.77ms repeats=5"
           }
         ]
       }
