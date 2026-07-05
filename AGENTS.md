@@ -46,7 +46,14 @@ chainweaver/
 ├── approvals.py       ApprovalCallback Protocol + ApprovalContext/ApprovalDecision/ApprovalRecord + coerce_approval_callback — execution-time ToolSafetyContract enforcement seam (#356); mirrors decisions.py
 ├── decorators.py      @tool decorator for zero-boilerplate tool definition
 ├── tools.py           Tool class: named callable with Pydantic I/O schemas + schema_hash + safety contract (#19) + metadata provenance (#358/#359/#371) + dry_run_fn/run_dry (#357); Tool.from_flow() wraps a Flow as a Tool (#24) with derived safety (#125); StreamingTool + ToolChunk for streamed output via run_streaming (#320)
-├── flow.py            FlowStep (+ output_mapping #386) + Flow + DAGFlow (+ dynamic_params #316) + FlowStatus + FlowLifecycle + FlowGovernance + DriftInfo + ConditionalEdge (#9) + determinism_level property (#8) + ContextCollisionPolicy / on_context_collision (#337)
+├── flow/              Stable `chainweaver.flow` surface, split by model concern (#396)
+│   ├── __init__.py    Re-exports the historical surface and preserves module-qualified references
+│   ├── definitions.py Flow + FlowStatus + ConditionalEdge + ContextCollisionPolicy
+│   ├── steps.py       FlowStep (+ output_mapping #386) + RetryPolicy
+│   ├── dag.py         DAGFlowStep + DAGFlow (+ dynamic_params #316) + validate_dag_topology
+│   ├── governance.py  FlowLifecycle + FlowGovernance
+│   ├── drift.py       DriftInfo
+│   └── refs.py        Schema/exception class-ref resolution + opt-in module allowlist policy (#345)
 ├── step_index.py      Named sentinels for flow input/output validation records (#339)
 ├── _pointer.py        Dependency-free RFC-6901 JSON pointer resolver shared by executor input_mapping (#387) and contrib json_pluck
 ├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
@@ -401,8 +408,8 @@ integration.
 | Add a new tool | `tools.py` | Integration tests in `test_flow_execution.py` |
 | Add a new exception | `exceptions.py` | `__init__.py` + `__all__` + README error table — **same PR** |
 | Modify flow execution | `executor.py` | Keep `StepRecord` + `ExecutionResult` consistent |
-| Add a new Flow field | `flow.py` | Serialization tests if `model_dump()` changes |
-| Add a new DAGFlow / DAGFlowStep field | `flow.py` | Update `validate_dag_topology` if needed; update tests |
+| Add a new Flow field | `flow/definitions.py` | Serialization tests if `model_dump()` changes |
+| Add a new DAGFlow / DAGFlowStep field | `flow/dag.py` | Update `validate_dag_topology` if needed; update tests |
 | Change logging format | `log_utils.py` | Update tests (no re-export needed) |
 | Add a new module | See [new-module checklist](docs/agent-context/workflows.md#new-module-checklist) |
 

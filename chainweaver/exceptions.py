@@ -1000,7 +1000,7 @@ class SchemaRefPolicyError(ChainWeaverError):
         self.detail = detail or (
             f"Module '{module_path}' is not permitted by the active schema-ref policy"
         )
-        super().__init__(f"Schema ref '{ref}' rejected: {self.detail}.")
+        super().__init__(f"Class ref '{ref}' rejected: {self.detail}.")
 
 
 # ---------------------------------------------------------------------------
