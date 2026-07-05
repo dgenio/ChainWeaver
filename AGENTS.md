@@ -181,6 +181,12 @@ changes. The executor is deterministic by design.
 2. No network I/O.
 3. No randomness.
 
+These invariants are mechanically enforced by
+`tests/test_executor_import_contract.py` over `executor.py` and
+`chainweaver/_execution/`, including direct imports, transitive in-repo reach,
+and obvious literal dynamic imports; see
+[invariants.md](docs/agent-context/invariants.md).
+
 **Package-wide:**
 4. All exceptions inherit from `ChainWeaverError` with relevant context
    attributes (`tool_name`, `step_index`, `detail` where applicable).
