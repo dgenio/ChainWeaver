@@ -2502,6 +2502,7 @@ class FlowExecutor:
             cached: bool = False,
             fallback_used: bool = False,
             fallback_tool_name: str | None = None,
+            approval: ApprovalRecord | None = None,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             retry_count = max(0, tool_attempts[0] - 1)
@@ -2522,7 +2523,9 @@ class FlowExecutor:
                 cached=cached,
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
-                approval=approval_record,
+                # A fallback-path safety-gate decision (issue #486) takes
+                # precedence over the primary gate's decision when both ran.
+                approval=approval if approval is not None else approval_record,
             )
 
         def _finish(record: StepRecord) -> StepRecord:
@@ -2729,6 +2732,9 @@ class FlowExecutor:
                     wrapped_error=wrapped,
                     retry_errors=retry_errors,
                     make_record=_record,
+                    flow_name=flow_name,
+                    trace_id=trace_id,
+                    step_id=getattr(step, "step_id", None),
                 )
             )
 
@@ -2855,6 +2861,9 @@ class FlowExecutor:
                 wrapped_error=wrapped,
                 retry_errors=retry_errors,
                 make_record=record_fn,
+                flow_name=flow_name,
+                trace_id=trace_id,
+                step_id=getattr(step, "step_id", None),
             )
 
         log_step_end(
@@ -3006,14 +3015,21 @@ class FlowExecutor:
 
         Applies the same backoff schedule via :func:`asyncio.sleep`
         instead of tenacity's blocking ``time.sleep``, so retries don't
-        starve the calling event loop.
+        starve the calling event loop. Honours the same ``strict_safety``
+        retry-suppression rule as the sync lane (issue #488).
         """
-        if policy is None:
+        if policy is None or (self._strict_safety and self._retry_disallowed_by_contract(tool)):
             attempts[0] += 1
             try:
                 return await tool.run_async(inputs)
             except Exception as exc:
-                retry_errors.append(str(exc))
+                if policy is not None:
+                    retry_errors.append(
+                        f"{exc} (retry suppressed: tool '{tool.name}' safety "
+                        "contract disallows unsafe retry under strict_safety=True)"
+                    )
+                else:
+                    retry_errors.append(str(exc))
                 raise
 
         retryable = policy.resolved_retryable_errors()
@@ -3045,12 +3061,20 @@ class FlowExecutor:
         wrapped_error: Exception,
         retry_errors: list[str],
         make_record: Callable[..., StepRecord],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None = None,
     ) -> StepRecord:
         """Async counterpart to :meth:`_apply_on_error`.
 
-        Identical fail / skip behaviour to the sync path; the
-        ``fallback:<tool_name>`` branch dispatches the fallback tool
-        via :meth:`Tool.run_async` so async fallbacks compose.
+        Identical fail / skip behaviour to the sync path — including,
+        as of issue #487, recording the wrapped error on a ``"skip"``
+        outcome rather than silently dropping it.  The
+        ``fallback:<tool_name>`` branch dispatches the fallback tool via
+        :meth:`Tool.run_async` so async fallbacks compose, and — as of
+        issue #486 — clears the same execution-time safety gate the
+        primary tool did before running (the async lane has no dry-run
+        mode, so unlike the sync path there is no dry-run stub here).
         """
         on_error = step.on_error
         if on_error == "fail":
@@ -3066,7 +3090,7 @@ class FlowExecutor:
             return make_record(
                 inputs=inputs,
                 outputs={},
-                error=None,
+                error=wrapped_error,
                 success=True,
                 skipped=True,
                 retry_errors=retry_errors,
@@ -3089,6 +3113,31 @@ class FlowExecutor:
                     fallback_used=True,
                     fallback_tool_name=fb_name,
                 )
+
+            gate_error, fallback_approval = self._evaluate_safety_gate(
+                step=step,
+                tool=fb_tool,
+                step_index=step_index,
+                inputs=inputs,
+                flow_name=flow_name,
+                trace_id=trace_id,
+                step_id=step_id,
+            )
+            if gate_error is not None:
+                log_step_error(_logger, step_index, step.display_name, gate_error)
+                retry_errors.append(f"fallback '{fb_name}' refused by safety gate: {gate_error}")
+                return make_record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=gate_error,
+                    success=False,
+                    skipped=False,
+                    retry_errors=retry_errors,
+                    fallback_used=True,
+                    fallback_tool_name=fb_name,
+                    approval=fallback_approval,
+                )
+
             try:
                 outputs = await fb_tool.run_async(inputs)
             except Exception as exc:
@@ -3103,6 +3152,7 @@ class FlowExecutor:
                     retry_errors=retry_errors,
                     fallback_used=True,
                     fallback_tool_name=fb_name,
+                    approval=fallback_approval,
                 )
             return make_record(
                 inputs=inputs,
@@ -3113,6 +3163,7 @@ class FlowExecutor:
                 retry_errors=retry_errors,
                 fallback_used=True,
                 fallback_tool_name=fb_name,
+                approval=fallback_approval,
             )
         # Unrecognised on_error → treat as fail.
         return make_record(
@@ -4662,6 +4713,7 @@ class FlowExecutor:
             cached: bool = False,
             fallback_used: bool = False,
             fallback_tool_name: str | None = None,
+            approval: ApprovalRecord | None = None,
         ) -> StepRecord:
             err_type, err_msg = (None, None) if error is None else _exc_to_strings(error)
             # ``retry_count`` = retries beyond the initial invocation.
@@ -4686,7 +4738,11 @@ class FlowExecutor:
                 cached=cached,
                 fallback_used=fallback_used,
                 fallback_tool_name=fallback_tool_name,
-                approval=approval_record,
+                # A fallback-path safety-gate decision (issue #486) takes
+                # precedence over the primary gate's decision when both ran —
+                # the fallback's approval is the one that actually gated
+                # execution of the tool whose outputs/error this record carries.
+                approval=approval if approval is not None else approval_record,
                 decision=decision_record,
             )
 
@@ -4912,6 +4968,9 @@ class FlowExecutor:
                     wrapped_error=wrapped,
                     retry_errors=retry_errors,
                     make_record=_record,
+                    flow_name=flow_name,
+                    trace_id=trace_id,
+                    step_id=step_id,
                 )
             )
 
@@ -5124,6 +5183,22 @@ class FlowExecutor:
             retry_errors=[],
         )
 
+    def _retry_disallowed_by_contract(self, tool: Tool) -> bool:
+        """Whether *tool*'s safety contract forbids retrying a failed call.
+
+        ``True`` when the contract explicitly marks the tool unsafe to retry
+        (``safe_to_retry=False``), or when it is both non-idempotent and
+        side-effecting (issue #488): retrying a non-idempotent side-effecting
+        tool after a failure of unknown effect (did the charge go through
+        before it errored?) risks duplicating the side effect. A
+        non-idempotent but read-only tool is unaffected — nothing external
+        changes state to duplicate.
+        """
+        contract = tool.safety
+        if not contract.safe_to_retry:
+            return True
+        return not contract.idempotent and not contract.read_only
+
     def _invoke_tool(
         self,
         tool: Tool,
@@ -5140,13 +5215,25 @@ class FlowExecutor:
         without conflating it with on-error decorations.  The final
         exception (after exhaustion or a non-retryable error) is re-raised;
         the caller is responsible for wrapping it.
+
+        Under ``strict_safety=True`` (issue #356), a *policy* attached to a
+        tool whose safety contract disallows retry (issue #488) is not
+        honoured: the tool is invoked exactly once, matching ``policy=None``
+        behaviour, rather than silently risking a duplicated side effect on
+        a retried non-idempotent call.
         """
-        if policy is None:
+        if policy is None or (self._strict_safety and self._retry_disallowed_by_contract(tool)):
             attempts[0] += 1
             try:
                 return tool.run(inputs)
             except Exception as exc:
-                retry_errors.append(str(exc))
+                if policy is not None:
+                    retry_errors.append(
+                        f"{exc} (retry suppressed: tool '{tool.name}' safety "
+                        "contract disallows unsafe retry under strict_safety=True)"
+                    )
+                else:
+                    retry_errors.append(str(exc))
                 raise
 
         def _wait_fn(retry_state: Any) -> float:
@@ -5205,6 +5292,9 @@ class FlowExecutor:
         wrapped_error: Exception,
         retry_errors: list[str],
         make_record: Callable[..., StepRecord],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None = None,
     ) -> StepRecord:
         """Apply the step's ``on_error`` policy and return a final record.
 
@@ -5212,9 +5302,15 @@ class FlowExecutor:
         - ``"skip"``: return a successful, ``skipped=True`` record with
           empty outputs so the flow continues without merging anything.
         - ``"fallback:<tool_name>"``: invoke the named tool with the same
-          inputs.  If it succeeds, return a successful record using its
-          outputs.  If it fails, return a failed record carrying the
-          fallback's exception (the original error stays in ``retry_errors``).
+          inputs, subject to the same execution-time safety gate and
+          dry-run handling as the primary tool (issue #486) — a fallback
+          declaring ``requires_approval`` or exceeding
+          ``max_side_effect_level`` is refused rather than run ungated, and
+          a side-effecting fallback is stubbed (never actually invoked)
+          under ``dry_run=True``.  If it succeeds, return a successful
+          record using its outputs.  If it fails, return a failed record
+          carrying the fallback's exception (the original error stays in
+          ``retry_errors``).
         """
         on_error = step.on_error
         if on_error == "fail":
@@ -5256,6 +5352,64 @@ class FlowExecutor:
                 fallback_tool_name=fallback_name,
             )
 
+        combined_retry_errors = [*retry_errors, str(wrapped_error)]
+
+        gate_error, fallback_approval = self._evaluate_safety_gate(
+            step=step,
+            tool=fallback_tool,
+            step_index=step_index,
+            inputs=inputs,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=step_id,
+        )
+        if gate_error is not None:
+            log_step_error(_logger, step_index, step.display_name, gate_error)
+            return make_record(
+                inputs=inputs,
+                outputs=None,
+                error=gate_error,
+                success=False,
+                skipped=False,
+                retry_errors=combined_retry_errors,
+                fallback_used=True,
+                fallback_tool_name=fallback_name,
+                approval=fallback_approval,
+            )
+
+        if self._local.dry_run:
+
+            def _fallback_dry_record(
+                *,
+                inputs: dict[str, Any],
+                outputs: dict[str, Any] | None,
+                error: Exception | None,
+                success: bool,
+                skipped: bool,
+                retry_errors: list[str],
+            ) -> StepRecord:
+                return make_record(
+                    inputs=inputs,
+                    outputs=outputs,
+                    error=error,
+                    success=success,
+                    skipped=skipped,
+                    retry_errors=combined_retry_errors,
+                    fallback_used=True,
+                    fallback_tool_name=fallback_name,
+                    approval=fallback_approval,
+                )
+
+            dry_record = self._dry_run_step(
+                step=step,
+                tool=fallback_tool,
+                step_index=step_index,
+                inputs=inputs,
+                record_fn=_fallback_dry_record,
+            )
+            if dry_record is not None:
+                return dry_record
+
         try:
             outputs = fallback_tool.run(inputs)
         except Exception as fallback_exc:
@@ -5268,9 +5422,10 @@ class FlowExecutor:
                 error=wrapped,
                 success=False,
                 skipped=False,
-                retry_errors=[*retry_errors, str(wrapped_error)],
+                retry_errors=combined_retry_errors,
                 fallback_used=True,
                 fallback_tool_name=fallback_name,
+                approval=fallback_approval,
             )
 
         return make_record(
@@ -5279,9 +5434,10 @@ class FlowExecutor:
             error=None,
             success=True,
             skipped=False,
-            retry_errors=[*retry_errors, str(wrapped_error)],
+            retry_errors=combined_retry_errors,
             fallback_used=True,
             fallback_tool_name=fallback_name,
+            approval=fallback_approval,
         )
 
     # ------------------------------------------------------------------

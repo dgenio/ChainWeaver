@@ -7,7 +7,8 @@ from typing import Any, Union
 from pydantic import BaseModel
 
 from chainweaver.compiler import CompilationResult, compile_flow
-from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep
+from chainweaver.contracts import SideEffectLevel, ToolSafetyContract
+from chainweaver.flow import DAGFlow, DAGFlowStep, Flow, FlowStep, RetryPolicy
 from chainweaver.tools import Tool
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,127 @@ class TestValidFlow:
         )
         result = compile_flow(flow, tools)
         assert result.success is True
+
+
+class TestUnsafeRetryAdvisory:
+    """``RetryPolicy`` against an unsafe-to-retry contract is a warning (#488)."""
+
+    def test_safe_to_retry_false_warns(self) -> None:
+        tools = _make_tools()
+        tools["double"] = Tool(
+            name="double",
+            description="Doubles, but not safe to retry.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL, safe_to_retry=False),
+        )
+        flow = Flow(
+            name="unsafe_retry",
+            description="Retries a tool that declares it unsafe to retry.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    retry=RetryPolicy(max_retries=2, backoff_seconds=0.0),
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+        result = compile_flow(flow, tools)
+        assert result.success is True  # advisory only, not blocking
+        warning = next(w for w in result.warnings if w.issue_type == "unsafe_retry")
+        assert warning.tool_name == "double"
+        assert warning.step_index == 0
+
+    def test_non_idempotent_side_effecting_warns(self) -> None:
+        tools = _make_tools()
+        tools["double"] = Tool(
+            name="double",
+            description="Doubles, non-idempotent side effect.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE, idempotent=False),
+        )
+        flow = Flow(
+            name="unsafe_retry_non_idempotent",
+            description="Retries a non-idempotent, side-effecting tool.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    retry=RetryPolicy(max_retries=2, backoff_seconds=0.0),
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+        result = compile_flow(flow, tools)
+        assert any(w.issue_type == "unsafe_retry" for w in result.warnings)
+
+    def test_non_idempotent_read_only_does_not_warn(self) -> None:
+        # Non-idempotent but read-only: nothing external to duplicate.
+        tools = _make_tools()
+        tools["double"] = Tool(
+            name="double",
+            description="Doubles, non-idempotent but read-only.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.READ, idempotent=False),
+        )
+        flow = Flow(
+            name="safe_retry_read_only",
+            description="Retries a non-idempotent read-only tool.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    retry=RetryPolicy(max_retries=2, backoff_seconds=0.0),
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+        result = compile_flow(flow, tools)
+        assert not any(w.issue_type == "unsafe_retry" for w in result.warnings)
+
+    def test_default_safety_contract_does_not_warn(self) -> None:
+        # The default ToolSafetyContract is maximally permissive
+        # (safe_to_retry=True, idempotent=True) — no advisory expected.
+        tools = _make_tools()
+        flow = Flow(
+            name="default_safe_retry",
+            description="Retries a tool with the default safety contract.",
+            steps=[
+                FlowStep(
+                    tool_name="double",
+                    input_mapping={"number": "number"},
+                    retry=RetryPolicy(max_retries=2, backoff_seconds=0.0),
+                )
+            ],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+        result = compile_flow(flow, tools)
+        assert not any(w.issue_type == "unsafe_retry" for w in result.warnings)
+
+    def test_no_retry_policy_no_warning_even_if_unsafe(self) -> None:
+        tools = _make_tools()
+        tools["double"] = Tool(
+            name="double",
+            description="Unsafe to retry, but no RetryPolicy attached.",
+            input_schema=NumberInput,
+            output_schema=ValueOutput,
+            fn=_double_fn,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL, safe_to_retry=False),
+        )
+        flow = Flow(
+            name="unsafe_no_retry_policy",
+            description="No retry attached at all.",
+            steps=[FlowStep(tool_name="double", input_mapping={"number": "number"})],
+            input_schema_ref=Flow.schema_ref_from(NumberInput),
+        )
+        result = compile_flow(flow, tools)
+        assert not any(w.issue_type == "unsafe_retry" for w in result.warnings)
 
 
 class TestMissingTool:
