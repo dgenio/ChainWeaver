@@ -216,7 +216,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is no longer honoured — the tool runs once rather than risk duplicating
   an uncertain side effect on retry; `compile_flow()` also emits a
   non-blocking `unsafe_retry` `CompilationWarning` for this combination
-  regardless of `strict_safety` (#488).
+  regardless of `strict_safety` (#488). The async fallback path also now
+  preserves the primary failure in `retry_errors` even when it arrives
+  empty (a streaming-tool failure bypasses `_invoke_tool_async`'s own
+  accumulation), so a successful fallback after a streaming failure no
+  longer loses the recovery root-cause from the trace.
 
 - **Executor determinism import-contract hardening** (#430): the guard in
   `tests/test_executor_import_contract.py` now rejects obvious literal dynamic

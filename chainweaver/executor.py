@@ -3099,6 +3099,12 @@ class FlowExecutor:
         prefix = "fallback:"
         if on_error.startswith(prefix):
             fb_name = on_error[len(prefix) :]
+            # Preserve the primary failure in the trace even when
+            # retry_errors arrives empty (e.g. a streaming-tool failure
+            # bypasses _invoke_tool_async's own accumulation) — mirrors the
+            # sync lane's combined_retry_errors so a successful fallback
+            # doesn't erase the recovery root-cause from the record.
+            retry_errors.append(str(wrapped_error))
             try:
                 fb_tool = self.get_tool(fb_name)
             except ToolNotFoundError as exc:
