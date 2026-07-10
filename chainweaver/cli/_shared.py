@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sys
 from enum import Enum
 from pathlib import Path
@@ -102,6 +103,24 @@ def _require_existing_dir(path: Path) -> None:
     if not path.is_dir():
         typer.echo(f"chainweaver: not a directory: {path}", err=True)
         raise typer.Exit(code=2)
+
+
+_UNSAFE_PATH_CHAR_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def sanitize_path_component(component: str) -> str:
+    """Make *component* safe to use as a single filesystem path segment (#494).
+
+    Flow and property names can reach path construction from untrusted input —
+    e.g. ``chainweaver record`` derives a candidate filename from a flow name
+    built out of tool names read verbatim from a JSONL trace file. Such a name
+    could contain ``/``, ``\\``, or ``..`` segments and escape the intended
+    output directory. Replace any character outside ``[A-Za-z0-9._-]`` with
+    ``_`` and never return an empty string, so the result is always a single,
+    in-directory segment.
+    """
+    cleaned = _UNSAFE_PATH_CHAR_RE.sub("_", component)
+    return cleaned or "_"
 
 
 def _load_flow_from_registry(flow_name: str) -> Flow | DAGFlow:

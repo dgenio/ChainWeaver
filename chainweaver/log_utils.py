@@ -53,6 +53,75 @@ class RedactionPolicy(BaseModel):
     max_value_length: int | None = None
     redact_replacement: str = "***REDACTED***"
 
+    @classmethod
+    def recommended(cls) -> RedactionPolicy:
+        """Return a curated secure-by-default policy (issue #361).
+
+        Extends :data:`DEFAULT_REDACT_KEYS` with more common credential and
+        PII-adjacent field names, and adds a conservative value pattern that
+        catches the shapes real secrets take — bearer tokens and the prefixed
+        API-key formats major providers issue — without over-redacting benign
+        text. A generous ``max_value_length`` keeps large payloads from
+        flooding logs. This is the one-line default new users should reach for;
+        it is deliberately less aggressive than :meth:`strict` to minimise
+        false positives. See ``docs/security.md`` for the logging trust model
+        (what this does and does not cover).
+        """
+        keys = DEFAULT_REDACT_KEYS | {
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "private_key",
+            "credential",
+            "credentials",
+            "session_token",
+            "cookie",
+            "set-cookie",
+        }
+        # Bearer tokens and common provider key prefixes (OpenAI ``sk-``/``rk-``,
+        # GitHub ``gh[a-z]_``, AWS ``AKIA``, Slack ``xox[a-z]-``). Anchored to
+        # token-like runs so ordinary prose is left intact.
+        pattern = re.compile(
+            r"(?i)\b("
+            r"bearer\s+[A-Za-z0-9._\-]+"
+            r"|(?:sk|rk|pk)-[A-Za-z0-9]{16,}"
+            r"|gh[pousr]_[A-Za-z0-9]{20,}"
+            r"|AKIA[0-9A-Z]{16}"
+            r"|xox[abpsr]-[A-Za-z0-9-]{10,}"
+            r")\b"
+        )
+        return cls(
+            redact_keys=frozenset(keys),
+            redact_pattern=pattern,
+            max_value_length=4096,
+        )
+
+    @classmethod
+    def strict(cls) -> RedactionPolicy:
+        """Return an aggressive policy for high-sensitivity environments (issue #361).
+
+        Builds on :meth:`recommended` with additional identifier-shaped keys
+        and a much shorter ``max_value_length`` so long values are truncated
+        early. Trades a higher false-positive rate for stronger guarantees;
+        use where leaking a value to a log is costlier than losing readability.
+        """
+        base = cls.recommended()
+        keys = base.redact_keys | {
+            "email",
+            "phone",
+            "ssn",
+            "account",
+            "account_number",
+            "card",
+            "card_number",
+            "pin",
+        }
+        return cls(
+            redact_keys=frozenset(keys),
+            redact_pattern=base.redact_pattern,
+            max_value_length=256,
+        )
+
     def redact(self, data: dict[str, Any]) -> dict[str, Any]:
         """Return a deep copy of *data* with sensitive values masked."""
         result = self._apply(data)

@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import Flow, FlowStep
@@ -47,6 +47,48 @@ class TestRedactKeys:
     def test_default_keys_constant_includes_known_sensitive(self) -> None:
         for k in ("password", "token", "api_key", "secret", "authorization"):
             assert k in DEFAULT_REDACT_KEYS
+
+
+class TestRecommendedAndStrictPresets:
+    """Secure-by-default presets (issue #361)."""
+
+    def test_recommended_extends_default_keys(self) -> None:
+        policy = RedactionPolicy.recommended()
+        assert policy.redact_keys >= DEFAULT_REDACT_KEYS
+        out = policy.redact({"access_token": "x", "client_secret": "y", "user": "alice"})
+        assert out["access_token"] == policy.redact_replacement
+        assert out["client_secret"] == policy.redact_replacement
+        assert out["user"] == "alice"
+
+    def test_recommended_redacts_credential_shaped_values(self) -> None:
+        policy = RedactionPolicy.recommended()
+        # Values that look like real secrets are scrubbed even under benign keys.
+        redacted = policy.redact_text("call with Authorization: Bearer abc123DEF456ghi789")
+        assert "abc123DEF456ghi789" not in redacted
+        openai = policy.redact_text("key sk-abcdefghijklmnopqrstuvwx here")
+        assert "sk-abcdefghijklmnopqrstuvwx" not in openai
+
+    def test_recommended_leaves_benign_prose_intact(self) -> None:
+        policy = RedactionPolicy.recommended()
+        text = "The token_count was 42 and the request succeeded."
+        assert policy.redact_text(text) == text
+
+    def test_strict_is_more_aggressive_than_recommended(self) -> None:
+        recommended = RedactionPolicy.recommended()
+        strict = RedactionPolicy.strict()
+        assert recommended.redact_keys <= strict.redact_keys
+        assert "email" in strict.redact_keys
+        assert "email" not in recommended.redact_keys
+        assert strict.max_value_length is not None
+        assert recommended.max_value_length is not None
+        assert strict.max_value_length < recommended.max_value_length
+
+    def test_presets_are_frozen_instances(self) -> None:
+        # Presets return ordinary RedactionPolicy instances (frozen models).
+        policy = RedactionPolicy.recommended()
+        assert isinstance(policy, RedactionPolicy)
+        with pytest.raises(ValidationError):
+            policy.redact_replacement = "changed"
 
 
 class TestRedactNested:

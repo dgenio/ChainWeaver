@@ -68,10 +68,46 @@ executor = FlowExecutor(registry=registry, redaction_policy=policy)
 `secret`, `authorization`.  Matching is case-insensitive.  Redaction is
 applied recursively to nested dicts and lists.
 
+### Secure-by-default presets (#361)
+
+Two classmethods package a curated configuration so opting in is one line:
+
+```python
+from chainweaver import FlowExecutor, RedactionPolicy
+
+# Recommended: extended key set + credential-shaped value patterns
+# (bearer tokens, provider API-key prefixes) + a generous length cap.
+executor = FlowExecutor(registry=registry, redaction_policy=RedactionPolicy.recommended())
+
+# Strict: adds identifier/PII keys (email, phone, account, …) and truncates
+# aggressively. Higher false-positive rate; use in high-sensitivity settings.
+executor = FlowExecutor(registry=registry, redaction_policy=RedactionPolicy.strict())
+```
+
+`recommended()` is deliberately conservative to avoid over-redacting benign
+prose; `strict()` trades readability for stronger guarantees.  Both remain
+opt-in — the executor default stays unchanged.
+
+### Logging trust model — what is and is not redacted
+
+`RedactionPolicy` scrubs the **logging/display path only**.  Every other
+surface stores values verbatim; redaction is the caller's responsibility
+before persistence or emission.
+
+| Surface | Redacted by `RedactionPolicy`? | Notes |
+|---------|:------------------------------:|-------|
+| Log lines (`log_step_start` / `log_step_end`) | ✅ when a policy is set | The only surface redaction covers automatically. |
+| In-memory `ExecutionResult` / `StepRecord` | ❌ | Stored raw so authorized callers can inspect. Redact explicitly via `policy.redact_execution_result(result)` before persisting. |
+| Checkpoints (`Checkpointer`) | ❌ | Snapshots carry raw step I/O; treat the checkpoint store as sensitive. |
+| Step cache (`StepCache`) | ❌ | Cached outputs are stored verbatim. |
+| `FlowEvent` stream | ❌ | Streamed payloads are raw; redact downstream if forwarding. |
+| MCP error detail (`FlowServer`) | ✅ via `redact_text` / `error_detail` | See the FlowServer hardening section. |
+
 > **Trace fields are stored raw on purpose.**  Treat the `ExecutionResult`
 > object as you would treat any other in-memory structure carrying tool
 > data: don't serialize it to disk or send it across the network without an
-> explicit decision about which fields are safe to expose.
+> explicit decision about which fields are safe to expose — e.g. call
+> `RedactionPolicy.recommended().redact_execution_result(result)` first.
 
 ---
 

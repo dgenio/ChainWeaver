@@ -10,6 +10,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Secure-by-default redaction presets** (#361): `RedactionPolicy.recommended()`
+  and `RedactionPolicy.strict()` classmethods package a curated key set plus
+  credential-shaped value patterns (bearer tokens, provider API-key prefixes) so
+  opting into redaction is one line. `docs/security.md` gains a logging
+  trust-model table stating exactly which surfaces redaction covers (log lines,
+  MCP error detail) and which store values raw (`ExecutionResult`, checkpoints,
+  step cache, `FlowEvent`). Executor defaults are unchanged.
+
+### Security
+
+- **`chainweaver record` path-traversal hardening** (#494): candidate flow names
+  are derived from tool names read verbatim from an untrusted JSONL trace, then
+  used to build the output filename. The name is now run through a shared
+  `sanitize_path_component` helper (factored out of `chainweaver.cli.fuzz`) before
+  the path join, so separators and `..` segments can no longer escape
+  `--output-dir`.
+- **Import-safety regression guard for `chainweaver validate` / `check`** (#491):
+  added sentinel-module tests proving these commands never import the modules
+  named in a flow's schema / `retryable_errors` refs. Ref resolution is lazy
+  (schema properties) or deferred to execution (`resolved_retryable_errors`), so
+  linting an untrusted flow file runs no attacker-controlled import side effects;
+  the tests lock that property against future regression.
+
+### Added
+
 - **Compile-time fallback validation for DAG flows and fallback output shapes**
   (#456, #457): `compile_flow()` now accepts a `DAGFlow` as well as a linear
   `Flow`. For a DAG, each step is validated against the union of its transitive
