@@ -109,6 +109,18 @@ executor = FlowExecutor(
   itself, so the no-LLM / no-network / no-randomness invariants are preserved
   (the same model as `decision_callback`).  Enforcement applies on both the sync
   and async lanes.
+* A step's `on_error="fallback:<tool_name>"` target is subject to the **same
+  gate** as the primary tool (issue #486) — a fallback declaring
+  `requires_approval=True` or exceeding `max_side_effect_level` is refused,
+  not run ungated, and a side-effecting fallback with no `dry_run_fn` is
+  stubbed rather than invoked under `dry_run=True` (sync lane only — the async
+  lane has no dry-run mode).
+* A `RetryPolicy` attached to a step whose tool declares `safe_to_retry=False`
+  (or is non-idempotent and side-effecting) is **not honoured** under
+  `strict_safety=True` (issue #488): the tool is invoked once, not retried,
+  to avoid duplicating an uncertain side effect. `compile_flow` additionally
+  emits a non-blocking `unsafe_retry` warning for this combination regardless
+  of `strict_safety`.
 
 ## Dry-run rehearsals (#357)
 

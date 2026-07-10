@@ -272,3 +272,41 @@ async def test_async_subflow_deadline_forwarded_into_subflow() -> None:
         await ex.execute_flow_async("parent", {"n": 1}, deadline=deadline)
     # The cancellation is re-anchored to the parent flow.
     assert excinfo.value.flow_name == "parent"
+
+
+# --------------------------------------------------------------------------
+# Async on_error="skip" diagnostics parity (#487)
+# --------------------------------------------------------------------------
+
+
+async def test_async_skip_records_error_diagnostics_like_sync() -> None:
+    """A skipped step's failure must be recorded on the async lane, matching
+    the sync lane's ``TestOnErrorSkip.test_skip_continues_with_empty_outputs``
+    (``tests/test_retry.py``) instead of silently dropping the diagnostics.
+    """
+
+    async def _explode(inp: _NIn) -> dict[str, Any]:
+        raise RuntimeError("async skip failure")
+
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="skip_async",
+            version="1.0.0",
+            description="",
+            steps=[FlowStep(tool_name="bad", input_mapping={"n": "n"}, on_error="skip")],
+        )
+    )
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        Tool(name="bad", description="", input_schema=_NIn, output_schema=_Out, fn=_explode)
+    )
+
+    result = await ex.execute_flow_async("skip_async", {"n": 1})
+    assert result.success is True
+    record = result.execution_log[0]
+    assert record.skipped is True
+    assert record.outputs == {}
+    assert record.error_type == "FlowExecutionError"
+    assert record.error_message is not None
+    assert "async skip failure" in record.error_message

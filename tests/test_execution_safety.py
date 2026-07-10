@@ -77,6 +77,43 @@ def _single_step_executor(tool: Tool, **executor_kwargs: Any) -> FlowExecutor:
     return executor
 
 
+def _failing_tool(name: str) -> Tool:
+    """A tool that always raises, for exercising on_error='fallback:...' paths."""
+
+    def fn(inp: _In) -> dict[str, Any]:
+        raise RuntimeError(f"{name} always fails")
+
+    return Tool(
+        name=name,
+        description=f"{name} tool.",
+        input_schema=_In,
+        output_schema=_Out,
+        fn=fn,
+        safety=ToolSafetyContract(side_effects=SideEffectLevel.READ),
+    )
+
+
+def _fallback_executor(primary: Tool, fallback: Tool, **executor_kwargs: Any) -> FlowExecutor:
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="f",
+            description="d",
+            steps=[
+                FlowStep(
+                    tool_name=primary.name,
+                    input_mapping={},
+                    on_error=f"fallback:{fallback.name}",
+                )
+            ],
+        )
+    )
+    executor = FlowExecutor(registry, **executor_kwargs)
+    executor.register_tool(primary)
+    executor.register_tool(fallback)
+    return executor
+
+
 # ---------------------------------------------------------------------------
 # #356 — approval enforcement
 # ---------------------------------------------------------------------------
@@ -295,3 +332,99 @@ class TestDryRun:
         executor = _single_step_executor(tool)
         result = executor.execute_flow("f", {"x": 1})
         assert result.dry_run is False
+
+
+# ---------------------------------------------------------------------------
+# #486 — fallback tools go through the same safety gate as the primary
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackSafetyGate:
+    def test_fallback_requiring_approval_is_denied_without_callback(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.WRITE, requires_approval=True)
+        executor = _fallback_executor(primary, fallback, strict_safety=True)
+        result = executor.execute_flow("f", {"x": 1})
+        assert result.success is False
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.fallback_tool_name == "fallback"
+        assert record.error_type == "ApprovalDeniedError"
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.DENY
+
+    def test_fallback_approved_via_callback_runs(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.WRITE, requires_approval=True)
+        executor = _fallback_executor(
+            primary, fallback, approval_callback=lambda ctx: ApprovalDecision.APPROVE
+        )
+        result = executor.execute_flow("f", {"x": 1})
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.APPROVE
+        assert result.final_output == {"x": 1, "y": 2}
+
+    def test_fallback_exceeding_side_effect_ceiling_is_refused(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.DESTRUCTIVE)
+        executor = _fallback_executor(
+            primary, fallback, max_side_effect_level=SideEffectLevel.READ
+        )
+        result = executor.execute_flow("f", {"x": 1})
+        assert result.success is False
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.error_type == "SafetyCeilingError"
+
+    def test_fallback_within_ceiling_runs(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.READ)
+        executor = _fallback_executor(
+            primary, fallback, max_side_effect_level=SideEffectLevel.WRITE
+        )
+        result = executor.execute_flow("f", {"x": 1})
+        assert result.success is True
+        assert result.execution_log[0].fallback_used is True
+
+    def test_fallback_side_effecting_step_stubbed_under_dry_run(self) -> None:
+        # A side-effecting fallback with no dry_run_fn is stubbed (skipped),
+        # never actually invoked — mirrors the primary's #357 behaviour.
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.WRITE)
+        executor = _fallback_executor(primary, fallback)
+        result = executor.execute_flow("f", {"x": 1}, dry_run=True)
+        assert result.dry_run is True
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.skipped is True
+        assert result.final_output == {"x": 1}
+
+    def test_fallback_read_only_actually_runs_under_dry_run(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.READ)
+        executor = _fallback_executor(primary, fallback)
+        result = executor.execute_flow("f", {"x": 1}, dry_run=True)
+        assert result.dry_run is True
+        assert result.success is True
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.skipped is False
+        assert result.final_output == {"x": 1, "y": 2}
+
+    def test_fallback_safety_gate_enforced_on_async_lane(self) -> None:
+        primary = _failing_tool("primary")
+        fallback = _make_tool("fallback", SideEffectLevel.WRITE, requires_approval=True)
+        executor = _fallback_executor(
+            primary, fallback, approval_callback=lambda ctx: ApprovalDecision.DENY
+        )
+        result = asyncio.run(executor.execute_flow_async("f", {"x": 1}))
+        assert result.success is False
+        record = result.execution_log[0]
+        assert record.fallback_used is True
+        assert record.error_type == "ApprovalDeniedError"
+        assert record.approval is not None
+        assert record.approval.decision is ApprovalDecision.DENY

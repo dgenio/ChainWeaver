@@ -364,6 +364,33 @@ def _validate_step(
 
     tool = tools[step.tool_name]
     tool_input_fields = _get_model_fields(tool.input_schema)
+
+    # 0. Retry-safety advisory (issue #488): a ``RetryPolicy`` attached to a
+    # step whose tool's safety contract says a failed call must not be
+    # retried risks silently duplicating a side effect on transient
+    # failures.  Non-blocking — the executor additionally refuses the retry
+    # outright when ``strict_safety=True``.
+    if step.retry is not None and step.retry.max_retries > 0:
+        contract = tool.safety
+        unsafe = not contract.safe_to_retry or (not contract.idempotent and not contract.read_only)
+        if unsafe:
+            warnings.append(
+                CompilationWarning(
+                    step_index=step_index,
+                    tool_name=step.tool_name,
+                    field_name=None,
+                    issue_type="unsafe_retry",
+                    detail=(
+                        f"Step {step_index} ('{step.tool_name}') has a RetryPolicy "
+                        f"but the tool's safety contract declares "
+                        f"safe_to_retry={contract.safe_to_retry}, "
+                        f"idempotent={contract.idempotent}, "
+                        f"read_only={contract.read_only} — retrying a failed call "
+                        "may duplicate a side effect."
+                    ),
+                )
+            )
+
     fallback_tool: Tool | None = None
     if step.on_error.startswith("fallback:"):
         fallback_name = step.on_error[len("fallback:") :]

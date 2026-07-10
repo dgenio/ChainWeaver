@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 from helpers import NumberInput, ValueOutput
 from pydantic import BaseModel, ValidationError
 
+from chainweaver.contracts import SideEffectLevel, ToolSafetyContract
 from chainweaver.executor import FlowExecutor
 from chainweaver.flow import Flow, FlowStep, RetryPolicy
 from chainweaver.registry import FlowRegistry
@@ -108,6 +110,7 @@ def _build_executor(
     retry: RetryPolicy | None = None,
     on_error: str = "fail",
     extra_tools: tuple[Tool, ...] = (),
+    **executor_kwargs: Any,
 ) -> FlowExecutor:
     flow = Flow(
         name="retry_flow",
@@ -124,20 +127,21 @@ def _build_executor(
     )
     registry = FlowRegistry()
     registry.register_flow(flow)
-    ex = FlowExecutor(registry=registry)
+    ex = FlowExecutor(registry=registry, **executor_kwargs)
     ex.register_tool(tool)
     for extra in extra_tools:
         ex.register_tool(extra)
     return ex
 
 
-def _make_tool(name: str, fn: Any) -> Tool:
+def _make_tool(name: str, fn: Any, *, safety: ToolSafetyContract | None = None) -> Tool:
     return Tool(
         name=name,
         description=f"{name} tool.",
         input_schema=NumberInput,
         output_schema=ValueOutput,
         fn=fn,
+        safety=safety,
     )
 
 
@@ -384,3 +388,108 @@ class TestBackoffTiming:
         # Two sleeps of 50ms each.  Allow generous lower bound (90ms) to
         # avoid timer flakiness.
         assert elapsed >= 0.09
+
+
+class TestUnsafeRetrySuppression:
+    """``strict_safety`` suppresses retry for a contract that disallows it (#488)."""
+
+    def test_strict_safety_suppresses_retry_when_not_safe_to_retry(self) -> None:
+        counter = _Counter(fail_until_attempt=10)  # always fails
+        tool = _make_tool(
+            "charge",
+            counter,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL, safe_to_retry=False),
+        )
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+            strict_safety=True,
+        )
+        result = ex.execute_flow("retry_flow", {"number": 1})
+        assert result.success is False
+        # Exactly one attempt — the retry policy was not honoured.
+        assert counter.attempts == 1
+        record = result.execution_log[0]
+        assert record.retry_count == 0
+        assert "retry suppressed" in record.retry_errors[0]
+
+    def test_strict_safety_suppresses_non_idempotent_side_effecting_tool(self) -> None:
+        counter = _Counter(fail_until_attempt=10)
+        tool = _make_tool(
+            "charge",
+            counter,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.WRITE, idempotent=False),
+        )
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+            strict_safety=True,
+        )
+        result = ex.execute_flow("retry_flow", {"number": 1})
+        assert result.success is False
+        assert counter.attempts == 1
+
+    def test_strict_safety_allows_retry_for_non_idempotent_read_only_tool(self) -> None:
+        # Non-idempotent but read-only (e.g. a clock read): nothing external
+        # changes state to duplicate, so retry is unaffected.
+        counter = _Counter(fail_until_attempt=1)
+        tool = _make_tool(
+            "flaky_read",
+            counter,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.READ, idempotent=False),
+        )
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+            strict_safety=True,
+        )
+        result = ex.execute_flow("retry_flow", {"number": 4})
+        assert result.success is True
+        assert counter.attempts == 2
+
+    def test_non_strict_safety_still_retries_unsafe_tool(self) -> None:
+        # strict_safety defaults to False: retry suppression is opt-in, so
+        # the pre-#488 permissive behaviour is unchanged outside strict mode.
+        counter = _Counter(fail_until_attempt=10)
+        tool = _make_tool(
+            "charge",
+            counter,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL, safe_to_retry=False),
+        )
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+        )
+        result = ex.execute_flow("retry_flow", {"number": 1})
+        assert result.success is False
+        assert counter.attempts == 4  # initial + 3 retries, unaffected
+
+    def test_strict_safety_retries_normal_tool_unaffected(self) -> None:
+        # A tool with the default (safe) contract still retries normally
+        # under strict_safety=True.
+        counter = _Counter(fail_until_attempt=1)
+        tool = _make_tool("flaky", counter)
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+            strict_safety=True,
+        )
+        result = ex.execute_flow("retry_flow", {"number": 4})
+        assert result.success is True
+        assert counter.attempts == 2
+
+    def test_strict_safety_suppression_on_async_lane(self) -> None:
+        counter = _Counter(fail_until_attempt=10)
+        tool = _make_tool(
+            "charge",
+            counter,
+            safety=ToolSafetyContract(side_effects=SideEffectLevel.EXTERNAL, safe_to_retry=False),
+        )
+        ex = _build_executor(
+            tool,
+            retry=RetryPolicy(max_retries=3, backoff_seconds=0.0, backoff_multiplier=1.0),
+            strict_safety=True,
+        )
+        result = asyncio.run(ex.execute_flow_async("retry_flow", {"number": 1}))
+        assert result.success is False
+        assert counter.attempts == 1

@@ -206,6 +206,61 @@ async def test_streaming_tool_without_terminal_chunk_fails_step() -> None:
     assert result.success is False
 
 
+async def test_streaming_failure_fallback_preserves_primary_error() -> None:
+    """A successful ``on_error="fallback:..."`` after a streaming-tool
+    failure must not lose the primary failure from ``retry_errors`` — a
+    streaming step bypasses ``_invoke_tool_async``'s own retry_errors
+    accumulation entirely, so the fallback branch is the only place left
+    that can record it (issue #486 review follow-up).
+    """
+
+    async def _boom(inp: _Query) -> AsyncIterator[ToolChunk]:
+        raise RuntimeError("stream boom")
+        yield  # pragma: no cover - unreachable; keeps this an async generator
+
+    registry = FlowRegistry()
+    registry.register_flow(
+        Flow(
+            name="gen_flow_fallback",
+            version="1.0.0",
+            description="",
+            steps=[
+                FlowStep(
+                    tool_name="generate",
+                    input_mapping={"prompt": "prompt"},
+                    on_error="fallback:backup",
+                )
+            ],
+        )
+    )
+    ex = FlowExecutor(registry=registry)
+    ex.register_tool(
+        StreamingTool(
+            name="generate",
+            description="Stream a completion.",
+            input_schema=_Query,
+            output_schema=_Completion,
+            stream_fn=_boom,
+        )
+    )
+    ex.register_tool(
+        Tool(
+            name="backup",
+            description="Non-streaming fallback.",
+            input_schema=_Query,
+            output_schema=_Completion,
+            fn=lambda inp: {"text": "fallback text"},
+        )
+    )
+
+    result = await ex.execute_flow_async("gen_flow_fallback", {"prompt": "hi"})
+    assert result.success is True
+    record = result.execution_log[0]
+    assert record.fallback_used is True
+    assert record.outputs == {"text": "fallback text"}
+    assert any("stream boom" in msg for msg in record.retry_errors)
+
+
 async def test_chunk_after_terminal_is_rejected() -> None:
     async def _extra_after_final(inp: _Query) -> AsyncIterator[ToolChunk]:
         yield ToolChunk(data={"text": "done"}, is_final=True)

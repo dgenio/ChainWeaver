@@ -196,6 +196,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fallback safety-gate bypass, async skip-diagnostics loss, and
+  unenforced retry-safety in `FlowExecutor`** (#486, #487, #488): three
+  step-failure-handling correctness bugs found by the same audit pass and
+  fixed together since they share one root cause — `ToolSafetyContract`
+  guarantees enforced on the primary tool invocation were not consistently
+  enforced on its alternate paths. `on_error="fallback:<tool>"` now routes
+  the fallback tool through the same execution-time safety gate as the
+  primary (#356) in both lanes — a fallback declaring
+  `requires_approval=True` or exceeding `max_side_effect_level` is refused
+  rather than run ungated, and on the sync lane a side-effecting fallback
+  with no `dry_run_fn` is stubbed rather than invoked under `dry_run=True`
+  (#357); the async lane has no dry-run mode to mirror (#486). The async
+  lane's `on_error="skip"` path now records the wrapped
+  `error_type`/`error_message` on the resulting `StepRecord`, matching the
+  sync lane instead of silently discarding the diagnostics (#487). Under
+  `strict_safety=True`, a `RetryPolicy` attached to a step whose tool
+  declares `safe_to_retry=False` (or is non-idempotent and side-effecting)
+  is no longer honoured — the tool runs once rather than risk duplicating
+  an uncertain side effect on retry; `compile_flow()` also emits a
+  non-blocking `unsafe_retry` `CompilationWarning` for this combination
+  regardless of `strict_safety` (#488). The async fallback path also now
+  preserves the primary failure in `retry_errors` even when it arrives
+  empty (a streaming-tool failure bypasses `_invoke_tool_async`'s own
+  accumulation), so a successful fallback after a streaming failure no
+  longer loses the recovery root-cause from the trace.
+
 - **Executor determinism import-contract hardening** (#430): the guard in
   `tests/test_executor_import_contract.py` now rejects obvious literal dynamic
   import patterns (`__import__("random")`,
