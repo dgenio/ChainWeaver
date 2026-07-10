@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Minimal-core dependency & import contract guards** (#378, #431, #418):
+  new `tests/test_dependency_contract.py` mechanically enforces the base
+  package's promises — the runtime dependency set stays exactly the reviewed
+  five-package allowlist (adding one now fails CI until explicitly signed off),
+  no LLM-provider SDK is ever an unconditional dependency, and `import
+  chainweaver` in a fresh interpreter pulls in none of the provider SDKs or
+  heavy optional integrations (`openai`, `anthropic`, `langchain_core`,
+  `mcp`, `fastmcp`, `opentelemetry`, …). The wall-clock cold-start half of #418
+  is left to the benchmark lane rather than a timing assertion.
+
 - **Secure-by-default redaction presets** (#361): `RedactionPolicy.recommended()`
   and `RedactionPolicy.strict()` classmethods package a curated key set plus
   credential-shaped value patterns (bearer tokens, provider API-key prefixes) so
