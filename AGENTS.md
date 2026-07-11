@@ -56,7 +56,7 @@ chainweaver/
 │   └── refs.py        Schema/exception class-ref resolution + opt-in module allowlist policy (#345)
 ├── step_index.py      Named sentinels for flow input/output validation records (#339)
 ├── _pointer.py        Dependency-free RFC-6901 JSON pointer resolver shared by executor input_mapping (#387) and contrib json_pluck
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335) + directory hot-reload (load_from_directory/reload_from_directory/watch → ReloadReport/WatchHandle, flow-definitions only, #322)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)

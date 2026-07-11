@@ -19,13 +19,95 @@ original in-process behavior; pass a
 
 from __future__ import annotations
 
-from packaging.version import InvalidVersion, Version
+import contextlib
+import hashlib
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from chainweaver.exceptions import FlowNotFoundError, InvalidFlowVersionError
+from packaging.version import InvalidVersion, Version
+from pydantic import BaseModel, ConfigDict
+
+from chainweaver.exceptions import (
+    FlowNotFoundError,
+    FlowSerializationError,
+    InvalidFlowVersionError,
+)
 from chainweaver.flow import DAGFlow, Flow, FlowStatus, validate_dag_topology
+from chainweaver.serialization import flow_from_json, flow_from_yaml
 from chainweaver.storage import InMemoryStore, RegistryStore
 
+if TYPE_CHECKING:  # pragma: no cover — type-only reference
+    from types import TracebackType
+
 AnyFlow = Flow | DAGFlow
+
+# Recognised flow-file extensions for directory loading / hot-reload (#322).
+_FLOW_FILE_SUFFIXES: tuple[str, ...] = (".flow.yaml", ".flow.yml", ".flow.json")
+
+
+class ReloadReport(BaseModel):
+    """Summary of a :meth:`FlowRegistry.reload_from_directory` pass (#322).
+
+    Each list holds ``"name@version"`` identifiers so a caller (or a
+    ``watch`` callback) can log or react to exactly what changed.
+
+    Attributes:
+        added: Flows whose ``(name, version)`` was not present on the previous
+            scan of this directory.
+        updated: Flows whose file contents changed since the previous scan.
+        unchanged: Flows whose file was byte-identical to the previous scan.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    added: list[str] = []
+    updated: list[str] = []
+    unchanged: list[str] = []
+
+    @property
+    def changed(self) -> bool:
+        """Return ``True`` when this pass added or updated at least one flow."""
+        return bool(self.added or self.updated)
+
+
+class WatchHandle:
+    """Control handle for a background :meth:`FlowRegistry.watch` poller (#322).
+
+    Returned by :meth:`FlowRegistry.watch`; call :meth:`stop` to end the
+    polling thread. Usable as a context manager so the thread is always
+    joined on exit::
+
+        with registry.watch("flows/") as handle:
+            ...  # flow files are hot-reloaded while this block runs
+    """
+
+    def __init__(self, thread: threading.Thread, stop_event: threading.Event) -> None:
+        self._thread = thread
+        self._stop_event = stop_event
+
+    def stop(self, *, timeout: float | None = 5.0) -> None:
+        """Signal the poller to stop and join its thread."""
+        self._stop_event.set()
+        self._thread.join(timeout=timeout)
+
+    @property
+    def running(self) -> bool:
+        """Return ``True`` while the polling thread is alive."""
+        return self._thread.is_alive()
+
+    def __enter__(self) -> WatchHandle:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.stop()
+
 
 # Sentinel distinguishing "argument not supplied" from an explicit ``None``
 # value for :meth:`FlowRegistry.update_flow_state` (``None`` is a meaningful
@@ -80,6 +162,10 @@ class FlowRegistry:
         discover_plugins: bool = False,
     ) -> None:
         self._store: RegistryStore = store if store is not None else InMemoryStore()
+        # Per-directory file-content hashes from the last scan, keyed by the
+        # resolved directory path, so ``reload_from_directory`` (#322) can
+        # classify each flow file as added / updated / unchanged.
+        self._dir_hashes: dict[str, dict[tuple[str, str], str]] = {}
         # Latest-version pointer; rebuilt from the store on construction so a
         # file-backed registry restored across process boundaries still
         # answers ``get_flow(name)`` queries without an explicit version.
@@ -137,6 +223,202 @@ class FlowRegistry:
             validate_dag_topology(flow)
         self._store.save_flow(flow, overwrite=overwrite)
         self._touch_latest(flow.name, flow.version)
+
+    @staticmethod
+    def _load_flow_file(path: Path) -> AnyFlow:
+        """Deserialize a single ``.flow.*`` file by extension (#322).
+
+        Raises:
+            FlowSerializationError: On an unrecognised extension or a malformed
+                file.
+        """
+        text = path.read_text(encoding="utf-8")
+        name_lower = path.name.lower()
+        if name_lower.endswith(".flow.json"):
+            return flow_from_json(text, source=str(path))
+        if name_lower.endswith((".flow.yaml", ".flow.yml")):
+            return flow_from_yaml(text, source=str(path))
+        raise FlowSerializationError(
+            f"Unrecognised extension; expected one of {_FLOW_FILE_SUFFIXES}",
+            source=str(path),
+        )
+
+    @staticmethod
+    def _iter_flow_files(directory: Path) -> list[Path]:
+        """Return every flow file under *directory* (recursive), sorted."""
+        return [
+            path
+            for path in sorted(directory.rglob("*"))
+            if path.is_file() and path.name.lower().endswith(_FLOW_FILE_SUFFIXES)
+        ]
+
+    def load_from_directory(
+        self, directory: Path | str, *, overwrite: bool = True
+    ) -> ReloadReport:
+        """Register every flow file under *directory* (recursive) (#322).
+
+        Convenience loader for file-defined flows: walks *directory* for
+        ``.flow.yaml`` / ``.flow.yml`` / ``.flow.json`` files and registers each
+        one, seeding the change-tracking baseline used by
+        :meth:`reload_from_directory` and :meth:`watch`.
+
+        Args:
+            directory: Directory to scan (recursively).
+            overwrite: When ``True`` (the default) an already-registered
+                ``(name, version)`` is replaced; when ``False`` a duplicate
+                raises :class:`~chainweaver.exceptions.FlowAlreadyExistsError`.
+
+        Returns:
+            A :class:`ReloadReport` whose ``added`` list names every flow loaded
+            (``updated`` / ``unchanged`` are empty on the initial load).
+
+        Raises:
+            FileNotFoundError: When *directory* does not exist.
+            NotADirectoryError: When *directory* is not a directory.
+            FlowSerializationError: When a flow file is malformed.
+        """
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Flow directory not found: {dir_path}")
+        if not dir_path.is_dir():
+            raise NotADirectoryError(f"Not a directory: {dir_path}")
+
+        hashes: dict[tuple[str, str], str] = {}
+        added: list[str] = []
+        for path in self._iter_flow_files(dir_path):
+            raw = path.read_bytes()
+            flow = self._load_flow_file(path)
+            self.register_flow(flow, overwrite=overwrite)
+            key = (flow.name, flow.version)
+            hashes[key] = hashlib.sha256(raw).hexdigest()
+            added.append(f"{flow.name}@{flow.version}")
+        self._dir_hashes[str(dir_path.resolve())] = hashes
+        return ReloadReport(added=sorted(added))
+
+    def reload_from_directory(self, directory: Path | str) -> ReloadReport:
+        """Re-scan *directory* and register new or changed flow files (#322).
+
+        Compares the current on-disk flow files against the file hashes recorded
+        by the previous :meth:`load_from_directory` / :meth:`reload_from_directory`
+        pass for the same directory, and re-registers (``overwrite=True``) only
+        the flows whose file is new or whose contents changed. Deterministic and
+        thread-free — this is the tested core that :meth:`watch` polls.
+
+        Scoped deliberately to **flow definitions**: it never registers or
+        unregisters tools, and it does not remove flows whose file disappeared.
+        Removing a flow that a concurrent execution might be running would breach
+        the concurrency contract (mutating operations must not race executions);
+        flow removal is left to an explicit, quiescent operator action.
+
+        Args:
+            directory: Directory to re-scan (recursively).
+
+        Returns:
+            A :class:`ReloadReport` classifying every current flow file as
+            ``added``, ``updated``, or ``unchanged``.
+
+        Raises:
+            FileNotFoundError: When *directory* does not exist.
+            NotADirectoryError: When *directory* is not a directory.
+            FlowSerializationError: When a flow file is malformed.
+        """
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Flow directory not found: {dir_path}")
+        if not dir_path.is_dir():
+            raise NotADirectoryError(f"Not a directory: {dir_path}")
+
+        previous = self._dir_hashes.get(str(dir_path.resolve()), {})
+        current: dict[tuple[str, str], str] = {}
+        added: list[str] = []
+        updated: list[str] = []
+        unchanged: list[str] = []
+        for path in self._iter_flow_files(dir_path):
+            raw = path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            flow = self._load_flow_file(path)
+            key = (flow.name, flow.version)
+            current[key] = digest
+            label = f"{flow.name}@{flow.version}"
+            if key not in previous:
+                self.register_flow(flow, overwrite=True)
+                added.append(label)
+            elif previous[key] != digest:
+                self.register_flow(flow, overwrite=True)
+                updated.append(label)
+            else:
+                unchanged.append(label)
+        self._dir_hashes[str(dir_path.resolve())] = current
+        return ReloadReport(
+            added=sorted(added),
+            updated=sorted(updated),
+            unchanged=sorted(unchanged),
+        )
+
+    def watch(
+        self,
+        directory: Path | str,
+        *,
+        poll_interval_seconds: float = 2.0,
+        on_reload: Callable[[ReloadReport], None] | None = None,
+    ) -> WatchHandle:
+        """Poll *directory* on a background thread, hot-reloading changed flows (#322).
+
+        Starts a daemon thread that calls :meth:`reload_from_directory` every
+        *poll_interval_seconds* until the returned :class:`WatchHandle` is
+        stopped. Polling (rather than OS file events) keeps the behavior
+        identical across platforms and dependency-free. Intended for development
+        iteration; the heavy lifting lives in the deterministic, thread-free
+        :meth:`reload_from_directory`.
+
+        Args:
+            directory: Directory to watch (recursively). It must already exist.
+            poll_interval_seconds: Seconds between scans (must be > 0).
+            on_reload: Optional callback invoked with the :class:`ReloadReport`
+                after every scan that added or updated a flow. Exceptions raised
+                by the callback are suppressed so a buggy callback never kills
+                the poller.
+
+        Returns:
+            A :class:`WatchHandle`; call :meth:`WatchHandle.stop` (or use it as a
+            context manager) to end polling.
+
+        Raises:
+            ValueError: When *poll_interval_seconds* is not positive.
+            FileNotFoundError: When *directory* does not exist.
+            NotADirectoryError: When *directory* is not a directory.
+        """
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive.")
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Flow directory not found: {dir_path}")
+        if not dir_path.is_dir():
+            raise NotADirectoryError(f"Not a directory: {dir_path}")
+
+        stop_event = threading.Event()
+
+        def _poll() -> None:
+            while not stop_event.is_set():
+                try:
+                    report = self.reload_from_directory(dir_path)
+                except FlowSerializationError:
+                    # A half-written or malformed file mid-edit: skip this pass
+                    # and retry on the next tick rather than killing the poller.
+                    report = None
+                if report is not None and report.changed and on_reload is not None:
+                    # A callback bug must not kill the poller.
+                    with contextlib.suppress(Exception):
+                        on_reload(report)
+                # Interruptible wait: stop() returns promptly instead of blocking
+                # a full interval.
+                stop_event.wait(poll_interval_seconds)
+
+        thread = threading.Thread(
+            target=_poll, name=f"chainweaver-watch-{dir_path.name}", daemon=True
+        )
+        thread.start()
+        return WatchHandle(thread, stop_event)
 
     def get_flow(self, name: str, *, version: str | None = None) -> AnyFlow:
         """Return the flow registered under *name*.

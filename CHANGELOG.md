@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Flow-definition hot-reload** (#322): `FlowRegistry` gains
+  `load_from_directory()`, `reload_from_directory()` (a deterministic,
+  thread-free diff that re-registers only new/changed `.flow.*` files, returning
+  a `ReloadReport` of added/updated/unchanged), and `watch()` (a background
+  polling thread returning a `WatchHandle` usable as a context manager, with an
+  optional `on_reload` callback). Scoped deliberately to flow definitions: it
+  never registers/unregisters tools and never removes a flow whose file
+  disappeared, so it cannot race a concurrent execution and breach the
+  concurrency contract (#336). Tool auto-reload and flow removal are left as
+  explicit, quiescent operator actions.
+
 - **Persistence-protocol conformance kit** (#397): a new
   `chainweaver.testing.protocol_suites` module ships reusable, parameterized
   pytest base classes — `RegistryStoreConformance`, `StepCacheConformance`,
