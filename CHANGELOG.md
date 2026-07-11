@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP error detail) and which store values raw (`ExecutionResult`, checkpoints,
   step cache, `FlowEvent`). Executor defaults are unchanged.
 
+### Documentation
+
+- **Design and investigation write-ups** (#425, #426, #432, #433) under
+  `docs/research/`: a signed flow-bundle format design proposal (#425), a
+  language-neutral flow-specification design proposal (#426), a trace-isolation
+  deep-copy cost investigation backed by a copy-strategy micro-benchmark that
+  recommends `copy.deepcopy` at the trace boundary with a large-payload escape
+  hatch (#432), and an MCP server schema survey that prioritizes the
+  field-alias / adapter-step work for #295 (#433). All are scoped as
+  low-confidence proposals / spikes per their issues; no runtime code changes.
+
 ### Security
 
 - **Release-critical CI supply-chain hardening** (#346, #495): all third-party
