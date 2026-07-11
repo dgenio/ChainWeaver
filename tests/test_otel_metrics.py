@@ -51,10 +51,13 @@ def _collect(reader: InMemoryMetricReader) -> dict[str, list[tuple[float, dict[s
             for metric in scope_metric.metrics:
                 points = out.setdefault(metric.name, [])
                 for dp in metric.data.data_points:
-                    value = getattr(dp, "value", None)
-                    if value is None:  # histogram data point
-                        value = dp.sum
-                    points.append((value, dict(dp.attributes or {})))
+                    # Counters expose ``value``; histogram points expose ``sum``.
+                    # ``getattr`` avoids narrowing the SDK's data-point union.
+                    raw = getattr(dp, "value", None)
+                    if raw is None:
+                        raw = getattr(dp, "sum", 0.0)
+                    assert raw is not None  # fallback above guarantees a value
+                    points.append((float(raw), dict(dp.attributes or {})))
     return out
 
 
