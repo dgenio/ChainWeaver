@@ -14,10 +14,12 @@ This module provides first-class, opt-in helpers for persisting traces *safely*:
   persistence seams (:class:`~chainweaver.checkpoint.Checkpointer`,
   :class:`~chainweaver.storage.RegistryStore`).
 - :class:`InMemoryTraceStore` — dict-backed, for tests and single-process use.
-- :class:`FileTraceStore` — an append-oriented JSONL store for local/dev usage,
-  with an optional :class:`~chainweaver.log_utils.RedactionPolicy` applied
-  **before** anything touches disk, and an optional ``max_traces`` retention cap
-  (oldest-first rotation).
+- :class:`FileTraceStore` — a rewrite-on-save JSONL store for local/dev usage
+  (each save/delete reads the whole file and rewrites it via a temp file +
+  atomic :func:`os.replace`; not a true append log), with an optional
+  :class:`~chainweaver.log_utils.RedactionPolicy` applied **before** anything
+  touches disk, and an optional ``max_traces`` retention cap (oldest-first
+  rotation).
 
 The separation is deliberate: the raw ``ExecutionResult`` stays in memory for an
 authorized caller to inspect; only the redacted view is persisted. Persistence
