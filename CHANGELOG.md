@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Persistence-protocol conformance kit** (#397): a new
+  `chainweaver.testing.protocol_suites` module ships reusable, parameterized
+  pytest base classes — `RegistryStoreConformance`, `StepCacheConformance`,
+  `CheckpointerConformance` — that a storage backend (Redis/SQLite/S3, in-tree
+  or third-party) subclasses with a one-line fixture to inherit the full
+  behavioral contract (round-trip, overwrite semantics, missing-key behavior,
+  defensive copying, drift-hash fidelity). The in-tree `InMemory*` / `File*`
+  reference implementations are run through the kit in
+  `tests/test_protocol_conformance.py`, so the suite and the backends it
+  certifies are verified together.
+
+- **Export-adapter regression coverage** (#439): added targeted tests for the
+  shared export schema-derivation helpers (`chainweaver.export._schema`),
+  raising its coverage from ~33% to ~96% by exercising the previously-untested
+  error and best-effort branches (empty flow, unresolved `input_schema_ref`,
+  composed sub-flow first/terminal steps, DAG single- vs multi-sink output
+  derivation, unregistered terminal tools) that every export adapter relies on.
+
 - **Free-threaded CPython smoke lane** (#402): a non-blocking `ci.yml` job runs
   the suite on the no-GIL `3.14t` build to surface GIL-dependence assumptions in
   the executor's thread interplay early, feeding the concurrency-contract work

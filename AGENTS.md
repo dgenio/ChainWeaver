@@ -100,7 +100,8 @@ chainweaver/
 │   ├── fakes.py       fake_tool: permissive-schema Tool factory for tests
 │   ├── runner.py      FlowTestRunner facade + capture_steps context manager
 │   ├── assertions.py  assert_result_matches with volatile-field normalisation
-│   └── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
+│   ├── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
+│   └── protocol_suites.py  Reusable pytest conformance suites (#397): RegistryStoreConformance / StepCacheConformance / CheckpointerConformance base classes a third-party backend subclasses with a fixture; imports pytest, so it stays a submodule never imported by testing/__init__.py
 ├── plugins.py         discover_tools() + discover_flows() over importlib.metadata entry points (#130)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
