@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenTelemetry metrics** (#435): the OTel integration now emits *metrics*
+  alongside the existing spans. `OTelMetricsMiddleware` (and the after-the-fact
+  `export_result_to_otel_metrics`) record flow/step execution counters, flow/step
+  duration histograms (ms), a cache counter (boolean `cache_hit` → hit rate), and
+  a retry counter — so operators get throughput, latency percentiles, cache-hit
+  rate, and failure rate (the `success=false` slice) for dashboards and SLO
+  alerts, not just per-run traces. Attributes are low-cardinality by design
+  (`flow_name` / `tool_name` / boolean `success` / `cache_hit`); `trace_id` and
+  raw inputs are never attached to metrics. Requires `chainweaver[otel]`.
+
 - **Flow-definition hot-reload** (#322): `FlowRegistry` gains
   `load_from_directory()`, `reload_from_directory()` (a deterministic,
   thread-free diff that re-registers only new/changed `.flow.*` files, returning

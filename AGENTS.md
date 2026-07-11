@@ -71,7 +71,7 @@ chainweaver/
 ├── checkpoint.py      Checkpointer Protocol + ExecutionSnapshot + InMemoryCheckpointer + FileCheckpointer (#128)
 ├── integrations/      Optional third-party adapters (each guards its extra import)
 │   ├── __init__.py    Package marker; documents available integrations
-│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); OTelMetricsMiddleware + export_result_to_otel_metrics — flow/step counters, duration histograms, cache-hit + retry counters (#435); requires chainweaver[otel]
 │   ├── langchain.py   from_/to_langchain_tool + from_langchain_toolkit (#82); requires chainweaver[langchain]
 │   ├── llamaindex.py  from_/to_llamaindex_tool (#82); requires chainweaver[llamaindex]
 │   ├── weaver_spec.py    Re-exports weaver-contracts types + flow_to_selectable_item + routing resolvers; needs [weaver-stack] extra (#91, #107, #233)
