@@ -119,6 +119,16 @@ class TestReloadFromDirectory:
         report = registry.reload_from_directory(tmp_path)
         assert report.added == ["a@0.1.0"]
 
+    def test_duplicate_name_version_across_files_raises(self, tmp_path: Path) -> None:
+        # Two files declaring the same (name, version) must fail fast rather than
+        # let filesystem ordering decide the winner (PR #516 review).
+        _write_flow(tmp_path / "one.flow.yaml", "dup", version="0.1.0")
+        _write_flow(tmp_path / "two.flow.yaml", "dup", version="0.1.0")
+        with pytest.raises(FlowSerializationError):
+            FlowRegistry().load_from_directory(tmp_path)
+        with pytest.raises(FlowSerializationError):
+            FlowRegistry().reload_from_directory(tmp_path)
+
 
 class TestReloadReport:
     def test_changed_property(self) -> None:

@@ -103,6 +103,47 @@ class TestInputGuardrailBlocks:
         assert seen[0].inputs == {"value": 1}
         assert seen[0].outputs is None
 
+    def test_context_inputs_are_isolated_from_live_inputs(self) -> None:
+        # A guardrail mutating a nested value in ctx.inputs must NOT affect the
+        # inputs later passed to the tool (read-only contract; PR #516 review).
+        def mutate(ctx: GuardrailContext) -> None:
+            ctx.inputs["items"].append("injected")
+
+        class _NestedIn(BaseModel):
+            items: list[str]
+
+        class _NestedOut(BaseModel):
+            items: list[str]
+
+        seen: list[list[str]] = []
+
+        def _fn(inp: _NestedIn) -> dict[str, Any]:
+            seen.append(list(inp.items))
+            return {"items": inp.items}
+
+        tool = Tool(
+            name="echo",
+            description="echo",
+            input_schema=_NestedIn,
+            output_schema=_NestedOut,
+            fn=_fn,
+        )
+        registry = FlowRegistry()
+        registry.register_flow(
+            Flow(
+                name="f",
+                version="0.1.0",
+                description="d",
+                steps=[FlowStep(tool_name="echo", input_mapping={})],
+            )
+        )
+        executor = FlowExecutor(registry=registry, guardrail_callback=mutate)
+        executor.register_tool(tool)
+        result = executor.execute_flow("f", {"items": ["a"]})
+        assert result.success
+        # The tool saw the original list, not the guardrail's mutation.
+        assert seen == [["a"]]
+
     def test_no_callback_is_behaviour_preserving(self) -> None:
         tool = _echo_tool()
         executor = FlowExecutor(registry=_one_step_registry())

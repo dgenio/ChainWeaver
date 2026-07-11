@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from chainweaver.exceptions import (
     FlowNotFoundError,
@@ -62,9 +62,9 @@ class ReloadReport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    added: list[str] = []
-    updated: list[str] = []
-    unchanged: list[str] = []
+    added: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    unchanged: list[str] = Field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -121,6 +121,25 @@ def _parse_version(flow_name: str, version: str) -> Version:
         return Version(version)
     except InvalidVersion as exc:
         raise InvalidFlowVersionError(flow_name, version, str(exc)) from exc
+
+
+def _reject_duplicate_flow_key(
+    key: tuple[str, str], path: Path, seen_paths: dict[tuple[str, str], Path]
+) -> None:
+    """Fail fast when two files in one directory scan share a ``(name, version)`` (#322).
+
+    Silently letting the last file win would make directory load/reload results
+    depend on filesystem ordering, so a clash raises
+    :class:`~chainweaver.exceptions.FlowSerializationError` naming both files.
+    """
+    prior = seen_paths.get(key)
+    if prior is not None:
+        raise FlowSerializationError(
+            f"Duplicate flow '{key[0]}' version '{key[1]}' defined by both "
+            f"'{prior.name}' and '{path.name}' in the same directory scan.",
+            source=str(path),
+        )
+    seen_paths[key] = path
 
 
 class FlowRegistry:
@@ -239,7 +258,8 @@ class FlowRegistry:
         if name_lower.endswith((".flow.yaml", ".flow.yml")):
             return flow_from_yaml(text, source=str(path))
         raise FlowSerializationError(
-            f"Unrecognised extension; expected one of {_FLOW_FILE_SUFFIXES}",
+            f"Unrecognised flow-file extension for '{path.name}'; "
+            f"expected one of {_FLOW_FILE_SUFFIXES}.",
             source=str(path),
         )
 
@@ -275,7 +295,8 @@ class FlowRegistry:
         Raises:
             FileNotFoundError: When *directory* does not exist.
             NotADirectoryError: When *directory* is not a directory.
-            FlowSerializationError: When a flow file is malformed.
+            FlowSerializationError: When a flow file is malformed, or when two
+                files in the scan declare the same ``(name, version)``.
         """
         dir_path = Path(directory)
         if not dir_path.exists():
@@ -284,12 +305,14 @@ class FlowRegistry:
             raise NotADirectoryError(f"Not a directory: {dir_path}")
 
         hashes: dict[tuple[str, str], str] = {}
+        seen_paths: dict[tuple[str, str], Path] = {}
         added: list[str] = []
         for path in self._iter_flow_files(dir_path):
             raw = path.read_bytes()
             flow = self._load_flow_file(path)
-            self.register_flow(flow, overwrite=overwrite)
             key = (flow.name, flow.version)
+            _reject_duplicate_flow_key(key, path, seen_paths)
+            self.register_flow(flow, overwrite=overwrite)
             hashes[key] = hashlib.sha256(raw).hexdigest()
             added.append(f"{flow.name}@{flow.version}")
         self._dir_hashes[str(dir_path.resolve())] = hashes
@@ -320,7 +343,8 @@ class FlowRegistry:
         Raises:
             FileNotFoundError: When *directory* does not exist.
             NotADirectoryError: When *directory* is not a directory.
-            FlowSerializationError: When a flow file is malformed.
+            FlowSerializationError: When a flow file is malformed, or when two
+                files in the scan declare the same ``(name, version)``.
         """
         dir_path = Path(directory)
         if not dir_path.exists():
@@ -330,6 +354,7 @@ class FlowRegistry:
 
         previous = self._dir_hashes.get(str(dir_path.resolve()), {})
         current: dict[tuple[str, str], str] = {}
+        seen_paths: dict[tuple[str, str], Path] = {}
         added: list[str] = []
         updated: list[str] = []
         unchanged: list[str] = []
@@ -338,6 +363,7 @@ class FlowRegistry:
             digest = hashlib.sha256(raw).hexdigest()
             flow = self._load_flow_file(path)
             key = (flow.name, flow.version)
+            _reject_duplicate_flow_key(key, path, seen_paths)
             current[key] = digest
             label = f"{flow.name}@{flow.version}"
             if key not in previous:

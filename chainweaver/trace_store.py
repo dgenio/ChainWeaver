@@ -114,13 +114,17 @@ class InMemoryTraceStore:
 
 
 class FileTraceStore:
-    """Append-oriented JSONL :class:`TraceStore` for local/dev usage (issue #292).
+    """JSONL :class:`TraceStore` for local/dev usage (issue #292).
 
     Each trace is one line of the backing ``traces.jsonl`` file (a
-    JSON-serialized :class:`ExecutionResult`). Saving a trace whose ``trace_id``
-    already exists replaces its line, keeping the file free of duplicates while
-    preserving newest-last order. Writes go through a temp file + atomic
-    :func:`os.replace`, so a crash mid-write cannot corrupt the log.
+    JSON-serialized :class:`ExecutionResult`). This is a *rewrite-on-save* store,
+    not a true append log: every :meth:`save`/:meth:`delete` reads the whole
+    file, applies the change (deduplicating by ``trace_id`` and enforcing
+    ``max_traces``), and rewrites it via a temp file + atomic :func:`os.replace`,
+    so a crash mid-write cannot corrupt the log and the file stays free of
+    duplicates in newest-last order. The full-rewrite cost is acceptable for the
+    intended local/dev scale; a backend needing append-only or high-volume I/O
+    should implement the :class:`TraceStore` protocol directly.
 
     Args:
         root: Directory holding the ``traces.jsonl`` file. Created (with

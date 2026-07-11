@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import copy
 import queue
 import threading
 import time
@@ -5201,10 +5202,14 @@ class FlowExecutor:
         """
         if self._guardrail_callback is None:
             return None
+        # Deep-copy so the read-only GuardrailContext.inputs contract holds even
+        # against nested mutation: a buggy guardrail that mutates a nested
+        # dict/list must not alter the live inputs later passed to the tool.
+        # (RedactionPolicy.redact already returns an independent deep copy.)
         redacted = (
             self._redaction_policy.redact(inputs)
             if self._redaction_policy is not None
-            else dict(inputs)
+            else copy.deepcopy(inputs)
         )
         ctx = GuardrailContext(
             trace_id=trace_id,
