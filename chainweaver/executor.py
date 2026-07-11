@@ -74,6 +74,7 @@ from chainweaver.exceptions import (
     FlowExecutionError,
     FlowNotFoundError,
     FlowStatusError,
+    GuardrailViolationError,
     InputMappingError,
     PredicateSyntaxError,
     SafetyCeilingError,
@@ -92,6 +93,12 @@ from chainweaver.flow import (
     FlowStep,
     RetryPolicy,
     validate_dag_topology,
+)
+from chainweaver.guardrails import (
+    GuardrailCallable,
+    GuardrailCallback,
+    GuardrailContext,
+    coerce_guardrail_callback,
 )
 from chainweaver.log_utils import (
     RedactionPolicy,
@@ -759,6 +766,7 @@ class FlowExecutor:
         approval_callback: ApprovalCallback | ApprovalCallable | None = None,
         strict_safety: bool = False,
         max_side_effect_level: SideEffectLevel | None = None,
+        guardrail_callback: GuardrailCallback | GuardrailCallable | None = None,
         discover_plugins: bool = False,
         max_composition_depth: int = 10,
         max_step_concurrency: int = 1,
@@ -817,6 +825,15 @@ class FlowExecutor:
         )
         self._strict_safety = strict_safety
         self._max_side_effect_level = max_side_effect_level
+        # Content-safety guardrail seam (issue #317).  Opt-in: when set, the
+        # callback is consulted before each tool runs (the "input" stage) so a
+        # host can block prompt injection / disallowed inputs on every tool
+        # call. Like the approval/decision seams it is a user-supplied callback
+        # the executor merely calls, so the no-LLM/no-network/no-randomness
+        # invariants hold. ``None`` (the default) is behaviour-preserving.
+        self._guardrail_callback: GuardrailCallback | None = coerce_guardrail_callback(
+            guardrail_callback
+        )
         # Step-result cache (issue #127).  ``None`` (the default)
         # disables caching entirely — every tool runs every call.
         # When set, eligible step outputs are read from / written to
@@ -2628,6 +2645,29 @@ class FlowExecutor:
                     inputs=inputs,
                     outputs=None,
                     error=gate_error,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
+
+        # Input-stage guardrail (issue #317): same seam and semantics as the
+        # sync lane — consulted before the tool runs / the cache is read.
+        guardrail_error = self._evaluate_input_guardrail(
+            tool=tool,
+            step_index=step_index,
+            inputs=inputs,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=getattr(step, "step_id", None),
+        )
+        if guardrail_error is not None:
+            log_step_error(_logger, step_index, step.display_name, guardrail_error)
+            return _finish(
+                _record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=guardrail_error,
                     success=False,
                     skipped=False,
                     retry_errors=[],
@@ -4863,6 +4903,30 @@ class FlowExecutor:
                 )
             )
 
+        # Input-stage guardrail (issue #317): consulted before the cache lookup
+        # and tool invocation, so a blocked input never runs the tool nor returns
+        # a cached result.
+        guardrail_error = self._evaluate_input_guardrail(
+            tool=tool,
+            step_index=step_index,
+            inputs=inputs,
+            flow_name=flow_name,
+            trace_id=trace_id,
+            step_id=step_id,
+        )
+        if guardrail_error is not None:
+            log_step_error(_logger, step_index, step.display_name, guardrail_error)
+            return _finish(
+                _record(
+                    inputs=inputs,
+                    outputs=None,
+                    error=guardrail_error,
+                    success=False,
+                    skipped=False,
+                    retry_errors=[],
+                )
+            )
+
         # Dry-run dispatch (issue #357): side-effecting steps run ``dry_run_fn``
         # or are skipped/aborted; read-only steps fall through and run normally
         # (with the cache bypassed below).
@@ -5114,6 +5178,52 @@ class FlowExecutor:
                 ApprovalRecord(decision=ApprovalDecision.DENY, reason=reason),
             )
         return None, ApprovalRecord(decision=ApprovalDecision.APPROVE)
+
+    def _evaluate_input_guardrail(
+        self,
+        *,
+        tool: Tool,
+        step_index: int,
+        inputs: dict[str, Any],
+        flow_name: str,
+        trace_id: str,
+        step_id: str | None,
+    ) -> Exception | None:
+        """Run the input-stage guardrail for a step (issue #317).
+
+        Returns a :class:`~chainweaver.exceptions.GuardrailViolationError` when
+        the guardrail blocks the step (so the caller aborts it with a failed
+        ``StepRecord``), or ``None`` when no callback is registered or the step
+        is allowed. Like :meth:`_evaluate_safety_gate` the only outward call is
+        the user-supplied callback, so the executor's determinism invariants are
+        preserved. Inputs are redacted (when a policy is configured) before they
+        reach the callback, matching the approval seam.
+        """
+        if self._guardrail_callback is None:
+            return None
+        redacted = (
+            self._redaction_policy.redact(inputs)
+            if self._redaction_policy is not None
+            else dict(inputs)
+        )
+        ctx = GuardrailContext(
+            trace_id=trace_id,
+            flow_name=flow_name,
+            step_index=step_index,
+            step_id=step_id,
+            tool_name=tool.name,
+            stage="input",
+            inputs=redacted,
+            outputs=None,
+        )
+        try:
+            self._guardrail_callback.check(ctx)
+        except Exception as exc:
+            reason = f"input guardrail raised {type(exc).__name__}: {exc}"
+            err = GuardrailViolationError(tool.name, step_index, "input", reason)
+            err.__cause__ = exc
+            return err
+        return None
 
     def _dry_run_step(
         self,

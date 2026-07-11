@@ -61,7 +61,8 @@ chainweaver/
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) (main entry point)
+├── guardrails.py      GuardrailCallback Protocol + GuardrailContext (stage input/output) + coerce_guardrail_callback — input-stage content-safety seam wired in executor.py (#317); mirrors approvals.py
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) + opt-in input-stage content-safety guardrails (guardrail_callback, #317) (main entry point)
 ├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
 │   ├── __init__.py    Re-exports merge_step_outputs + apply_output_mapping
 │   └── context.py     merge_step_outputs + apply_output_mapping: single context-merge honouring on_context_collision (#337) and output_mapping (#386)

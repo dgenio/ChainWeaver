@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Input-stage content-safety guardrails** (#317): a new
+  `chainweaver.guardrails` module and an opt-in `FlowExecutor(...,
+  guardrail_callback=...)` seam (mirroring the approval/decision callbacks) that
+  is consulted before every tool runs — and before the step cache is read — so a
+  host can block prompt injection or disallowed inputs on every tool call
+  without embedding the check in each tool. A callback that raises aborts the
+  step with the new typed `GuardrailViolationError` (`CW-E052`) and a failed
+  `StepRecord`; both the sync and async lanes enforce it identically. The
+  `GuardrailContext` carries a `stage` field so output-stage moderation can be
+  added at the same seam later without an API change (that stage is not yet
+  enforced). Public symbols (`GuardrailCallback`, `GuardrailContext`,
+  `BaseGuardrailCallback`, `coerce_guardrail_callback`, `GuardrailViolationError`,
+  …) are exported top-level; executor defaults are unchanged when no callback is
+  set.
+
 - **Redacted trace-persistence interfaces** (#292): a new
   `chainweaver.trace_store` module — a `TraceStore` protocol (mirroring the
   `Checkpointer` / `RegistryStore` seams) with `InMemoryTraceStore` and an

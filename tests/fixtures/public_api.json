@@ -16,6 +16,7 @@
     "BacktestReport",
     "BaseApprovalCallback",
     "BaseDecisionCallback",
+    "BaseGuardrailCallback",
     "BaseMiddleware",
     "CancellationToken",
     "CandidateScore",
@@ -93,6 +94,11 @@
     "FuzzConfigError",
     "FuzzFailure",
     "FuzzReport",
+    "GuardrailCallable",
+    "GuardrailCallback",
+    "GuardrailContext",
+    "GuardrailStage",
+    "GuardrailViolationError",
     "InMemoryCheckpointer",
     "InMemoryStepCache",
     "InMemoryStore",
@@ -186,6 +192,7 @@
     "cli",
     "coerce_approval_callback",
     "coerce_decision_callback",
+    "coerce_guardrail_callback",
     "compile_flow",
     "description_proposal_schema",
     "detect_tool_name_collisions",
@@ -385,6 +392,12 @@
       "kind": "class",
       "module": "chainweaver.decisions",
       "qualname": "BaseDecisionCallback",
+      "signature": "()"
+    },
+    "BaseGuardrailCallback": {
+      "kind": "class",
+      "module": "chainweaver.guardrails",
+      "qualname": "BaseGuardrailCallback",
       "signature": "()"
     },
     "BaseMiddleware": {
@@ -889,7 +902,7 @@
       "kind": "class",
       "module": "chainweaver.executor",
       "qualname": "FlowExecutor",
-      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, decision_policy: DecisionPolicy | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
+      "signature": "(registry: FlowRegistry, *, cost_profile: CostProfile | None = None, redaction_policy: RedactionPolicy | None = None, trace_recorder: TraceRecorder | None = None, middleware: list[FlowExecutorMiddleware] | None = None, step_cache: StepCache | None = None, checkpointer: Checkpointer | None = None, delete_on_success: bool = True, decision_callback: DecisionCallback | DecisionCallable | None = None, decision_policy: DecisionPolicy | None = None, approval_callback: ApprovalCallback | ApprovalCallable | None = None, strict_safety: bool = False, max_side_effect_level: SideEffectLevel | None = None, guardrail_callback: GuardrailCallback | GuardrailCallable | None = None, discover_plugins: bool = False, max_composition_depth: int = 10, max_step_concurrency: int = 1) -> None"
     },
     "FlowExecutorMiddleware": {
       "kind": "class",
@@ -1043,6 +1056,43 @@
       },
       "module": "chainweaver.fuzz",
       "qualname": "FuzzReport"
+    },
+    "GuardrailCallable": {
+      "kind": "_CallableGenericAlias",
+      "module": "collections.abc",
+      "qualname": "Callable"
+    },
+    "GuardrailCallback": {
+      "kind": "class",
+      "module": "chainweaver.guardrails",
+      "qualname": "GuardrailCallback",
+      "signature": "(*args, **kwargs)"
+    },
+    "GuardrailContext": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "flow_name": "str",
+        "inputs": "dict[str, Any]",
+        "outputs": "dict[str, Any] | NoneType",
+        "stage": "Literal['input', 'output']",
+        "step_id": "str | NoneType",
+        "step_index": "int",
+        "tool_name": "str",
+        "trace_id": "str"
+      },
+      "module": "chainweaver.guardrails",
+      "qualname": "GuardrailContext"
+    },
+    "GuardrailStage": {
+      "kind": "_LiteralGenericAlias",
+      "module": "typing",
+      "qualname": "Literal"
+    },
+    "GuardrailViolationError": {
+      "kind": "class",
+      "module": "chainweaver.exceptions",
+      "qualname": "GuardrailViolationError",
+      "signature": "(tool_name: str, step_index: int, stage: str, detail: str) -> None"
     },
     "InMemoryCheckpointer": {
       "kind": "class",
@@ -1773,6 +1823,12 @@
       "module": "chainweaver.decisions",
       "qualname": "coerce_decision_callback",
       "signature": "(cb: DecisionCallback | DecisionCallable | None) -> DecisionCallback | None"
+    },
+    "coerce_guardrail_callback": {
+      "kind": "function",
+      "module": "chainweaver.guardrails",
+      "qualname": "coerce_guardrail_callback",
+      "signature": "(cb: GuardrailCallback | GuardrailCallable | None) -> GuardrailCallback | None"
     },
     "compile_flow": {
       "kind": "function",

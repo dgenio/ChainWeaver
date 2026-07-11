@@ -158,6 +158,37 @@ executor = FlowExecutor(
   emits a non-blocking `unsafe_retry` warning for this combination regardless
   of `strict_safety`.
 
+## Input guardrails (#317)
+
+For content-safety enforcement on **every** tool call — blocking prompt
+injection, disallowed inputs, or policy violations without embedding the check
+in each tool — register a `guardrail_callback` on the executor:
+
+```python
+from chainweaver import FlowExecutor, GuardrailContext
+
+def block_injection(ctx: GuardrailContext) -> None:
+    if ctx.stage == "input" and _looks_like_injection(ctx.inputs):
+        raise ValueError("possible prompt injection")  # blocks the step
+
+executor = FlowExecutor(registry=registry, guardrail_callback=block_injection)
+```
+
+The callback is consulted at the **input stage** — before the tool runs and
+**before the step cache is read**, so a blocked input can neither invoke the
+tool nor return a previously-cached result. Raising anything aborts the step
+with `GuardrailViolationError` (`CW-E052`) and a failed `StepRecord`, the same
+path a denied approval takes; returning `None` allows the step. Inputs are
+redacted (when a `RedactionPolicy` is configured) before reaching the callback.
+The seam is a user-supplied callback the executor merely calls, so the
+no-LLM / no-network / no-randomness executor invariants are preserved — a
+moderation model or PII detector lives inside your callback, not the executor.
+
+The `GuardrailContext` carries a `stage` field (`"input"` / `"output"`);
+output-stage moderation is reserved for a future release and will use the same
+seam without an API change. Both the sync (`execute_flow`) and async
+(`execute_flow_async`) lanes enforce the input guardrail identically.
+
 ## Dry-run rehearsals (#357)
 
 `execute_flow(dry_run=True)` runs a side-effect-free rehearsal that validates
