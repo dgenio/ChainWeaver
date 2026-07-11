@@ -17,6 +17,10 @@ on:
       - ".github/actions/chainweaver/**"
       - ".github/workflows/action-smoke.yml"
 
+# Minimal default token scope (#495): the smoke tests only read the repo.
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: annotate.py unit tests

@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Free-threaded CPython smoke lane** (#402): a non-blocking `ci.yml` job runs
+  the suite on the no-GIL `3.14t` build to surface GIL-dependence assumptions in
+  the executor's thread interplay early, feeding the concurrency-contract work
+  (#336).
+
 - **Minimal-core dependency & import contract guards** (#378, #431, #418):
   new `tests/test_dependency_contract.py` mechanically enforces the base
   package's promises — the runtime dependency set stays exactly the reviewed
@@ -29,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step cache, `FlowEvent`). Executor defaults are unchanged.
 
 ### Security
+
+- **Release-critical CI supply-chain hardening** (#346, #495): all third-party
+  GitHub Actions in `publish.yml`, `release.yml`, and `distribution-check.yml`
+  are pinned to full commit SHAs with Dependabot-style version comments (no more
+  floating `@v7` / `@release/v1` refs on the OIDC-privileged publish path), and
+  PEP 740 attestations are enabled on the PyPI publish step. `workflow_dispatch`
+  inputs are routed through `env:` instead of interpolated directly into `run:`
+  scripts across `evals.yml`, `publish.yml`, `release.yml`, and
+  `distribution-check.yml` (script-injection hardening), explicit minimal
+  `permissions: contents: read` blocks were added to `ci.yml`, `docs.yml`, and
+  `action-smoke.yml`, and CI's routine jobs pin the transitively-installed
+  `weaver-contracts` to an exact version via a new `constraints.txt`
+  (`PIP_CONSTRAINT`), leaving the floor-deps and latest-deps canaries free to
+  resolve minimum / newest versions as before.
 
 - **`chainweaver record` path-traversal hardening** (#494): candidate flow names
   are derived from tool names read verbatim from an untrusted JSONL trace, then
