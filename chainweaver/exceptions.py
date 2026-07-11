@@ -671,6 +671,35 @@ class SafetyCeilingError(ChainWeaverError):
         )
 
 
+class GuardrailViolationError(ChainWeaverError):
+    """Raised when a :class:`~chainweaver.guardrails.GuardrailCallback` blocks a step (issue #317).
+
+    Guardrails are an opt-in content-safety seam: when a
+    ``guardrail_callback`` is registered on the executor, it is consulted
+    *before* each tool runs (the ``"input"`` stage) so a host can block prompt
+    injection, disallowed inputs, or policy violations. A callback that rejects
+    the step (by raising) aborts it with this typed error and a failed
+    ``StepRecord`` — the same abort path a denied approval or a tool failure
+    takes — rather than running the tool on unsafe input.
+
+    Attributes:
+        tool_name: Name of the tool whose invocation was blocked.
+        step_index: Zero-based position of the step inside the flow.
+        stage: The guardrail stage that blocked the step (``"input"``).
+        detail: Human-readable description of why the guardrail blocked the step.
+    """
+
+    def __init__(self, tool_name: str, step_index: int, stage: str, detail: str) -> None:
+        self.tool_name = tool_name
+        self.step_index = step_index
+        self.stage = stage
+        self.detail = detail
+        normalised = detail.rstrip(".")
+        super().__init__(
+            f"Guardrail ({stage}) blocked tool '{tool_name}' at step {step_index}: {normalised}."
+        )
+
+
 class MCPMetadataError(MCPError):
     """Raised when server-provided MCP tool metadata violates the metadata policy (issue #359).
 
@@ -1064,6 +1093,7 @@ _ERROR_CODES: dict[type[ChainWeaverError], str] = {
     DecisionTimeoutError: "CW-E049",
     DecisionBudgetExceededError: "CW-E050",
     SchemaRefPolicyError: "CW-E051",
+    GuardrailViolationError: "CW-E052",
 }
 
 for _exc_cls, _exc_code in _ERROR_CODES.items():

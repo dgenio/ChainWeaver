@@ -45,19 +45,24 @@ jobs:
           python-version: "3.12"
 
       - name: Install with the provider extra
+        # Values flow through env (not direct ${{ }} interpolation) so a
+        # dispatch input cannot inject shell — matching fuzz.yml (#495).
+        env:
+          PROVIDER: ${{ github.event.inputs.provider || 'anthropic' }}
         run: |
-          provider="${{ github.event.inputs.provider || 'anthropic' }}"
-          pip install -e ".[dev,yaml,llm-${provider}]"
+          set -euo pipefail
+          pip install -e ".[dev,yaml,llm-${PROVIDER}]"
 
       - name: Run proposer evals against the real provider
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PROVIDER: ${{ github.event.inputs.provider || 'anthropic' }}
+          MODEL: ${{ github.event.inputs.model }}
         run: |
-          provider="${{ github.event.inputs.provider || 'anthropic' }}"
-          model="${{ github.event.inputs.model }}"
-          args=(--provider "${provider}")
-          if [ -n "${model}" ]; then args+=(--model "${model}"); fi
+          set -euo pipefail
+          args=(--provider "${PROVIDER}")
+          if [ -n "${MODEL}" ]; then args+=(--model "${MODEL}"); fi
           python -m evals.run_evals "${args[@]}"
 
       - name: Upload eval report

@@ -1,4 +1,4 @@
-"""OpenTelemetry trace exporter for ChainWeaver flows (issue #126).
+"""OpenTelemetry trace + metrics integration for ChainWeaver flows (issues #126, #435).
 
 Bridges :class:`~chainweaver.executor.ExecutionResult` and the
 :class:`~chainweaver.middleware.FlowExecutorMiddleware` lifecycle hooks
@@ -19,6 +19,16 @@ Both paths preserve the original ``ExecutionResult.trace_id`` as a
 ``chainweaver.trace_id`` attribute, so spans link back to the
 ChainWeaver execution log unambiguously.
 
+For **aggregate** signals (throughput, latency percentiles, cache-hit rate,
+failure rate) rather than individual traces, :class:`OTelMetricsMiddleware`
+(issue #435) emits OpenTelemetry *metrics* — counters and duration histograms
+for flows and steps — via the same middleware seam, and
+:func:`export_result_to_otel_metrics` records the same instruments from a
+completed :class:`ExecutionResult`.  Attributes are deliberately low-cardinality
+(``flow_name`` / ``tool_name`` / boolean ``success`` / boolean cache-``hit``);
+raw inputs and ``trace_id`` are never attached to metrics, where high
+cardinality would blow up the time-series backend.
+
 Optional extra
 --------------
 
@@ -37,6 +47,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 try:  # Optional dependency.
+    from opentelemetry.metrics import Meter
     from opentelemetry.trace import (
         Status,
         StatusCode,
@@ -292,4 +303,175 @@ def export_result_to_otel(result: ExecutionResult, *, tracer: Tracer) -> None:
         flow_span.end(end_time=_datetime_to_ns(result.ended_at))
 
 
-__all__ = ["OTelTraceExporter", "export_result_to_otel"]
+# ---------------------------------------------------------------------------
+# Metrics (issue #435)
+# ---------------------------------------------------------------------------
+
+# Instrument names — namespaced under ``chainweaver.*`` to match the span names.
+_FLOW_EXECUTIONS = "chainweaver.flow.executions"
+_FLOW_DURATION = "chainweaver.flow.duration"
+_STEP_EXECUTIONS = "chainweaver.step.executions"
+_STEP_DURATION = "chainweaver.step.duration"
+_STEP_CACHE = "chainweaver.step.cache"
+_STEP_RETRIES = "chainweaver.step.retries"
+
+
+def _flow_metric_attrs(flow_name: str, *, success: bool) -> dict[str, Any]:
+    return {"chainweaver.flow_name": flow_name, "chainweaver.success": success}
+
+
+def _step_metric_attrs(flow_name: str, tool_name: str, *, success: bool) -> dict[str, Any]:
+    return {
+        "chainweaver.flow_name": flow_name,
+        "chainweaver.tool_name": tool_name,
+        "chainweaver.success": success,
+    }
+
+
+class _OTelMetrics:
+    """Shared instrument set + recording logic for the two metrics entry points."""
+
+    def __init__(self, meter: Meter) -> None:
+        self._flow_executions = meter.create_counter(
+            _FLOW_EXECUTIONS,
+            unit="1",
+            description="Count of flow executions, tagged by flow_name and success.",
+        )
+        self._flow_duration = meter.create_histogram(
+            _FLOW_DURATION,
+            unit="ms",
+            description="Wall-clock flow execution duration in milliseconds.",
+        )
+        self._step_executions = meter.create_counter(
+            _STEP_EXECUTIONS,
+            unit="1",
+            description="Count of step executions, tagged by flow_name, tool_name, success.",
+        )
+        self._step_duration = meter.create_histogram(
+            _STEP_DURATION,
+            unit="ms",
+            description="Wall-clock step execution duration in milliseconds.",
+        )
+        self._step_cache = meter.create_counter(
+            _STEP_CACHE,
+            unit="1",
+            description=(
+                "Count of executed steps tagged by cache hit=true (served from "
+                "the step cache) or hit=false (the tool actually ran)."
+            ),
+        )
+        self._step_retries = meter.create_counter(
+            _STEP_RETRIES,
+            unit="1",
+            description="Total retry attempts across steps (retry_count summed).",
+        )
+
+    def record_step(self, record: Any, *, flow_name: str) -> None:
+        """Record metrics for one :class:`StepRecord`.
+
+        Skipped steps (a branch not taken) are ignored: they never executed, so
+        counting them would distort throughput and cache-rate signals.
+        """
+        if getattr(record, "skipped", False):
+            return
+        attrs = _step_metric_attrs(flow_name, record.tool_name, success=record.success)
+        self._step_executions.add(1, attrs)
+        self._step_duration.record(record.duration_ms, attrs)
+        self._step_cache.add(
+            1,
+            {
+                "chainweaver.flow_name": flow_name,
+                "chainweaver.tool_name": record.tool_name,
+                "chainweaver.cache_hit": bool(record.cached),
+            },
+        )
+        if record.retry_count:
+            self._step_retries.add(
+                record.retry_count,
+                {"chainweaver.flow_name": flow_name, "chainweaver.tool_name": record.tool_name},
+            )
+
+    def record_flow(self, *, flow_name: str, success: bool, duration_ms: float) -> None:
+        """Record the flow-level counter + duration histogram."""
+        attrs = _flow_metric_attrs(flow_name, success=success)
+        self._flow_executions.add(1, attrs)
+        self._flow_duration.record(duration_ms, {"chainweaver.flow_name": flow_name})
+
+
+class OTelMetricsMiddleware(BaseMiddleware):
+    """Emit OpenTelemetry metrics for every flow execution via the middleware seam (#435).
+
+    Complements :class:`OTelTraceExporter` (which emits per-run spans) with
+    aggregate instruments an SRE can build dashboards and SLO alerts on::
+
+        from opentelemetry import metrics
+        from chainweaver.integrations.opentelemetry import OTelMetricsMiddleware
+
+        meter = metrics.get_meter("my-app")
+        executor = FlowExecutor(
+            registry=registry,
+            middleware=[OTelMetricsMiddleware(meter=meter)],
+        )
+
+    Instruments emitted:
+
+    - ``chainweaver.flow.executions`` (counter) — one per run, attributes
+      ``flow_name`` + boolean ``success`` (the failure rate is the
+      ``success=false`` slice).
+    - ``chainweaver.flow.duration`` (histogram, ms) — end-to-end wall clock.
+    - ``chainweaver.step.executions`` (counter) — one per executed step,
+      attributes ``flow_name`` + ``tool_name`` + ``success``.
+    - ``chainweaver.step.duration`` (histogram, ms) — per-step wall clock.
+    - ``chainweaver.step.cache`` (counter) — one per executed step, attribute
+      boolean ``cache_hit`` (served from cache vs actually ran) → cache-hit rate.
+    - ``chainweaver.step.retries`` (counter) — total retry attempts.
+
+    Attributes are low-cardinality by design; ``trace_id`` and raw inputs are
+    intentionally never attached to metrics. Skipped (branch-not-taken) steps
+    are not counted. Register alongside :class:`OTelTraceExporter` for both
+    traces and metrics from one execution.
+    """
+
+    def __init__(self, meter: Meter) -> None:
+        self._metrics = _OTelMetrics(meter)
+
+    def on_step_end(self, ctx: StepEndContext) -> None:
+        self._metrics.record_step(ctx.step_record, flow_name=ctx.flow_name)
+
+    def on_flow_end(self, ctx: FlowEndContext) -> None:
+        self._metrics.record_flow(
+            flow_name=ctx.result.flow_name,
+            success=ctx.result.success,
+            duration_ms=ctx.result.total_duration_ms,
+        )
+
+
+def export_result_to_otel_metrics(result: ExecutionResult, *, meter: Meter) -> None:
+    """Record OpenTelemetry metrics for a completed :class:`ExecutionResult` (#435).
+
+    The after-the-fact counterpart of :class:`OTelMetricsMiddleware`, mirroring
+    :func:`export_result_to_otel` for the trace path. Records the same flow- and
+    step-level instruments from a finished result, so replayed or
+    batch-reconstructed traces feed the same dashboards.
+
+    Args:
+        result: A completed :class:`ExecutionResult` (success or failure).
+        meter: An ``opentelemetry.metrics.Meter`` acquired via
+            :func:`opentelemetry.metrics.get_meter`.
+    """
+    metrics = _OTelMetrics(meter)
+    for record in result.execution_log:
+        metrics.record_step(record, flow_name=result.flow_name)
+    metrics.record_flow(
+        flow_name=result.flow_name,
+        success=result.success,
+        duration_ms=result.total_duration_ms,
+    )
+
+
+__all__ = [
+    "OTelMetricsMiddleware",
+    "OTelTraceExporter",
+    "export_result_to_otel",
+    "export_result_to_otel_metrics",
+]

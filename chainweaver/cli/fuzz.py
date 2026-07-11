@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import re
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,6 +31,7 @@ from chainweaver.cli._shared import (
     _parse_initial_input,
     _require_existing_file,
     app,
+    sanitize_path_component,
 )
 
 _FUZZ_PROPERTY_OPTION = typer.Option(
@@ -161,18 +161,6 @@ def _resolve_fuzz_properties(specs: list[str]) -> list[FlowProperty]:
     return resolved
 
 
-def _sanitize_path_component(component: str) -> str:
-    """Make *component* safe to use as a single filesystem path segment.
-
-    Property names can contain ``:`` (from ``module:attr`` specs) and flow
-    names could contain ``/`` or ``\\``; these are invalid on Windows and can
-    alter path semantics elsewhere.  Replace any character outside
-    ``[A-Za-z0-9._-]`` with ``_`` and never return an empty string.
-    """
-    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", component)
-    return cleaned or "_"
-
-
 @app.command("fuzz")
 def fuzz_command(
     flow_file: Path = _RUN_FILE_ARG,
@@ -271,8 +259,8 @@ def fuzz_command(
         if save_failures is not None:
             out_trace = policy.redact_execution_result(trace) if redact else trace
             filename = (
-                f"{_sanitize_path_component(flow.name)}."
-                f"{_sanitize_path_component(failure.property_name)}."
+                f"{sanitize_path_component(flow.name)}."
+                f"{sanitize_path_component(failure.property_name)}."
                 f"case{failure.case_index}.json"
             )
             path = save_failures / filename

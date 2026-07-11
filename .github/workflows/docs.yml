@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Minimal default token scope (#495): the docs build only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: build docs

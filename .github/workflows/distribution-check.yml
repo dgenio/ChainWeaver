@@ -28,23 +28,28 @@ jobs:
     env:
       MCP_PUBLISHER_VERSION: "1.7.9"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Set up Python 3.10
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.10"
 
       - name: Resolve and verify release version
         id: release
         shell: bash
+        # Inputs flow through env (not direct ${{ }} interpolation in the
+        # script body) so a dispatch input cannot inject shell (#495).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version="${{ inputs.version }}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION}"
           else
             version="$(python scripts/release.py version)"
           fi

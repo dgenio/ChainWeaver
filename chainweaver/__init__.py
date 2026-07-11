@@ -41,7 +41,13 @@ from __future__ import annotations
 import logging
 
 from chainweaver import cli
-from chainweaver.analyzer import ChainAnalyzer, Suggestion, ToolChain, suggest_optimizations
+from chainweaver.analyzer import (
+    ChainAnalyzer,
+    MappingSuggestion,
+    Suggestion,
+    ToolChain,
+    suggest_optimizations,
+)
 from chainweaver.approvals import (
     ApprovalCallable,
     ApprovalCallback,
@@ -127,6 +133,7 @@ from chainweaver.exceptions import (
     FlowNotFoundError,
     FlowSerializationError,
     FlowStatusError,
+    GuardrailViolationError,
     InputMappingError,
     InvalidFlowVersionError,
     KernelInvocationError,
@@ -189,6 +196,14 @@ from chainweaver.fuzz import (
     FuzzFailure,
     FuzzReport,
     minimize_failure,
+)
+from chainweaver.guardrails import (
+    BaseGuardrailCallback,
+    GuardrailCallable,
+    GuardrailCallback,
+    GuardrailContext,
+    GuardrailStage,
+    coerce_guardrail_callback,
 )
 from chainweaver.lessons import (
     LessonCandidate,
@@ -269,6 +284,12 @@ from chainweaver.step_index import FLOW_INPUT_STEP_INDEX, flow_output_step_index
 from chainweaver.storage import FileStore, InMemoryStore, RegistryStore
 from chainweaver.testing.replay import FixtureStaleError
 from chainweaver.tools import StreamingTool, Tool, ToolChunk
+from chainweaver.trace_store import (
+    FileTraceStore,
+    InMemoryTraceStore,
+    TraceStore,
+    redact_execution_result,
+)
 from chainweaver.traces import (
     AgentTraceEvent,
     BacktestMismatch,
@@ -330,6 +351,7 @@ __all__ = [
     "BacktestReport",
     "BaseApprovalCallback",
     "BaseDecisionCallback",
+    "BaseGuardrailCallback",
     "BaseMiddleware",
     "CancellationToken",
     "CandidateScore",
@@ -373,6 +395,7 @@ __all__ = [
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
+    "FileTraceStore",
     "FixtureStaleError",
     "Flow",
     "FlowAlreadyExistsError",
@@ -404,9 +427,15 @@ __all__ = [
     "FuzzConfigError",
     "FuzzFailure",
     "FuzzReport",
+    "GuardrailCallable",
+    "GuardrailCallback",
+    "GuardrailContext",
+    "GuardrailStage",
+    "GuardrailViolationError",
     "InMemoryCheckpointer",
     "InMemoryStepCache",
     "InMemoryStore",
+    "InMemoryTraceStore",
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
@@ -421,6 +450,7 @@ __all__ = [
     "MCPSchemaConversionError",
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
+    "MappingSuggestion",
     "ModelInfo",
     "ObservedStep",
     "ObservedTrace",
@@ -479,6 +509,7 @@ __all__ = [
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
+    "TraceStore",
     "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
@@ -489,6 +520,7 @@ __all__ = [
     "cli",
     "coerce_approval_callback",
     "coerce_decision_callback",
+    "coerce_guardrail_callback",
     "compile_flow",
     "description_proposal_schema",
     "detect_tool_name_collisions",
@@ -523,6 +555,7 @@ __all__ = [
     "optimize_tool_descriptions",
     "parse_agent_trace",
     "read_provenance",
+    "redact_execution_result",
     "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",

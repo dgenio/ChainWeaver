@@ -68,10 +68,46 @@ executor = FlowExecutor(registry=registry, redaction_policy=policy)
 `secret`, `authorization`.  Matching is case-insensitive.  Redaction is
 applied recursively to nested dicts and lists.
 
+### Secure-by-default presets (#361)
+
+Two classmethods package a curated configuration so opting in is one line:
+
+```python
+from chainweaver import FlowExecutor, RedactionPolicy
+
+# Recommended: extended key set + credential-shaped value patterns
+# (bearer tokens, provider API-key prefixes) + a generous length cap.
+executor = FlowExecutor(registry=registry, redaction_policy=RedactionPolicy.recommended())
+
+# Strict: adds identifier/PII keys (email, phone, account, …) and truncates
+# aggressively. Higher false-positive rate; use in high-sensitivity settings.
+executor = FlowExecutor(registry=registry, redaction_policy=RedactionPolicy.strict())
+```
+
+`recommended()` is deliberately conservative to avoid over-redacting benign
+prose; `strict()` trades readability for stronger guarantees.  Both remain
+opt-in — the executor default stays unchanged.
+
+### Logging trust model — what is and is not redacted
+
+`RedactionPolicy` scrubs the **logging/display path only**.  Every other
+surface stores values verbatim; redaction is the caller's responsibility
+before persistence or emission.
+
+| Surface | Redacted by `RedactionPolicy`? | Notes |
+|---------|:------------------------------:|-------|
+| Log lines (`log_step_start` / `log_step_end`) | ✅ when a policy is set | The only surface redaction covers automatically. |
+| In-memory `ExecutionResult` / `StepRecord` | ❌ | Stored raw so authorized callers can inspect. Redact explicitly via `policy.redact_execution_result(result)` before persisting. |
+| Checkpoints (`Checkpointer`) | ❌ | Snapshots carry raw step I/O; treat the checkpoint store as sensitive. |
+| Step cache (`StepCache`) | ❌ | Cached outputs are stored verbatim. |
+| `FlowEvent` stream | ❌ | Streamed payloads are raw; redact downstream if forwarding. |
+| MCP error detail (`FlowServer`) | ✅ via `redact_text` / `error_detail` | See the FlowServer hardening section. |
+
 > **Trace fields are stored raw on purpose.**  Treat the `ExecutionResult`
 > object as you would treat any other in-memory structure carrying tool
 > data: don't serialize it to disk or send it across the network without an
-> explicit decision about which fields are safe to expose.
+> explicit decision about which fields are safe to expose — e.g. call
+> `RedactionPolicy.recommended().redact_execution_result(result)` first.
 
 ---
 
@@ -121,6 +157,37 @@ executor = FlowExecutor(
   to avoid duplicating an uncertain side effect. `compile_flow` additionally
   emits a non-blocking `unsafe_retry` warning for this combination regardless
   of `strict_safety`.
+
+## Input guardrails (#317)
+
+For content-safety enforcement on **every** tool call — blocking prompt
+injection, disallowed inputs, or policy violations without embedding the check
+in each tool — register a `guardrail_callback` on the executor:
+
+```python
+from chainweaver import FlowExecutor, GuardrailContext
+
+def block_injection(ctx: GuardrailContext) -> None:
+    if ctx.stage == "input" and _looks_like_injection(ctx.inputs):
+        raise ValueError("possible prompt injection")  # blocks the step
+
+executor = FlowExecutor(registry=registry, guardrail_callback=block_injection)
+```
+
+The callback is consulted at the **input stage** — before the tool runs and
+**before the step cache is read**, so a blocked input can neither invoke the
+tool nor return a previously-cached result. Raising anything aborts the step
+with `GuardrailViolationError` (`CW-E052`) and a failed `StepRecord`, the same
+path a denied approval takes; returning `None` allows the step. Inputs are
+redacted (when a `RedactionPolicy` is configured) before reaching the callback.
+The seam is a user-supplied callback the executor merely calls, so the
+no-LLM / no-network / no-randomness executor invariants are preserved — a
+moderation model or PII detector lives inside your callback, not the executor.
+
+The `GuardrailContext` carries a `stage` field (`"input"` / `"output"`);
+output-stage moderation is reserved for a future release and will use the same
+seam without an API change. Both the sync (`execute_flow`) and async
+(`execute_flow_async`) lanes enforce the input guardrail identically.
 
 ## Dry-run rehearsals (#357)
 

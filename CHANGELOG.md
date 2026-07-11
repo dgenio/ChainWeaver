@@ -10,6 +10,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Input-stage content-safety guardrails** (#317): a new
+  `chainweaver.guardrails` module and an opt-in `FlowExecutor(...,
+  guardrail_callback=...)` seam (mirroring the approval/decision callbacks) that
+  is consulted before every tool runs — and before the step cache is read — so a
+  host can block prompt injection or disallowed inputs on every tool call
+  without embedding the check in each tool. A callback that raises aborts the
+  step with the new typed `GuardrailViolationError` (`CW-E052`) and a failed
+  `StepRecord`; both the sync and async lanes enforce it identically. The
+  `GuardrailContext` carries a `stage` field so output-stage moderation can be
+  added at the same seam later without an API change (that stage is not yet
+  enforced). Public symbols (`GuardrailCallback`, `GuardrailContext`,
+  `BaseGuardrailCallback`, `coerce_guardrail_callback`, `GuardrailViolationError`,
+  …) are exported top-level; executor defaults are unchanged when no callback is
+  set.
+
+- **Redacted trace-persistence interfaces** (#292): a new
+  `chainweaver.trace_store` module — a `TraceStore` protocol (mirroring the
+  `Checkpointer` / `RegistryStore` seams) with `InMemoryTraceStore` and an
+  append-oriented JSONL `FileTraceStore`, both accepting an optional
+  `RedactionPolicy` that scrubs each `ExecutionResult` **before** it is
+  persisted, plus an optional `max_traces` retention cap (oldest-first
+  rotation). A module-level `redact_execution_result(result, policy)`
+  convenience makes "redact before persist" one call. All four symbols are
+  exported at the top level.
+
+- **Schema-mapping suggestions for flow discovery** (#295):
+  `ChainAnalyzer.suggest_schema_mappings()` is an opt-in, advisory layer that
+  finds producer→consumer edges the exact name-and-type rule misses — via
+  case/separator name normalization (`account_id` ↔ `accountId`), a
+  caller-supplied synonym table, and type-compatible (`int`→`float`) matches —
+  each returned as a reviewable `MappingSuggestion` carrying a ready-to-use
+  `field_mappings` adapter and per-match warnings. Default `ChainAnalyzer`
+  behavior is unchanged; nested-path and trace-derived hints are out of scope
+  (deferred to #297). Grounded in the MCP-schema survey (#433).
+
+- **OpenTelemetry metrics** (#435): the OTel integration now emits *metrics*
+  alongside the existing spans. `OTelMetricsMiddleware` (and the after-the-fact
+  `export_result_to_otel_metrics`) record flow/step execution counters, flow/step
+  duration histograms (ms), a cache counter (boolean `cache_hit` → hit rate), and
+  a retry counter — so operators get throughput, latency percentiles, cache-hit
+  rate, and failure rate (the `success=false` slice) for dashboards and SLO
+  alerts, not just per-run traces. Attributes are low-cardinality by design
+  (`flow_name` / `tool_name` / boolean `success` / `cache_hit`); `trace_id` and
+  raw inputs are never attached to metrics. Requires `chainweaver[otel]`.
+
+- **Flow-definition hot-reload** (#322): `FlowRegistry` gains
+  `load_from_directory()`, `reload_from_directory()` (a deterministic,
+  thread-free diff that re-registers only new/changed `.flow.*` files, returning
+  a `ReloadReport` of added/updated/unchanged), and `watch()` (a background
+  polling thread returning a `WatchHandle` usable as a context manager, with an
+  optional `on_reload` callback). Scoped deliberately to flow definitions: it
+  never registers/unregisters tools and never removes a flow whose file
+  disappeared, so it cannot race a concurrent execution and breach the
+  concurrency contract (#336). Tool auto-reload and flow removal are left as
+  explicit, quiescent operator actions.
+
+- **Persistence-protocol conformance kit** (#397): a new
+  `chainweaver.testing.protocol_suites` module ships reusable, parameterized
+  pytest base classes — `RegistryStoreConformance`, `StepCacheConformance`,
+  `CheckpointerConformance` — that a storage backend (Redis/SQLite/S3, in-tree
+  or third-party) subclasses with a one-line fixture to inherit the full
+  behavioral contract (round-trip, overwrite semantics, missing-key behavior,
+  defensive copying, drift-hash fidelity). The in-tree `InMemory*` / `File*`
+  reference implementations are run through the kit in
+  `tests/test_protocol_conformance.py`, so the suite and the backends it
+  certifies are verified together.
+
+- **Export-adapter regression coverage** (#439): added targeted tests for the
+  shared export schema-derivation helpers (`chainweaver.export._schema`),
+  raising its coverage from ~33% to ~96% by exercising the previously-untested
+  error and best-effort branches (empty flow, unresolved `input_schema_ref`,
+  composed sub-flow first/terminal steps, DAG single- vs multi-sink output
+  derivation, unregistered terminal tools) that every export adapter relies on.
+
+- **Free-threaded CPython smoke lane** (#402): a non-blocking `ci.yml` job runs
+  the suite on the no-GIL `3.14t` build to surface GIL-dependence assumptions in
+  the executor's thread interplay early, feeding the concurrency-contract work
+  (#336).
+
+- **Minimal-core dependency & import contract guards** (#378, #431, #418):
+  new `tests/test_dependency_contract.py` mechanically enforces the base
+  package's promises — the runtime dependency set stays exactly the reviewed
+  five-package allowlist (adding one now fails CI until explicitly signed off),
+  no LLM-provider SDK is ever an unconditional dependency, and `import
+  chainweaver` in a fresh interpreter pulls in none of the provider SDKs or
+  heavy optional integrations (`openai`, `anthropic`, `langchain_core`,
+  `mcp`, `fastmcp`, `opentelemetry`, …). The wall-clock cold-start half of #418
+  is left to the benchmark lane rather than a timing assertion.
+
+- **Secure-by-default redaction presets** (#361): `RedactionPolicy.recommended()`
+  and `RedactionPolicy.strict()` classmethods package a curated key set plus
+  credential-shaped value patterns (bearer tokens, provider API-key prefixes) so
+  opting into redaction is one line. `docs/security.md` gains a logging
+  trust-model table stating exactly which surfaces redaction covers (log lines,
+  MCP error detail) and which store values raw (`ExecutionResult`, checkpoints,
+  step cache, `FlowEvent`). Executor defaults are unchanged.
+
+### Documentation
+
+- **Internal MCP platform-governance guide** (#290) under `docs/research/`:
+  documents the contextweaver + ChainWeaver platform-governance workflow,
+  clearly separating what is operable today (`FlowServer`, governance
+  lifecycle, the traces pipeline, redacted `TraceStore`, OTel metrics) from the
+  capabilities still planned in milestone 4.3 (telemetry ingest #284, decision
+  engine #285, capability reports #289), so the guide does not document unbuilt
+  features as if they exist.
+
+- **Design and investigation write-ups** (#425, #426, #432, #433) under
+  `docs/research/`: a signed flow-bundle format design proposal (#425), a
+  language-neutral flow-specification design proposal (#426), a trace-isolation
+  deep-copy cost investigation backed by a copy-strategy micro-benchmark that
+  recommends `copy.deepcopy` at the trace boundary with a large-payload escape
+  hatch (#432), and an MCP server schema survey that prioritizes the
+  field-alias / adapter-step work for #295 (#433). All are scoped as
+  low-confidence proposals / spikes per their issues; no runtime code changes.
+
+### Security
+
+- **Release-critical CI supply-chain hardening** (#346, #495): all third-party
+  GitHub Actions in `publish.yml`, `release.yml`, and `distribution-check.yml`
+  are pinned to full commit SHAs with Dependabot-style version comments (no more
+  floating `@v7` / `@release/v1` refs on the OIDC-privileged publish path), and
+  PEP 740 attestations are enabled on the PyPI publish step. `workflow_dispatch`
+  inputs are routed through `env:` instead of interpolated directly into `run:`
+  scripts across `evals.yml`, `publish.yml`, `release.yml`, and
+  `distribution-check.yml` (script-injection hardening), explicit minimal
+  `permissions: contents: read` blocks were added to `ci.yml`, `docs.yml`, and
+  `action-smoke.yml`, and CI's routine jobs pin the transitively-installed
+  `weaver-contracts` to an exact version via a new `constraints.txt`
+  (`PIP_CONSTRAINT`), leaving the floor-deps and latest-deps canaries free to
+  resolve minimum / newest versions as before.
+
+- **`chainweaver record` path-traversal hardening** (#494): candidate flow names
+  are derived from tool names read verbatim from an untrusted JSONL trace, then
+  used to build the output filename. The name is now run through a shared
+  `sanitize_path_component` helper (factored out of `chainweaver.cli.fuzz`) before
+  the path join, so separators and `..` segments can no longer escape
+  `--output-dir`.
+- **Import-safety regression guard for `chainweaver validate` / `check`** (#491):
+  added sentinel-module tests proving these commands never import the modules
+  named in a flow's schema / `retryable_errors` refs. Ref resolution is lazy
+  (schema properties) or deferred to execution (`resolved_retryable_errors`), so
+  linting an untrusted flow file runs no attacker-controlled import side effects;
+  the tests lock that property against future regression.
+
+### Added
+
 - **Compile-time fallback validation for DAG flows and fallback output shapes**
   (#456, #457): `compile_flow()` now accepts a `DAGFlow` as well as a linear
   `Flow`. For a DAG, each step is validated against the union of its transitive

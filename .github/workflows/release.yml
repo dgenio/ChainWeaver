@@ -28,26 +28,32 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: main
 
       - name: Set up Python 3.10
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.10"
 
       - name: Prepare release metadata
-        run: python scripts/release.py prepare "${{ inputs.version }}"
+        # Input flows through env (not direct ${{ }} interpolation) so it
+        # cannot inject shell (#495).
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py prepare "${INPUT_VERSION}"
 
       - name: Verify release metadata
-        run: python scripts/release.py check --expected-version "${{ inputs.version }}"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py check --expected-version "${INPUT_VERSION}"
 
       - name: Generate release status
         run: python scripts/release.py status > "${RUNNER_TEMP}/release-status.md"
 
       - name: Open release PR
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           # Required because GitHub suppresses pull_request workflow events
           # created with GITHUB_TOKEN. Use a fine-grained PAT or App token.
@@ -95,7 +101,7 @@ jobs:
           echo "release=true" >> "${GITHUB_OUTPUT}"
           echo "version=${head_ref#release/v}" >> "${GITHUB_OUTPUT}"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         if: steps.release.outputs.release == 'true'
         with:
           ref: ${{ env.MERGE_SHA }}
@@ -103,7 +109,7 @@ jobs:
 
       - name: Set up Python 3.10
         if: steps.release.outputs.release == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.10"
 

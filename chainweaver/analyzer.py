@@ -114,6 +114,72 @@ def _auto_input_mapping(
     return {name: name for name in consumer.input_schema.model_fields if name in out_fields}
 
 
+def _normalize_field_name(name: str) -> str:
+    """Return a case/separator-insensitive key for loose field matching (#295).
+
+    Collapses the common naming drift the MCP-schema survey (issue #433) found
+    dominant — ``account_id`` / ``accountId`` / ``AccountID`` all normalize to
+    ``accountid`` — so a producer and a semantically-identical consumer field
+    that differ only in casing or word separators can be matched.
+    """
+    return name.replace("_", "").replace("-", "").lower()
+
+
+# Type "categories" for loose, reviewable type compatibility (#295). Two fields
+# with different exact annotations but the same category are a *type-compatible*
+# match that is surfaced with a warning rather than silently accepted.
+_TYPE_CATEGORIES: dict[object, str] = {
+    str: "string",
+    int: "number",
+    float: "number",
+    bool: "boolean",
+}
+
+
+def _type_relation(producer_type: object, consumer_type: object) -> str | None:
+    """Classify a producer→consumer field type match.
+
+    Returns ``"exact"`` for identical annotations, ``"compatible"`` when both
+    fall in the same coarse category (e.g. ``int`` feeding ``float``), or
+    ``None`` when there is no defensible match. ``bool`` is treated as distinct
+    from ``number`` on purpose (a bool feeding an int field is usually a bug).
+    """
+    if producer_type == consumer_type:
+        return "exact"
+    p_cat = _TYPE_CATEGORIES.get(producer_type)
+    c_cat = _TYPE_CATEGORIES.get(consumer_type)
+    if p_cat is not None and p_cat == c_cat:
+        return "compatible"
+    return None
+
+
+class MappingSuggestion(BaseModel):
+    """A reviewable producer→consumer mapping the exact matrix would miss (#295).
+
+    Emitted by :meth:`ChainAnalyzer.suggest_schema_mappings` when a consumer's
+    required inputs can be satisfied from a producer's outputs only via
+    name-normalization, a synonym, or a type-compatible (non-exact) match — the
+    ``ChainAnalyzer`` exact-name-and-type rule would otherwise declare the pair
+    incompatible and under-discover the chain.
+
+    Attributes:
+        producer: Producer tool name.
+        consumer: Consumer tool name.
+        field_mappings: ``{consumer_field: producer_field}`` — usable directly
+            as the consumer step's ``input_mapping`` (the generated adapter
+            wiring). Fields that matched exactly by name are included too, so
+            the mapping is complete.
+        warnings: Human-readable notes, one per non-exact match (alias /
+            normalized-name / type-compatible), so a reviewer sees exactly why
+            the pair is only a *candidate*, not an automatic edge.
+    """
+
+    producer: str
+    consumer: str
+    field_mappings: dict[str, str]
+    warnings: list[str] = []
+
+
 class ChainAnalyzer:
     """Discover schema-compatible tool combinations offline.
 
@@ -272,6 +338,128 @@ class ChainAnalyzer:
                 )
             )
         return flows
+
+    def suggest_schema_mappings(
+        self,
+        *,
+        synonyms: dict[str, set[str]] | None = None,
+    ) -> list[MappingSuggestion]:
+        """Suggest reviewable producer→consumer mappings the exact rule misses (#295).
+
+        The default :meth:`compatibility_matrix` requires exact field-name and
+        field-type matches, which is safe but under-discovers real chains whose
+        fields are semantically compatible yet named or typed differently
+        (issue #295; grounded in the MCP-schema survey, issue #433). This
+        method is the *opt-in, advisory* complement: for every producer→consumer
+        pair the exact rule rejects, it tries to satisfy each **required**
+        consumer input from a producer output via, in order,
+
+        1. exact name match,
+        2. case/separator-insensitive name match (``account_id`` ↔ ``accountId``),
+        3. a caller-supplied *synonym* (``{"id": {"account_id", "customer_id"}}``),
+
+        each subject to a type check that is ``exact`` or the same coarse
+        category (``int`` → ``float``). A pair is suggested only when **all**
+        required consumer fields are satisfiable **and** at least one match was
+        non-exact (so an already-compatible pair is never re-emitted here).
+
+        Nested-path extraction and trace-derived mapping hints are intentionally
+        out of scope (authoring-time ``input_mapping`` pointers already cover the
+        former; the latter belongs with the LLM-assisted variant, issue #297).
+
+        Args:
+            synonyms: Optional ``{consumer_field: {producer_field, ...}}`` map of
+                accepted aliases. Keys and values are matched
+                case/separator-insensitively.
+
+        Returns:
+            A list of :class:`MappingSuggestion` objects, one per newly-unlocked
+            producer→consumer edge, in ``(producer, consumer)`` insertion order.
+            Each carries a ready-to-use ``field_mappings`` adapter and warnings
+            explaining every non-exact match.
+        """
+        # Normalize the synonym table once: consumer-field norm → set of
+        # acceptable producer-field norms.
+        norm_synonyms: dict[str, set[str]] = {}
+        for consumer_field, aliases in (synonyms or {}).items():
+            key = _normalize_field_name(consumer_field)
+            norm_synonyms.setdefault(key, set()).update(_normalize_field_name(a) for a in aliases)
+
+        suggestions: list[MappingSuggestion] = []
+        for producer_name, producer in self._tools.items():
+            out_types = _schema_field_types(producer.output_schema)
+            out_by_norm = {_normalize_field_name(n): n for n in out_types}
+            for consumer_name, consumer in self._tools.items():
+                if consumer_name == producer_name:
+                    continue
+                if _is_compatible(producer, consumer):
+                    continue  # already an exact edge; nothing to suggest.
+                in_types = _schema_field_types(consumer.input_schema)
+                required = _schema_required_fields(consumer.input_schema)
+                field_mappings: dict[str, str] = {}
+                warnings: list[str] = []
+                satisfiable = True
+                used_non_exact = False
+                for field_name, in_type in in_types.items():
+                    match = self._match_field(
+                        field_name, in_type, out_types, out_by_norm, norm_synonyms
+                    )
+                    if match is None:
+                        if field_name in required:
+                            satisfiable = False
+                            break
+                        continue  # optional + unmatched → tool default applies.
+                    producer_field, relation, how = match
+                    field_mappings[field_name] = producer_field
+                    if how != "exact-name" or relation != "exact":
+                        used_non_exact = True
+                        warnings.append(
+                            f"'{consumer_name}.{field_name}' ← "
+                            f"'{producer_name}.{producer_field}' "
+                            f"(name: {how}, type: {relation})"
+                        )
+                if satisfiable and used_non_exact and field_mappings:
+                    suggestions.append(
+                        MappingSuggestion(
+                            producer=producer_name,
+                            consumer=consumer_name,
+                            field_mappings=field_mappings,
+                            warnings=warnings,
+                        )
+                    )
+        return suggestions
+
+    @staticmethod
+    def _match_field(
+        field_name: str,
+        in_type: object,
+        out_types: dict[str, object],
+        out_by_norm: dict[str, str],
+        norm_synonyms: dict[str, set[str]],
+    ) -> tuple[str, str, str] | None:
+        """Resolve one consumer field to a producer output field (#295).
+
+        Returns ``(producer_field, type_relation, name_relation)`` or ``None``.
+        ``name_relation`` is ``"exact-name"`` / ``"normalized-name"`` /
+        ``"synonym"``; ``type_relation`` is ``"exact"`` / ``"compatible"``.
+        Candidates are tried strongest-first and the first with a defensible
+        type relation wins.
+        """
+        norm = _normalize_field_name(field_name)
+        # (candidate producer field, how the name matched) in priority order.
+        candidates: list[tuple[str, str]] = []
+        if field_name in out_types:
+            candidates.append((field_name, "exact-name"))
+        if norm in out_by_norm and out_by_norm[norm] != field_name:
+            candidates.append((out_by_norm[norm], "normalized-name"))
+        for alias_norm in norm_synonyms.get(norm, set()):
+            if alias_norm in out_by_norm:
+                candidates.append((out_by_norm[alias_norm], "synonym"))
+        for producer_field, how in candidates:
+            relation = _type_relation(out_types[producer_field], in_type)
+            if relation is not None:
+                return producer_field, relation, how
+        return None
 
 
 # ---------------------------------------------------------------------------

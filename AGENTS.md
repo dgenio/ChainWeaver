@@ -56,12 +56,13 @@ chainweaver/
 │   └── refs.py        Schema/exception class-ref resolution + opt-in module allowlist policy (#345)
 ├── step_index.py      Named sentinels for flow input/output validation records (#339)
 ├── _pointer.py        Dependency-free RFC-6901 JSON pointer resolver shared by executor input_mapping (#387) and contrib json_pluck
-├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335)
+├── registry.py        FlowRegistry: multi-version catalogue with status filtering (store-backed) + copy-on-write update_flow_state (#335) + directory hot-reload (load_from_directory/reload_from_directory/watch → ReloadReport/WatchHandle, flow-definitions only, #322)
 ├── storage.py         RegistryStore protocol + InMemoryStore + FileStore (#16)
 ├── analyzer.py        ChainAnalyzer: offline schema-compatibility analysis (#77)
 ├── attest.py          attest_flow() + AttestationReport: observed-determinism evidence (#154)
 ├── decisions.py       DecisionCallback Protocol + DecisionContext + coerce_decision_callback (#102)
-├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) (main entry point)
+├── guardrails.py      GuardrailCallback Protocol + GuardrailContext (stage input/output) + coerce_guardrail_callback — input-stage content-safety seam wired in executor.py (#317); mirrors approvals.py
+├── executor.py        FlowExecutor: sequential/DAG runner + drift detection + stream_flow + opt-in async DAG-level concurrency (max_step_concurrency, #344) + opt-in execution-time safety enforcement (approval_callback/strict_safety/max_side_effect_level, #356) + dry-run mode (execute_flow(dry_run=...), #357) + opt-in input-stage content-safety guardrails (guardrail_callback, #317) (main entry point)
 ├── _execution/        Internal, no-I/O execution collaborators shared by both lanes (#330, #331); banned from importing LLM/network/random — see invariants
 │   ├── __init__.py    Re-exports merge_step_outputs + apply_output_mapping
 │   └── context.py     merge_step_outputs + apply_output_mapping: single context-merge honouring on_context_collision (#337) and output_mapping (#386)
@@ -71,7 +72,7 @@ chainweaver/
 ├── checkpoint.py      Checkpointer Protocol + ExecutionSnapshot + InMemoryCheckpointer + FileCheckpointer (#128)
 ├── integrations/      Optional third-party adapters (each guards its extra import)
 │   ├── __init__.py    Package marker; documents available integrations
-│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); requires chainweaver[otel]
+│   ├── opentelemetry.py  OTelTraceExporter middleware + export_result_to_otel (#126); OTelMetricsMiddleware + export_result_to_otel_metrics — flow/step counters, duration histograms, cache-hit + retry counters (#435); requires chainweaver[otel]
 │   ├── langchain.py   from_/to_langchain_tool + from_langchain_toolkit (#82); requires chainweaver[langchain]
 │   ├── llamaindex.py  from_/to_llamaindex_tool (#82); requires chainweaver[llamaindex]
 │   ├── weaver_spec.py    Re-exports weaver-contracts types + flow_to_selectable_item + routing resolvers; needs [weaver-stack] extra (#91, #107, #233)
@@ -100,11 +101,13 @@ chainweaver/
 │   ├── fakes.py       fake_tool: permissive-schema Tool factory for tests
 │   ├── runner.py      FlowTestRunner facade + capture_steps context manager
 │   ├── assertions.py  assert_result_matches with volatile-field normalisation
-│   └── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
+│   ├── replay.py      record_then_replay decorator + FixtureStaleError (#153); hooks at Tool._call_fn — never inside executor.py
+│   └── protocol_suites.py  Reusable pytest conformance suites (#397): RegistryStoreConformance / StepCacheConformance / CheckpointerConformance base classes a third-party backend subclasses with a fixture; imports pytest, so it stays a submodule never imported by testing/__init__.py
 ├── plugins.py         discover_tools() + discover_flows() over importlib.metadata entry points (#130)
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
+├── trace_store.py     TraceStore protocol + InMemoryTraceStore + FileTraceStore (JSONL) + redact_execution_result — redacted execution-trace persistence with retention (#292)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
 ├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py

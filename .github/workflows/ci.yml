@@ -9,6 +9,11 @@ on:
     # Weekly latest/pre-release canary (issue #236) — Mondays 06:00 UTC.
     - cron: "0 6 * * 1"
 
+# Minimal default token scope (#495): CI only reads the repo. Any job needing
+# more (none today) must opt in with its own job-level permissions block.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -30,6 +35,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        # Pin transitive weaver-contracts to a reviewed version (#495).
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
         run: pip install -e ".[dev]"
 
       # Lint / format / mypy / workflow + vocabulary checks live in the
@@ -73,6 +81,9 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
+        # Pin transitive weaver-contracts to a reviewed version (#495).
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
         run: pip install -e ".[dev]"
 
       # The first three steps are the static-analysis commands from
@@ -111,6 +122,9 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
+        # Pin transitive weaver-contracts to a reviewed version (#495).
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
         run: pip install -e ".[dev]"
 
       # Dedicated gate so the conformance signal stays distinguishable
@@ -176,4 +190,34 @@ jobs:
           pip install --pre --upgrade -e ".[dev]"
 
       - name: Run tests against latest dependencies
+        run: python -m pytest tests/ -v --no-cov
+
+  # Free-threaded CPython smoke lane (issue #402): runs the suite on the
+  # no-GIL 3.14t build to surface GIL-dependence assumptions in the real
+  # thread interplay (stream_flow worker threads, ThreadPoolExecutor tool
+  # timeouts, asyncio.to_thread offloading, record_then_replay monkey-patching)
+  # while they are cheap to fix. Non-gating (``continue-on-error``) — it feeds
+  # the concurrency-contract work (#336); it warns, it does not block.
+  free-threaded:
+    name: free-threaded smoke (Python 3.14t)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up free-threaded Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14t"
+
+      - name: Install dependencies
+        # Pin transitive weaver-contracts to a reviewed version (#495).
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
+        run: pip install -e ".[dev]"
+
+      - name: Run tests on the free-threaded build
+        # --no-cov: this is a concurrency smoke signal, not a coverage gate
+        # (the standard 3.x matrix enforces coverage).
         run: python -m pytest tests/ -v --no-cov

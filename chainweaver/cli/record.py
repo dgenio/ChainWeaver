@@ -15,6 +15,7 @@ from chainweaver.cli._shared import (
     _require_existing_file,
     _write_candidate,
     app,
+    sanitize_path_component,
 )
 from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
 
@@ -111,7 +112,11 @@ def record_command(
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         for suggestion in ranked_all:
-            dest = output_dir / f"{suggestion.flow.name}.flow.yaml"
+            # Flow names are derived from tool names read verbatim from an
+            # untrusted trace file, so sanitize before path construction to
+            # keep the write inside output_dir (#494).
+            safe_name = sanitize_path_component(suggestion.flow.name)
+            dest = output_dir / f"{safe_name}.flow.yaml"
             try:
                 if dest.exists():
                     existing = _load_persisted_candidate(dest)

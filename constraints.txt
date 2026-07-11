@@ -1,0 +1,14 @@
+# CI pip constraints (issue #495).
+#
+# weaver-contracts (the [weaver-stack] extra, transitively installed by .[dev])
+# is published with anonymous PyPI metadata and a wide declared range
+# (>=0.6,<1.0), so an unpinned install auto-picks whatever 0.x is newest at run
+# time. Pin it here to an exact, reviewed version for the routine CI jobs
+# (test / lint / conformance) via PIP_CONSTRAINT, independent of the library's
+# own compatibility range in pyproject.toml. Bumping this pin is a deliberate,
+# reviewed change — that is the point.
+#
+# NOT applied to the floor-deps job (which resolves the declared minimums with
+# uv) or the latest-deps canary (which intentionally installs newest/pre-release
+# versions): constraining either would defeat its purpose.
+weaver-contracts==0.7.0
