@@ -106,6 +106,7 @@ chainweaver/
 ├── exceptions.py      Typed exception hierarchy (all inherit ChainWeaverError)
 ├── log_utils.py       Structured per-step logging utilities
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
+├── trace_store.py     TraceStore protocol + InMemoryTraceStore + FileTraceStore (JSONL) + redact_execution_result — redacted execution-trace persistence with retention (#292)
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
 ├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py

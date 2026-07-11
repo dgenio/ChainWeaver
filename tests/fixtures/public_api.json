@@ -61,6 +61,7 @@
     "FileCheckpointer",
     "FileStepCache",
     "FileStore",
+    "FileTraceStore",
     "FixtureStaleError",
     "Flow",
     "FlowAlreadyExistsError",
@@ -95,6 +96,7 @@
     "InMemoryCheckpointer",
     "InMemoryStepCache",
     "InMemoryStore",
+    "InMemoryTraceStore",
     "InputMappingError",
     "InvalidFlowVersionError",
     "KernelInvocationError",
@@ -109,6 +111,7 @@
     "MCPSchemaConversionError",
     "MCPSchemaDriftError",
     "MCPToolInvocationError",
+    "MappingSuggestion",
     "ModelInfo",
     "OPENCODE_OBSERVE_PLUGIN_FILENAME",
     "OPENCODE_TOOL_PREFIX",
@@ -172,6 +175,7 @@
     "ToolTimeoutError",
     "TraceEventKind",
     "TraceRecorder",
+    "TraceStore",
     "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
@@ -216,6 +220,7 @@
     "optimize_tool_descriptions",
     "parse_agent_trace",
     "read_provenance",
+    "redact_execution_result",
     "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",
@@ -767,6 +772,12 @@
       "qualname": "FileStore",
       "signature": "(base_dir: Path | str) -> None"
     },
+    "FileTraceStore": {
+      "kind": "class",
+      "module": "chainweaver.trace_store",
+      "qualname": "FileTraceStore",
+      "signature": "(root: str | Path, *, redaction_policy: RedactionPolicy | None = None, max_traces: int | None = None) -> None"
+    },
     "FixtureStaleError": {
       "kind": "class",
       "module": "chainweaver.testing.replay",
@@ -1051,6 +1062,12 @@
       "qualname": "InMemoryStore",
       "signature": "() -> None"
     },
+    "InMemoryTraceStore": {
+      "kind": "class",
+      "module": "chainweaver.trace_store",
+      "qualname": "InMemoryTraceStore",
+      "signature": "(*, redaction_policy: RedactionPolicy | None = None) -> None"
+    },
     "InputMappingError": {
       "kind": "class",
       "module": "chainweaver.exceptions",
@@ -1152,6 +1169,17 @@
       "module": "chainweaver.exceptions",
       "qualname": "MCPToolInvocationError",
       "signature": "(tool_name: str, detail: str) -> None"
+    },
+    "MappingSuggestion": {
+      "kind": "pydantic-model",
+      "model_fields": {
+        "consumer": "str",
+        "field_mappings": "dict[str, str]",
+        "producer": "str",
+        "warnings": "list[str]"
+      },
+      "module": "chainweaver.analyzer",
+      "qualname": "MappingSuggestion"
     },
     "ModelInfo": {
       "kind": "pydantic-model",
@@ -1681,6 +1709,12 @@
       "qualname": "TraceRecorder",
       "signature": "() -> None"
     },
+    "TraceStore": {
+      "kind": "class",
+      "module": "chainweaver.trace_store",
+      "qualname": "TraceStore",
+      "signature": "(*args, **kwargs)"
+    },
     "add_flow_server_to_config": {
       "kind": "function",
       "module": "chainweaver.opencode",
@@ -1942,6 +1976,12 @@
       "module": "chainweaver.compiler_llm",
       "qualname": "read_provenance",
       "signature": "(flow_path: str | Path) -> ProposalProvenance | None"
+    },
+    "redact_execution_result": {
+      "kind": "function",
+      "module": "chainweaver.trace_store",
+      "qualname": "redact_execution_result",
+      "signature": "(result: ExecutionResult, policy: RedactionPolicy) -> ExecutionResult"
     },
     "remove_flow_server_from_config": {
       "kind": "function",

@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Redacted trace-persistence interfaces** (#292): a new
+  `chainweaver.trace_store` module — a `TraceStore` protocol (mirroring the
+  `Checkpointer` / `RegistryStore` seams) with `InMemoryTraceStore` and an
+  append-oriented JSONL `FileTraceStore`, both accepting an optional
+  `RedactionPolicy` that scrubs each `ExecutionResult` **before** it is
+  persisted, plus an optional `max_traces` retention cap (oldest-first
+  rotation). A module-level `redact_execution_result(result, policy)`
+  convenience makes "redact before persist" one call. All four symbols are
+  exported at the top level.
+
+- **Schema-mapping suggestions for flow discovery** (#295):
+  `ChainAnalyzer.suggest_schema_mappings()` is an opt-in, advisory layer that
+  finds producer→consumer edges the exact name-and-type rule misses — via
+  case/separator name normalization (`account_id` ↔ `accountId`), a
+  caller-supplied synonym table, and type-compatible (`int`→`float`) matches —
+  each returned as a reviewable `MappingSuggestion` carrying a ready-to-use
+  `field_mappings` adapter and per-match warnings. Default `ChainAnalyzer`
+  behavior is unchanged; nested-path and trace-derived hints are out of scope
+  (deferred to #297). Grounded in the MCP-schema survey (#433).
+
 - **OpenTelemetry metrics** (#435): the OTel integration now emits *metrics*
   alongside the existing spans. `OTelMetricsMiddleware` (and the after-the-fact
   `export_result_to_otel_metrics`) record flow/step execution counters, flow/step
@@ -73,6 +93,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step cache, `FlowEvent`). Executor defaults are unchanged.
 
 ### Documentation
+
+- **Internal MCP platform-governance guide** (#290) under `docs/research/`:
+  documents the contextweaver + ChainWeaver platform-governance workflow,
+  clearly separating what is operable today (`FlowServer`, governance
+  lifecycle, the traces pipeline, redacted `TraceStore`, OTel metrics) from the
+  capabilities still planned in milestone 4.3 (telemetry ingest #284, decision
+  engine #285, capability reports #289), so the guide does not document unbuilt
+  features as if they exist.
 
 - **Design and investigation write-ups** (#425, #426, #432, #433) under
   `docs/research/`: a signed flow-bundle format design proposal (#425), a

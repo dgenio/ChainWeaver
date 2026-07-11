@@ -71,7 +71,7 @@ flow. A mismatch aborts before any flow parsing or ref resolution runs.
 *Proposed, open for review — the core decision this doc exists to scope.*
 
 - **Option A — Sigstore/`cosign`-style keyless** (OIDC-backed). Matches the
-  release pipeline's existing OIDC trusted-publishing posture (#346) and avoids
+  release workflow's existing OIDC trusted-publishing posture (#346) and avoids
   key management, at the cost of a heavier dependency and an online transparency
   log. *Inferred fit: strong for the org's own CI-published bundles.*
 - **Option B — detached signature with a supplied key** (e.g. `ed25519` via a
