@@ -29,6 +29,7 @@ The MCP entry itself is built by the editor-agnostic
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar
 
@@ -278,11 +279,12 @@ def build_observe_hook_command(*, sink: str = CLAUDE_TRACE_SINK, redact: bool = 
     (delivered on stdin by Claude Code) to ``chainweaver claude capture``, which
     owns normalization, redaction, and JSONL safety.  *sink* is normalized to
     forward slashes so the command is identical and portable across operating
-    systems.
+    systems, and shell-escaped (``shlex.quote``) so a path containing spaces or
+    shell metacharacters cannot break the hook or inject extra shell tokens.
     """
     sink = sink.replace("\\", "/")
     redact_flag = "" if redact else " --no-redact"
-    return f"chainweaver claude capture --sink {sink}{redact_flag}"
+    return f"chainweaver claude capture --sink {shlex.quote(sink)}{redact_flag}"
 
 
 def render_posttooluse_hook(

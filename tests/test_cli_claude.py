@@ -232,6 +232,22 @@ class TestSetupFlows:
         assert cli.main(base) == 1
         assert cli.main([*base, "--allow-collisions"]) == 0
 
+    def test_relative_flows_dir_resolved_against_workspace(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A relative --flows-dir (here the default) must resolve against the
+        # workspace, not the process CWD, so the scan finds the flow even when
+        # invoked from elsewhere.
+        flows = tmp_path / ".chainweaver" / "flows"
+        flows.mkdir(parents=True)
+        (flows / "a.flow.yaml").write_text(_flow_yaml("ship_it", "active"), encoding="utf-8")
+        exit_code = cli.main(
+            ["claude", "setup", "--flows", "--workspace", str(tmp_path), "--json"]
+        )
+        assert exit_code == 0
+        change = json.loads(capsys.readouterr().out)["changes"][0]
+        assert "ship_it" in change["exposed_tools"]
+
 
 class TestSetupArgsContract:
     def test_no_flag_exits_one(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

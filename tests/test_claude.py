@@ -14,6 +14,7 @@ from chainweaver.claude import (
     ClaudeCodeAdapterError,
     add_flow_server_to_config,
     add_observe_hook_to_settings,
+    build_observe_hook_command,
     normalize_claude_hook_event,
     normalize_claude_hook_events,
     remove_flow_server_from_config,
@@ -142,6 +143,14 @@ class TestObserveHook:
         entry = render_posttooluse_hook(redact=False, matcher="mcp__.*")
         assert "--no-redact" in entry["hooks"][0]["command"]
         assert entry["matcher"] == "mcp__.*"
+
+    def test_command_shell_escapes_sink_with_spaces(self) -> None:
+        # A sink path with a space (or shell metacharacters) must be quoted so it
+        # cannot break the hook command or inject extra shell tokens.
+        command = build_observe_hook_command(sink="my traces/cc.jsonl")
+        assert "'my traces/cc.jsonl'" in command
+        # A plain path is left unquoted (shlex.quote only quotes when needed).
+        assert build_observe_hook_command(sink="a/b.jsonl").endswith("--sink a/b.jsonl")
 
     def test_render_normalizes_windows_backslash_sink(self) -> None:
         entry = render_posttooluse_hook(sink=".chainweaver\\traces\\claude-code.jsonl")

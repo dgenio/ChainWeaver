@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any, ClassVar
 
 from chainweaver._agent_config import add_flow_server, remove_flow_server
@@ -210,14 +211,21 @@ def _opt_str(value: Any) -> str | None:
     return str(value) if value not in (None, "") else None
 
 
-def _opt_iso(value: Any) -> Any:
-    """Pass through an ISO-8601 timestamp string, else ``None``.
+def _opt_iso(value: Any) -> datetime | None:
+    """Return *value* parsed as an ISO-8601 ``datetime``, or ``None``.
 
-    Numeric/epoch timestamps are not treated as wall-clock here (kept in
-    metadata instead) so the normalized ``timestamp`` field stays a value
-    :class:`AgentTraceEvent` can parse.
+    ``AgentTraceEvent.timestamp`` is a ``datetime | None`` field, so an
+    unparseable string would raise a validation error at construction and abort
+    capture.  This adapter is meant to tolerate shape drift, so a non-ISO (or
+    numeric/epoch) timestamp is dropped to ``None`` rather than propagated —
+    :func:`datetime.fromisoformat` is the gate, matching Pydantic's own parser.
     """
-    return value if isinstance(value, str) and value else None
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def normalize_vscode_event(

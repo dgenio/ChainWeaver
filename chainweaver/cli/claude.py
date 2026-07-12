@@ -277,6 +277,11 @@ def _setup_flows(
     write: bool,
 ) -> dict[str, Any]:
     """Plan (and optionally apply) FlowServer exposure in ``.mcp.json`` (#273)."""
+    # Resolve a relative --flows-dir against the workspace, not the process CWD,
+    # so both the scan and the path embedded in .mcp.json are correct when the
+    # command is run from elsewhere.
+    if not flows_dir.is_absolute():
+        flows_dir = workspace / flows_dir
     exposable, withheld = _active_flow_names(flows_dir)
     collisions = detect_tool_name_collisions(exposable, prefix=prefix)
     if collisions and not allow_collisions:

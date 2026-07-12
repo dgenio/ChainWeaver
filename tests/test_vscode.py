@@ -85,6 +85,18 @@ class TestNormalizeEvent:
         assert event.args == {"a": 1}
         assert event.output_keys == ("ok",)
 
+    def test_valid_iso_timestamp_preserved(self) -> None:
+        event = normalize_vscode_event({"tool": "x", "timestamp": "2026-07-12T09:00:00+00:00"})
+        assert event is not None
+        assert event.timestamp is not None
+
+    def test_non_iso_timestamp_dropped_not_raised(self) -> None:
+        # A non-ISO timestamp string must not crash capture (tolerant of drift):
+        # it is dropped to None rather than propagated into the datetime field.
+        event = normalize_vscode_event({"tool": "x", "timestamp": "last tuesday"})
+        assert event is not None
+        assert event.timestamp is None
+
     def test_missing_optional_fields_do_not_fail(self) -> None:
         event = normalize_vscode_event({"tool": "read"})
         assert event is not None
