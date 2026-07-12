@@ -1,23 +1,26 @@
-"""``chainweaver opencode`` commands: observe, setup, and expose for OpenCode.
+"""``chainweaver vscode`` commands: observe, setup, and expose for VS Code.
 
-This command group is the operator-facing half of the OpenCode integration
-(issues #276, #277, #279, #280).  It stays thin: all normalization, naming, and
-config-merge logic lives in :mod:`chainweaver.opencode` so it can be unit-tested
-without a CLI runner.
+This command group is the operator-facing half of the VS Code / GitHub Copilot
+integration (issues #265, #269).  It stays thin: all normalization, config
+merging, and the OpenTelemetry snippet live in :mod:`chainweaver.vscode`.
 
-- ``capture`` (#276) reads OpenCode plugin event JSON from stdin, normalizes it
-  via :func:`chainweaver.opencode.normalize_opencode_event` (redaction on by
-  default), and appends valid JSONL to a workspace-local sink.  Malformed input
-  fails to stderr without corrupting the sink.
-- ``setup`` (#277, #279, #280) prepares a workspace for passive observation
-  (``--observe``) and/or FlowServer exposure of active flows (``--flows``).  It
-  defaults to a dry run; ``--write`` is required to touch files and always
-  creates ``.bak`` backups first.
-- ``revert`` (#277) removes only the ChainWeaver-managed plugin / MCP entry,
-  leaving unrelated OpenCode config, traces, and flow files untouched.
+VS Code / Copilot has no ``PostToolUse``-style hook, so observe mode works in
+two portable pieces:
+
+- ``capture`` (#265) reads MCP trace records from stdin or ``--from <file>``,
+  normalizes them via :func:`chainweaver.vscode.normalize_vscode_event`
+  (redaction on by default), and appends valid JSONL to a workspace-local sink.
+- ``setup --observe`` (#265) **prints** the ``.vscode/settings.json`` snippet
+  that routes GitHub Copilot's OpenTelemetry telemetry to the sink.  Those keys
+  are a product-level setting on an evolving surface, so ChainWeaver never
+  writes them — the operator copies the snippet in and the captured JSONL is
+  then fed to ``capture --from``.
+- ``setup --flows`` / ``revert --flows`` (#269) write / remove the
+  ChainWeaver ``.vscode/mcp.json`` FlowServer entry, reversibly and with
+  backups (this file ChainWeaver *does* manage).
 
 Exit-code contract mirrors the rest of the CLI: ``0`` success, ``1`` logic
-error (malformed input, name collisions, nothing to do), ``2`` missing path.
+error, ``2`` missing path.
 """
 
 from __future__ import annotations
@@ -36,46 +39,55 @@ from chainweaver.cli._shared import (
     _load_flow_file,
     app,
 )
-from chainweaver.cli.doctor import _load_json_config, _opencode_config_path
+from chainweaver.cli.doctor import _load_json_config
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
 from chainweaver.opencode import (
-    OPENCODE_OBSERVE_PLUGIN_FILENAME,
     OPENCODE_TOOL_PREFIX,
-    OPENCODE_TRACE_SINK,
-    add_flow_server_to_config,
     build_flow_mcp_entry,
     detect_tool_name_collisions,
     exposable_flow_lifecycle,
     flow_lifecycle,
-    normalize_opencode_event,
-    remove_flow_server_from_config,
-    render_observe_plugin,
     safe_macro_tool_name,
 )
+from chainweaver.vscode import (
+    VSCODE_TRACE_SINK,
+    add_flow_server_to_config,
+    copilot_otel_settings_snippet,
+    normalize_vscode_event,
+    remove_flow_server_from_config,
+)
 
-opencode_app = typer.Typer(
-    name="opencode",
+vscode_app = typer.Typer(
+    name="vscode",
     help=(
-        "OpenCode integration: 'opencode capture' normalizes plugin events into "
-        "traces; 'opencode setup'/'revert' wire up observe mode and FlowServer "
-        "exposure (reversible, with backups)."
+        "VS Code / Copilot integration: 'vscode capture' normalizes MCP trace "
+        "records into traces; 'vscode setup'/'revert' print the Copilot OTel "
+        "observe snippet and wire up FlowServer exposure (reversible)."
     ),
     no_args_is_help=True,
 )
-app.add_typer(opencode_app, name="opencode")
+app.add_typer(vscode_app, name="vscode")
 
 
-# Module-level option singletons (typer pattern; keeps ``B008`` happy and
-# mirrors the rest of the CLI package).
+_VSCODE_MCP_CONFIG = (".vscode", "mcp.json")
+_VSCODE_SETTINGS_REL = ".vscode/settings.json"
+
+
+# Module-level option singletons (typer pattern).
 _WORKSPACE_OPTION = typer.Option(Path("."), "--workspace", "-w", help="Workspace directory.")
 _JSON_OPTION = typer.Option(False, "--json", help="Emit the change plan as JSON.")
 _CAPTURE_SINK_OPTION = typer.Option(
-    Path(OPENCODE_TRACE_SINK), "--sink", help="Trace sink JSONL file (created if absent)."
+    Path(VSCODE_TRACE_SINK), "--sink", help="Trace sink JSONL file (created if absent)."
+)
+_CAPTURE_FROM_OPTION = typer.Option(
+    None, "--from", help="Read trace records from this file instead of stdin."
 )
 _CAPTURE_REDACT_OPTION = typer.Option(
     True, "--redact/--no-redact", help="Redact argument values before writing (on by default)."
 )
-_SETUP_OBSERVE_OPTION = typer.Option(False, "--observe", help="Install the observe-mode plugin.")
+_SETUP_OBSERVE_OPTION = typer.Option(
+    False, "--observe", help="Print the Copilot OpenTelemetry observe snippet."
+)
 _SETUP_FLOWS_OPTION = typer.Option(False, "--flows", help="Expose active flows via FlowServer.")
 _SETUP_WRITE_OPTION = typer.Option(
     False,
@@ -83,7 +95,9 @@ _SETUP_WRITE_OPTION = typer.Option(
     help="Apply changes (with backups). Default is a dry run that writes nothing.",
 )
 _SETUP_SINK_OPTION = typer.Option(
-    Path(OPENCODE_TRACE_SINK), "--sink", help="Observe-mode trace sink path."
+    Path(VSCODE_TRACE_SINK),
+    "--sink",
+    help="Observe-mode trace sink path (baked into the snippet).",
 )
 _FLOWS_DIR_OPTION = typer.Option(
     Path(".chainweaver/flows"), "--flows-dir", help="Directory of flow files to expose."
@@ -94,11 +108,12 @@ _TOOLS_OPTION = typer.Option(
 _PREFIX_OPTION = typer.Option(
     OPENCODE_TOOL_PREFIX, "--prefix", help="Namespace prefix for exposed tool names."
 )
-_SETUP_REDACT_OPTION = typer.Option(True, "--redact/--no-redact", help="Redact captured args.")
 _ALLOW_COLLISIONS_OPTION = typer.Option(
     False, "--allow-collisions", help="Expose flows even if generated names collide."
 )
-_REVERT_OBSERVE_OPTION = typer.Option(False, "--observe", help="Remove the observe-mode plugin.")
+_REVERT_OBSERVE_OPTION = typer.Option(
+    False, "--observe", help="Print how to remove the Copilot OTel observe keys."
+)
 _REVERT_FLOWS_OPTION = typer.Option(False, "--flows", help="Remove the FlowServer MCP entry.")
 _REVERT_WRITE_OPTION = typer.Option(
     False, "--write/--dry-run", help="Apply removals. Default is a dry run."
@@ -106,12 +121,12 @@ _REVERT_WRITE_OPTION = typer.Option(
 
 
 # --------------------------------------------------------------------------- #
-# capture (#276)
+# capture (#265)
 # --------------------------------------------------------------------------- #
 
 
 def _decode_payloads(text: str) -> list[Any]:
-    """Decode stdin *text* as a JSON object, a JSON array, or JSONL.
+    """Decode *text* as a JSON object, a JSON array, or JSONL.
 
     Raises:
         ChainWeaverError: If *text* holds no valid JSON.
@@ -138,33 +153,46 @@ def _decode_payloads(text: str) -> list[Any]:
     return payloads
 
 
-@opencode_app.command("capture")
+def _no_redaction() -> Any:
+    """Return a no-op redaction policy (keep raw values)."""
+    from chainweaver.log_utils import RedactionPolicy
+
+    return RedactionPolicy(redact_keys=frozenset())
+
+
+@vscode_app.command("capture")
 def capture_command(
     sink: Path = _CAPTURE_SINK_OPTION,
+    source: Path | None = _CAPTURE_FROM_OPTION,
     redact: bool = _CAPTURE_REDACT_OPTION,
 ) -> None:
-    """Normalize an OpenCode plugin event from stdin into trace JSONL (#276).
+    """Normalize VS Code MCP trace records into trace JSONL (#265).
 
-    Reads one JSON object, a JSON array, or JSONL from stdin; appends each
-    normalized tool-execution event to ``--sink``.  Non-tool events are
-    skipped.  Malformed input is reported on stderr and the sink is left
-    untouched (no partial / corrupt writes).
+    Reads one JSON object, a JSON array, or JSONL from ``--from <file>`` (or
+    stdin when omitted); appends each normalized tool-call event to ``--sink``.
+    Non-tool records are skipped.  Malformed input is reported on stderr and the
+    sink is left untouched (no partial / corrupt writes).
     """
     redaction = None if redact else _no_redaction()
     try:
-        payloads = _decode_payloads(sys.stdin.read())
+        if source is not None:
+            if not source.is_file():
+                typer.echo(f"chainweaver: not a file: {source}", err=True)
+                raise typer.Exit(code=2)
+            text = source.read_text(encoding="utf-8")
+        else:
+            text = sys.stdin.read()
+        payloads = _decode_payloads(text)
         events = [
             event
             for payload in payloads
-            if (event := normalize_opencode_event(payload, redaction=redaction)) is not None
+            if (event := normalize_vscode_event(payload, redaction=redaction)) is not None
         ]
     except ChainWeaverError as exc:
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     if not events:
-        # Nothing to record (e.g. a non-tool event) — succeed quietly so the
-        # plugin never treats observation as a failure.
         return
 
     lines = [
@@ -176,35 +204,13 @@ def capture_command(
         handle.write("\n".join(lines) + "\n")
 
 
-def _no_redaction() -> Any:
-    """Return a no-op redaction policy (keep raw values)."""
-    from chainweaver.log_utils import RedactionPolicy
-
-    return RedactionPolicy(redact_keys=frozenset())
-
-
 # --------------------------------------------------------------------------- #
-# setup / revert (#277, #279, #280)
+# setup / revert (#265, #269)
 # --------------------------------------------------------------------------- #
-
-
-def _backup(path: Path) -> Path | None:
-    """Copy *path* to ``<path>.bak`` before modifying it; return the backup.
-
-    Thin alias over :func:`chainweaver._agent_config.backup_file`, shared with
-    the Claude Code and VS Code setup commands.
-    """
-    return backup_file(path)
 
 
 def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
-    """Return (*exposable flow names*, *withheld names*) under *flows_dir*.
-
-    Exposable = governance lifecycle in :data:`exposable_flow_lifecycle`
-    (active / reviewed).  Drafts and archived flows are withheld by default.
-    Malformed flow files are skipped with a stderr warning rather than
-    aborting, matching ``chainweaver serve <dir>`` discovery semantics.
-    """
+    """Return (*exposable flow names*, *withheld names*) under *flows_dir*."""
     exposable: list[str] = []
     withheld: list[str] = []
     for flow_file in _iter_flow_files(flows_dir):
@@ -220,20 +226,19 @@ def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
     return sorted(set(exposable)), sorted(set(withheld))
 
 
-def _setup_observe(workspace: Path, sink: Path, *, redact: bool, write: bool) -> dict[str, Any]:
-    """Plan (and optionally apply) the observe-plugin install (#276)."""
-    plugin_path = workspace / ".opencode" / "plugin" / OPENCODE_OBSERVE_PLUGIN_FILENAME
-    content = render_observe_plugin(sink=str(sink), redact=redact)
-    change: dict[str, Any] = {
-        "action": "update plugin" if plugin_path.is_file() else "create plugin",
-        "path": str(plugin_path),
+def _setup_observe(workspace: Path, sink: Path) -> dict[str, Any]:
+    """Plan the observe step: print the Copilot OTel settings snippet (#265).
+
+    VS Code / Copilot exposes no writable hook for ChainWeaver, so this step is
+    always guidance — never a file write — regardless of ``--write``.
+    """
+    return {
+        "action": "show Copilot OpenTelemetry settings snippet (manual step)",
+        "path": _VSCODE_SETTINGS_REL,
+        "manual": True,
         "sink": str(sink),
+        "snippet": copilot_otel_settings_snippet(sink=str(sink)),
     }
-    if write:
-        plugin_path.parent.mkdir(parents=True, exist_ok=True)
-        change["backup"] = str(_backup(plugin_path) or "")
-        plugin_path.write_text(content, encoding="utf-8")
-    return change
 
 
 def _setup_flows(
@@ -245,7 +250,7 @@ def _setup_flows(
     allow_collisions: bool,
     write: bool,
 ) -> dict[str, Any]:
-    """Plan (and optionally apply) FlowServer exposure in the OpenCode config (#279)."""
+    """Plan (and optionally apply) FlowServer exposure in ``.vscode/mcp.json`` (#269)."""
     exposable, withheld = _active_flow_names(flows_dir)
     collisions = detect_tool_name_collisions(exposable, prefix=prefix)
     if collisions and not allow_collisions:
@@ -255,7 +260,7 @@ def _setup_flows(
             "Rename the flow(s), change --prefix, or pass --allow-collisions."
         )
 
-    config_path = _opencode_config_path(workspace)
+    config_path = workspace.joinpath(*_VSCODE_MCP_CONFIG)
     _, config, _ = _load_json_config(config_path)
     entry = build_flow_mcp_entry(
         flows_dir=str(flows_dir), tools_module=tools_module, prefix=prefix
@@ -263,7 +268,9 @@ def _setup_flows(
     new_config = add_flow_server_to_config(config, entry)
 
     change: dict[str, Any] = {
-        "action": "update OpenCode config" if config_path.is_file() else "create OpenCode config",
+        "action": "update .vscode/mcp.json"
+        if config_path.is_file()
+        else "create .vscode/mcp.json",
         "path": str(config_path),
         "entry": entry,
         "exposed_tools": {name: safe_macro_tool_name(name, prefix=prefix) for name in exposable},
@@ -271,14 +278,15 @@ def _setup_flows(
         "collisions": collisions,
     }
     if write:
-        change["backup"] = str(_backup(config_path) or "")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        change["backup"] = str(backup_file(config_path) or "")
         config_path.write_text(
             json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
     return change
 
 
-@opencode_app.command("setup")
+@vscode_app.command("setup")
 def setup_command(
     observe: bool = _SETUP_OBSERVE_OPTION,
     flows: bool = _SETUP_FLOWS_OPTION,
@@ -288,16 +296,17 @@ def setup_command(
     flows_dir: Path = _FLOWS_DIR_OPTION,
     tools: str | None = _TOOLS_OPTION,
     prefix: str = _PREFIX_OPTION,
-    redact: bool = _SETUP_REDACT_OPTION,
     allow_collisions: bool = _ALLOW_COLLISIONS_OPTION,
     output_json: bool = _JSON_OPTION,
 ) -> None:
-    """Wire up OpenCode observe mode and/or flow exposure (reversible) (#277, #279).
+    """Wire up VS Code observe guidance and/or flow exposure (reversible) (#265, #269).
 
-    Defaults to a dry run: pass ``--write`` to modify files, which always backs
-    up the originals to ``<file>.bak`` first.  ``--observe`` installs the
-    ChainWeaver plugin; ``--flows`` adds an MCP entry exposing only active /
-    reviewed flows under a safe, prefixed namespace.
+    ``--observe`` prints the ``.vscode/settings.json`` Copilot OpenTelemetry
+    snippet (a manual step — never written, since those keys are a product-level
+    setting).  ``--flows`` adds a ChainWeaver entry to ``.vscode/mcp.json``
+    exposing only active / reviewed flows under a safe, prefixed namespace;
+    it defaults to a dry run and backs up the original to ``<file>.bak`` on
+    ``--write``.
     """
     if not workspace.is_dir():
         typer.echo(f"chainweaver: not a directory: {workspace}", err=True)
@@ -309,7 +318,7 @@ def setup_command(
     changes: list[dict[str, Any]] = []
     try:
         if observe:
-            changes.append(_setup_observe(workspace, sink, redact=redact, write=write))
+            changes.append(_setup_observe(workspace, sink))
         if flows:
             changes.append(
                 _setup_flows(
@@ -328,7 +337,7 @@ def setup_command(
     _report(changes, write=write, output_json=output_json)
 
 
-@opencode_app.command("revert")
+@vscode_app.command("revert")
 def revert_command(
     observe: bool = _REVERT_OBSERVE_OPTION,
     flows: bool = _REVERT_FLOWS_OPTION,
@@ -336,10 +345,12 @@ def revert_command(
     workspace: Path = _WORKSPACE_OPTION,
     output_json: bool = _JSON_OPTION,
 ) -> None:
-    """Remove only ChainWeaver-managed OpenCode config; leave the rest intact (#277).
+    """Remove only ChainWeaver-managed VS Code config; leave the rest intact (#269).
 
-    Traces and flow files are never deleted.  Unrelated MCP servers and plugins
-    are preserved.
+    Traces and flow files are never deleted.  ``--observe`` only prints how to
+    remove the Copilot OTel keys (ChainWeaver never wrote them); ``--flows``
+    removes the ChainWeaver ``.vscode/mcp.json`` entry, preserving unrelated
+    MCP servers.
     """
     if not workspace.is_dir():
         typer.echo(f"chainweaver: not a directory: {workspace}", err=True)
@@ -350,20 +361,25 @@ def revert_command(
 
     changes: list[dict[str, Any]] = []
     if observe:
-        plugin_path = workspace / ".opencode" / "plugin" / OPENCODE_OBSERVE_PLUGIN_FILENAME
-        if plugin_path.is_file():
-            change = {"action": "remove plugin", "path": str(plugin_path)}
-            if write:
-                plugin_path.unlink()
-            changes.append(change)
+        changes.append(
+            {
+                "action": "remove Copilot OpenTelemetry keys (manual step)",
+                "path": _VSCODE_SETTINGS_REL,
+                "manual": True,
+                "detail": (
+                    "Delete the 'github.copilot.chat.otel.exporterType' and "
+                    "'github.copilot.chat.otel.outfile' keys from .vscode/settings.json."
+                ),
+            }
+        )
     if flows:
-        config_path = _opencode_config_path(workspace)
+        config_path = workspace.joinpath(*_VSCODE_MCP_CONFIG)
         _, config, _ = _load_json_config(config_path)
         new_config, removed = remove_flow_server_from_config(config)
         if removed:
-            change = {"action": "remove MCP entry", "path": str(config_path)}
+            change: dict[str, Any] = {"action": "remove MCP entry", "path": str(config_path)}
             if write:
-                change["backup"] = str(_backup(config_path) or "")
+                change["backup"] = str(backup_file(config_path) or "")
                 config_path.write_text(
                     json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
                 )
@@ -385,6 +401,8 @@ def _report(changes: list[dict[str, Any]], *, write: bool, output_json: bool) ->
     typer.echo(header)
     for change in changes:
         typer.echo(f"  ~ {change['action']} → {change['path']}")
+        if change.get("detail"):
+            typer.echo(f"      {change['detail']}")
         if change.get("withheld_flows"):
             withheld = ", ".join(change["withheld_flows"])
             typer.echo(f"      withheld (not active/reviewed): {withheld}")
@@ -394,5 +412,9 @@ def _report(changes: list[dict[str, Any]], *, write: bool, output_json: bool) ->
         if change.get("exposed_tools"):
             for flow_name, tool_name in sorted(change["exposed_tools"].items()):
                 typer.echo(f"      expose: {flow_name} → {tool_name}")
+        if change.get("snippet"):
+            typer.echo("      add to .vscode/settings.json:")
+            for line in change["snippet"].splitlines():
+                typer.echo(f"        {line}")
     if not write:
         typer.echo("\nRe-run with --write to apply (originals are backed up to <file>.bak).")

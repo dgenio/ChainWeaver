@@ -379,8 +379,9 @@ def _run_first_run_profile(fmt: OutputFormat) -> None:
 #
 # These commands are *read-only*: they inspect a workspace and report what is
 # configured for the observe → suggest → compile workflow. They never modify
-# files. ``--fix-dry-run`` prints the config that *would* be written (so the
-# actual config-writing helpers, issues #269 / #271 / #277, stay separate).
+# files. ``--fix-dry-run`` prints the config that *would* be written; the actual
+# reversible config-writing lives in the per-editor setup/revert commands
+# (``opencode`` #277/#279, ``claude`` #271/#273, ``vscode`` #269).
 # ---------------------------------------------------------------------------
 
 # A configured MCP server is treated as a ChainWeaver FlowServer when its key

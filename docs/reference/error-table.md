@@ -70,6 +70,8 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E050` | `DecisionBudgetExceededError` | A flow exceeded its `DecisionPolicy.max_decisions_per_flow` budget. |
 | `CW-E051` | `SchemaRefPolicyError` | The active schema-ref policy rejected a `"module:qualname"` ref's module path before importing it (`set_schema_ref_policy` / `SchemaRefAllowlist`). |
 | `CW-E052` | `GuardrailViolationError` | A registered `guardrail_callback` blocked a step at the input stage (content-safety / injection check). |
+| `CW-E053` | `ClaudeCodeAdapterError` | A Claude Code `PostToolUse` hook payload could not be normalized into a trace event (not a JSON object). |
+| `CW-E054` | `VSCodeAdapterError` | A VS Code / Copilot trace record could not be normalized into a trace event (not a JSON object). |
 
 ## Catching strategy
 

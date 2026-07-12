@@ -32,6 +32,7 @@ import typer
 from chainweaver.cli import (  # noqa: F401  side-effect: command registration
     _shared,
     attest,
+    claude,
     diff,
     doctor,
     explain,
@@ -46,6 +47,7 @@ from chainweaver.cli import (  # noqa: F401  side-effect: command registration
     suggest,
     traces,
     validate,
+    vscode,
 )
 from chainweaver.cli._shared import (
     OutputFormat,

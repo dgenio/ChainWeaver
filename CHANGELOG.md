@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Claude Code and VS Code observe integrations** (#265, #269, #271, #272,
+  #273): parity with the shipped OpenCode integration for the two other coding
+  agents. New `chainweaver.claude` and `chainweaver.vscode` library modules and
+  `chainweaver claude` / `chainweaver vscode` CLI groups.
+  - **Claude Code**: `normalize_claude_hook_event(s)` maps a `PostToolUse` hook
+    payload to a vendor-neutral `AgentTraceEvent` (redaction on by default, MCP
+    `mcp__server__tool` provenance) (#272); `claude capture` appends normalized
+    trace JSONL from stdin; `claude setup`/`revert` install a reversible
+    `PostToolUse` observe hook (personal `--scope local` by default) (#271) and
+    a `.mcp.json` FlowServer entry exposing only active/reviewed flows (#273) —
+    dry-run by default, `.bak` backups on `--write`.
+  - **VS Code / Copilot**: `normalize_vscode_event(s)` normalizes MCP tool-call
+    trace records (flat or OpenTelemetry-span shape); `vscode capture` reads
+    from stdin or `--from <file>`; `vscode setup --observe` **prints** the
+    `.vscode/settings.json` Copilot OpenTelemetry snippet (never written, since
+    those keys are a product-level setting) (#265); `vscode setup --flows`
+    writes a reversible `.vscode/mcp.json` FlowServer entry (#269).
+  - New typed errors `ClaudeCodeAdapterError` (`CW-E053`) and
+    `VSCodeAdapterError` (`CW-E054`); new public symbols exported top-level.
+  - Refactor: a private `chainweaver._agent_config` module now holds the shared
+    editor-agnostic MCP-config merge/remove/backup logic used by all three
+    adapters (OpenCode migrated onto it; its public API is unchanged).
+
 - **Input-stage content-safety guardrails** (#317): a new
   `chainweaver.guardrails` module and an opt-in `FlowExecutor(...,
   guardrail_callback=...)` seam (mirroring the approval/decision callbacks) that
