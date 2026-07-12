@@ -105,7 +105,7 @@ Draft flows are **not** exposed automatically — only flows whose governance
 lifecycle is **active** or **reviewed** are exposable in the next step. Draft,
 suggested, ignored, and archived flows are withheld by default.
 
-## 4. Expose reviewed flows back to Claude Code (MCP FlowServer)
+## 4. Expose active flows back to Claude Code (MCP FlowServer)
 
 ```bash
 chainweaver claude setup --flows --dry-run --workspace . \
@@ -115,9 +115,11 @@ chainweaver claude setup --flows --write   --workspace . \
 ```
 
 This adds (or replaces) a single `chainweaver` entry under `mcpServers` in your
-project `.mcp.json` that runs `chainweaver serve` over the flows **directory**
-(`chainweaver serve` accepts a file or a directory; a directory exposes its
-active/reviewed flows and withholds drafts). Existing MCP servers are preserved.
+project `.mcp.json` that runs `chainweaver serve` over the flows **directory**.
+By default only **ACTIVE** flows are exposed — a reviewed-but-not-yet-approved
+candidate is *not* surfaced as a live tool. For local development you can pass
+`--include-reviewed` to also expose REVIEWED flows (it prints a warning).
+Existing MCP servers are preserved.
 
 ### Safe naming and collisions
 

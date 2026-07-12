@@ -248,6 +248,32 @@ class TestSetupFlows:
         change = json.loads(capsys.readouterr().out)["changes"][0]
         assert "ship_it" in change["exposed_tools"]
 
+    def test_reviewed_withheld_by_default_exposed_with_flag(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flows = tmp_path / "flows"
+        flows.mkdir()
+        (flows / "r.flow.yaml").write_text(_flow_yaml("candidate", "reviewed"), encoding="utf-8")
+        base = [
+            "claude",
+            "setup",
+            "--flows",
+            "--workspace",
+            str(tmp_path),
+            "--flows-dir",
+            str(flows),
+            "--json",
+        ]
+        # Default: a REVIEWED (not-yet-active) flow is withheld, not deployed.
+        assert cli.main(base) == 0
+        change = json.loads(capsys.readouterr().out)["changes"][0]
+        assert change["exposed_tools"] == {}
+        assert "candidate" in change["withheld_flows"]
+        # Explicit opt-in exposes it (and warns on stderr).
+        assert cli.main([*base, "--include-reviewed"]) == 0
+        change = json.loads(capsys.readouterr().out)["changes"][0]
+        assert "candidate" in change["exposed_tools"]
+
 
 class TestSetupArgsContract:
     def test_no_flag_exits_one(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

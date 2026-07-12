@@ -19,16 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `mcp__server__tool` provenance) (#272); `claude capture` appends normalized
     trace JSONL from stdin; `claude setup`/`revert` install a reversible
     `PostToolUse` observe hook (personal `--scope local` by default) (#271) and
-    a `.mcp.json` FlowServer entry exposing only active/reviewed flows (#273) —
-    dry-run by default, `.bak` backups on `--write`.
+    a `.mcp.json` FlowServer entry exposing only **ACTIVE** flows by default
+    (reviewed candidates are withheld unless `--include-reviewed`, which warns)
+    (#273) — dry-run by default, `.bak` backups on `--write`.
   - **VS Code / Copilot**: `normalize_vscode_event(s)` normalizes MCP tool-call
     trace records (flat or OpenTelemetry-span shape); `vscode capture` reads
     from stdin or `--from <file>`; `vscode setup --observe` **prints** the
     `.vscode/settings.json` Copilot OpenTelemetry snippet (never written, since
     those keys are a product-level setting) (#265); `vscode setup --flows`
-    writes a reversible `.vscode/mcp.json` FlowServer entry (#269).
+    writes a reversible `.vscode/mcp.json` FlowServer entry, ACTIVE-only by
+    default (#269).
   - New typed errors `ClaudeCodeAdapterError` (`CW-E053`) and
-    `VSCodeAdapterError` (`CW-E054`); new public symbols exported top-level.
+    `VSCodeAdapterError` (`CW-E054`).
+  - These vendor adapters are **experimental and namespaced**: their symbols are
+    reachable via `chainweaver.claude` / `chainweaver.vscode` but are
+    intentionally kept out of the stable top-level `chainweaver.__all__` /
+    public-API snapshot (they do not carry the `Tool` / `Flow` / `FlowExecutor`
+    compatibility promise). OpenTelemetry is the primary observation path; local
+    hooks / stdin capture are supported fallbacks. Mapping onto the unified
+    evidence model (`EvidenceEvent` / `EvidenceTrace`, provenance and
+    content-availability states) is tracked as follow-up under #334.
   - Refactor: a private `chainweaver._agent_config` module now holds the shared
     editor-agnostic MCP-config merge/remove/backup logic used by all three
     adapters (OpenCode migrated onto it; its public API is unchanged).

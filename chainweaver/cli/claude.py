@@ -47,13 +47,21 @@ from chainweaver.cli._shared import (
 )
 from chainweaver.cli.doctor import _load_json_config
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
+from chainweaver.flow import FlowLifecycle
 from chainweaver.opencode import (
     OPENCODE_TOOL_PREFIX,
     build_flow_mcp_entry,
     detect_tool_name_collisions,
-    exposable_flow_lifecycle,
     flow_lifecycle,
     safe_macro_tool_name,
+)
+
+# Default exposure is strictly ACTIVE flows: a REVIEWED candidate has passed
+# review but is not an approved/deployed artifact, so it must not be surfaced as
+# a live MCP tool unless the operator explicitly opts in (see #525/#526).
+_ACTIVE_ONLY: frozenset[FlowLifecycle] = frozenset({FlowLifecycle.ACTIVE})
+_ACTIVE_OR_REVIEWED: frozenset[FlowLifecycle] = frozenset(
+    {FlowLifecycle.ACTIVE, FlowLifecycle.REVIEWED}
 )
 
 claude_app = typer.Typer(
@@ -124,6 +132,12 @@ _PREFIX_OPTION = typer.Option(
 _SETUP_REDACT_OPTION = typer.Option(True, "--redact/--no-redact", help="Redact captured args.")
 _ALLOW_COLLISIONS_OPTION = typer.Option(
     False, "--allow-collisions", help="Expose flows even if generated names collide."
+)
+_INCLUDE_REVIEWED_OPTION = typer.Option(
+    False,
+    "--include-reviewed",
+    help="Also expose REVIEWED (reviewed-but-not-approved) flows, not just ACTIVE. "
+    "Off by default; intended for local development and prints a warning.",
 )
 _REVERT_OBSERVE_OPTION = typer.Option(False, "--observe", help="Remove the observe hook.")
 _REVERT_FLOWS_OPTION = typer.Option(False, "--flows", help="Remove the FlowServer MCP entry.")
@@ -221,13 +235,16 @@ def _settings_path(workspace: Path, scope: str) -> Path:
     return workspace.joinpath(*parts)
 
 
-def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
+def _active_flow_names(
+    flows_dir: Path, *, include_reviewed: bool = False
+) -> tuple[list[str], list[str]]:
     """Return (*exposable flow names*, *withheld names*) under *flows_dir*.
 
-    Exposable = governance lifecycle in
-    :data:`chainweaver.opencode.exposable_flow_lifecycle` (active / reviewed).
+    Exposable defaults to strictly ACTIVE flows; ``include_reviewed=True`` also
+    exposes REVIEWED candidates (an explicit, warned local-development override).
     Malformed flow files are skipped with a stderr warning rather than aborting.
     """
+    exposable_set = _ACTIVE_OR_REVIEWED if include_reviewed else _ACTIVE_ONLY
     exposable: list[str] = []
     withheld: list[str] = []
     for flow_file in _iter_flow_files(flows_dir):
@@ -236,7 +253,7 @@ def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
         except FlowSerializationError as exc:
             typer.echo(f"chainweaver: skipping {flow_file}: {exc.detail}", err=True)
             continue
-        if flow_lifecycle(flow) in exposable_flow_lifecycle:
+        if flow_lifecycle(flow) in exposable_set:
             exposable.append(flow.name)
         else:
             withheld.append(flow.name)
@@ -274,6 +291,7 @@ def _setup_flows(
     tools_module: str | None,
     prefix: str,
     allow_collisions: bool,
+    include_reviewed: bool,
     write: bool,
 ) -> dict[str, Any]:
     """Plan (and optionally apply) FlowServer exposure in ``.mcp.json`` (#273)."""
@@ -282,7 +300,13 @@ def _setup_flows(
     # command is run from elsewhere.
     if not flows_dir.is_absolute():
         flows_dir = workspace / flows_dir
-    exposable, withheld = _active_flow_names(flows_dir)
+    if include_reviewed:
+        typer.echo(
+            "chainweaver: --include-reviewed also exposes REVIEWED (not-yet-approved) flows; "
+            "prefer ACTIVE-only for shared/deployed configuration.",
+            err=True,
+        )
+    exposable, withheld = _active_flow_names(flows_dir, include_reviewed=include_reviewed)
     collisions = detect_tool_name_collisions(exposable, prefix=prefix)
     if collisions and not allow_collisions:
         detail = "; ".join(f"{name}: {reason}" for name, reason in sorted(collisions.items()))
@@ -328,6 +352,7 @@ def setup_command(
     prefix: str = _PREFIX_OPTION,
     redact: bool = _SETUP_REDACT_OPTION,
     allow_collisions: bool = _ALLOW_COLLISIONS_OPTION,
+    include_reviewed: bool = _INCLUDE_REVIEWED_OPTION,
     output_json: bool = _JSON_OPTION,
 ) -> None:
     """Wire up Claude Code observe mode and/or flow exposure (reversible) (#271, #273).
@@ -336,7 +361,8 @@ def setup_command(
     up the originals to ``<file>.bak`` first.  ``--observe`` installs a
     ``PostToolUse`` hook (personal ``--scope local`` by default, so it is never
     silently committed to shared project settings); ``--flows`` adds an
-    ``.mcp.json`` entry exposing only active / reviewed flows under a safe,
+    ``.mcp.json`` entry exposing only ACTIVE flows by default (pass
+    ``--include-reviewed`` to also expose reviewed candidates) under a safe,
     prefixed namespace.
     """
     if not workspace.is_dir():
@@ -365,6 +391,7 @@ def setup_command(
                     tools_module=tools,
                     prefix=prefix,
                     allow_collisions=allow_collisions,
+                    include_reviewed=include_reviewed,
                     write=write,
                 )
             )

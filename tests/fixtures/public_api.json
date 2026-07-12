@@ -18,7 +18,6 @@
     "BaseDecisionCallback",
     "BaseGuardrailCallback",
     "BaseMiddleware",
-    "CLAUDE_TRACE_SINK",
     "CancellationToken",
     "CandidateScore",
     "ChainAnalyzer",
@@ -30,7 +29,6 @@
     "CheckpointVersionError",
     "Checkpointer",
     "CheckpointerNotConfiguredError",
-    "ClaudeCodeAdapterError",
     "CompatibilityIssue",
     "CompilationError",
     "CompilationResult",
@@ -184,8 +182,6 @@
     "TraceEventKind",
     "TraceRecorder",
     "TraceStore",
-    "VSCODE_TRACE_SINK",
-    "VSCodeAdapterError",
     "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
@@ -198,7 +194,6 @@
     "coerce_decision_callback",
     "coerce_guardrail_callback",
     "compile_flow",
-    "copilot_otel_settings_snippet",
     "description_proposal_schema",
     "detect_tool_name_collisions",
     "discover_flows",
@@ -226,12 +221,8 @@
     "merge_safety",
     "mine_routing_cases",
     "minimize_failure",
-    "normalize_claude_hook_event",
-    "normalize_claude_hook_events",
     "normalize_opencode_event",
     "normalize_opencode_events",
-    "normalize_vscode_event",
-    "normalize_vscode_events",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
     "parse_agent_trace",
@@ -240,7 +231,6 @@
     "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",
-    "render_posttooluse_hook",
     "result_to_mermaid",
     "safe_macro_tool_name",
     "schema_fingerprint",
@@ -416,11 +406,6 @@
       "qualname": "BaseMiddleware",
       "signature": "()"
     },
-    "CLAUDE_TRACE_SINK": {
-      "kind": "str",
-      "module": null,
-      "qualname": null
-    },
     "CancellationToken": {
       "kind": "class",
       "module": "chainweaver.cancellation",
@@ -500,12 +485,6 @@
       "module": "chainweaver.exceptions",
       "qualname": "CheckpointerNotConfiguredError",
       "signature": "() -> None"
-    },
-    "ClaudeCodeAdapterError": {
-      "kind": "class",
-      "module": "chainweaver.claude",
-      "qualname": "ClaudeCodeAdapterError",
-      "signature": null
     },
     "CompatibilityIssue": {
       "kind": "class",
@@ -1786,17 +1765,6 @@
       "qualname": "TraceStore",
       "signature": "(*args, **kwargs)"
     },
-    "VSCODE_TRACE_SINK": {
-      "kind": "str",
-      "module": null,
-      "qualname": null
-    },
-    "VSCodeAdapterError": {
-      "kind": "class",
-      "module": "chainweaver.vscode",
-      "qualname": "VSCodeAdapterError",
-      "signature": null
-    },
     "add_flow_server_to_config": {
       "kind": "function",
       "module": "chainweaver.opencode",
@@ -1867,12 +1835,6 @@
       "module": "chainweaver.compiler",
       "qualname": "compile_flow",
       "signature": "(flow: Flow | DAGFlow, tools: dict[str, Tool]) -> CompilationResult"
-    },
-    "copilot_otel_settings_snippet": {
-      "kind": "function",
-      "module": "chainweaver.vscode",
-      "qualname": "copilot_otel_settings_snippet",
-      "signature": "(*, sink: str = '.chainweaver/traces/vscode.jsonl') -> str"
     },
     "description_proposal_schema": {
       "kind": "function",
@@ -2035,18 +1997,6 @@
       "qualname": "minimize_failure",
       "signature": "(executor: FlowExecutor, flow: Flow | DAGFlow, failing_input: dict[str, Any], prop: FlowProperty, *, max_rounds: int = 50) -> dict[str, Any]"
     },
-    "normalize_claude_hook_event": {
-      "kind": "function",
-      "module": "chainweaver.claude",
-      "qualname": "normalize_claude_hook_event",
-      "signature": "(payload: Any, *, redaction: RedactionPolicy | None = None) -> AgentTraceEvent | None"
-    },
-    "normalize_claude_hook_events": {
-      "kind": "function",
-      "module": "chainweaver.claude",
-      "qualname": "normalize_claude_hook_events",
-      "signature": "(payloads: Iterable[Any], *, redaction: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
-    },
     "normalize_opencode_event": {
       "kind": "function",
       "module": "chainweaver.opencode",
@@ -2057,18 +2007,6 @@
       "kind": "function",
       "module": "chainweaver.opencode",
       "qualname": "normalize_opencode_events",
-      "signature": "(payloads: Iterable[Any], *, redaction: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
-    },
-    "normalize_vscode_event": {
-      "kind": "function",
-      "module": "chainweaver.vscode",
-      "qualname": "normalize_vscode_event",
-      "signature": "(payload: Any, *, redaction: RedactionPolicy | None = None) -> AgentTraceEvent | None"
-    },
-    "normalize_vscode_events": {
-      "kind": "function",
-      "module": "chainweaver.vscode",
-      "qualname": "normalize_vscode_events",
       "signature": "(payloads: Iterable[Any], *, redaction: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
     },
     "optimize_new_tool_description": {
@@ -2118,12 +2056,6 @@
       "module": "chainweaver.opencode",
       "qualname": "render_observe_plugin",
       "signature": "(*, sink: str = '.chainweaver/traces/opencode.jsonl', redact: bool = True) -> str"
-    },
-    "render_posttooluse_hook": {
-      "kind": "function",
-      "module": "chainweaver.claude",
-      "qualname": "render_posttooluse_hook",
-      "signature": "(*, sink: str = '.chainweaver/traces/claude-code.jsonl', redact: bool = True, matcher: str = '') -> dict[str, Any]"
     },
     "result_to_mermaid": {
       "kind": "function",

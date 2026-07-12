@@ -94,7 +94,7 @@ chainweaver flows promote <flow-name>     # move draft → reviewed → active
 
 Only **active** or **reviewed** flows are exposable next; drafts are withheld.
 
-## 4. Expose reviewed flows back to VS Code (MCP FlowServer)
+## 4. Expose active flows back to VS Code (MCP FlowServer)
 
 ```bash
 chainweaver vscode setup --flows --dry-run --workspace . \
@@ -105,9 +105,10 @@ chainweaver vscode setup --flows --write   --workspace . \
 
 This adds (or replaces) a single `chainweaver` entry under `servers` in
 `.vscode/mcp.json` that runs `chainweaver serve` over the flows directory.
-Existing MCP servers are preserved. Generated tool names are namespaced
-(`cw__<flow.name>`); `setup --flows` refuses colliding names unless you pass
-`--allow-collisions`.
+By default only **ACTIVE** flows are exposed (reviewed candidates are withheld
+unless you pass `--include-reviewed`, which warns). Existing MCP servers are
+preserved. Generated tool names are namespaced (`cw__<flow.name>`);
+`setup --flows` refuses colliding names unless you pass `--allow-collisions`.
 
 ## 5. Revert
 

@@ -67,13 +67,6 @@ from chainweaver.checkpoint import (
     FileCheckpointer,
     InMemoryCheckpointer,
 )
-from chainweaver.claude import (
-    CLAUDE_TRACE_SINK,
-    ClaudeCodeAdapterError,
-    normalize_claude_hook_event,
-    normalize_claude_hook_events,
-    render_posttooluse_hook,
-)
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility, schema_fingerprint
 from chainweaver.compiler import (
     CompilationError,
@@ -316,13 +309,6 @@ from chainweaver.traces import (
     score_candidate,
 )
 from chainweaver.viz import flow_to_ascii, flow_to_dot, flow_to_mermaid, result_to_mermaid
-from chainweaver.vscode import (
-    VSCODE_TRACE_SINK,
-    VSCodeAdapterError,
-    copilot_otel_settings_snippet,
-    normalize_vscode_event,
-    normalize_vscode_events,
-)
 
 # Resolve forward references in middleware context, event, and snapshot
 # models — ``StepRecord`` and ``ExecutionResult`` are defined in
@@ -343,7 +329,6 @@ __version__ = "0.13.0"
 
 __all__ = [
     "BUILTIN_PROPERTIES",
-    "CLAUDE_TRACE_SINK",
     "DEFAULT_PARSE_LIMITS",
     "FLOW_INPUT_STEP_INDEX",
     "OPENCODE_OBSERVE_PLUGIN_FILENAME",
@@ -351,7 +336,6 @@ __all__ = [
     "OPENCODE_TRACE_SINK",
     "PROVIDER_PRICES",
     "RESERVED_OPENCODE_TOOL_NAMES",
-    "VSCODE_TRACE_SINK",
     "AgentTraceEvent",
     "AgentTraceImportError",
     "ApprovalCallable",
@@ -380,7 +364,6 @@ __all__ = [
     "CheckpointVersionError",
     "Checkpointer",
     "CheckpointerNotConfiguredError",
-    "ClaudeCodeAdapterError",
     "CompatibilityIssue",
     "CompilationError",
     "CompilationResult",
@@ -527,7 +510,6 @@ __all__ = [
     "TraceEventKind",
     "TraceRecorder",
     "TraceStore",
-    "VSCodeAdapterError",
     "add_flow_server_to_config",
     "agent_trace_to_traces",
     "attest_flow",
@@ -540,7 +522,6 @@ __all__ = [
     "coerce_decision_callback",
     "coerce_guardrail_callback",
     "compile_flow",
-    "copilot_otel_settings_snippet",
     "description_proposal_schema",
     "detect_tool_name_collisions",
     "discover_flows",
@@ -568,12 +549,8 @@ __all__ = [
     "merge_safety",
     "mine_routing_cases",
     "minimize_failure",
-    "normalize_claude_hook_event",
-    "normalize_claude_hook_events",
     "normalize_opencode_event",
     "normalize_opencode_events",
-    "normalize_vscode_event",
-    "normalize_vscode_events",
     "optimize_new_tool_description",
     "optimize_tool_descriptions",
     "parse_agent_trace",
@@ -582,7 +559,6 @@ __all__ = [
     "remove_flow_server_from_config",
     "render_candidate_report",
     "render_observe_plugin",
-    "render_posttooluse_hook",
     "result_to_mermaid",
     "safe_macro_tool_name",
     "schema_fingerprint",
