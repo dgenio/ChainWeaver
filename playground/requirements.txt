@@ -8,6 +8,6 @@
 # file as the requirements path. Replace the released package below with
 # `-e .` (an editable install of this repo) to run the playground against
 # local, unreleased changes.
-streamlit>=1.59.0
+streamlit>=1.59.2
 streamlit-mermaid>=0.3.0
 chainweaver
