@@ -204,6 +204,12 @@ and obvious literal dynamic imports; see
 4. All exceptions inherit from `ChainWeaverError` with relevant context
    attributes (`tool_name`, `step_index`, `detail` where applicable).
 5. All public symbols exported in `chainweaver/__init__.py` `__all__`.
+   *Exception:* the experimental vendor observe adapters (`chainweaver.claude`,
+   `chainweaver.vscode`) are reachable only through their own module namespaces
+   and are intentionally kept out of the stable top-level `__all__` / public-API
+   snapshot, so they do not carry the same compatibility promise as `Tool` /
+   `Flow` / `FlowExecutor`. The boundary is pinned by
+   `tests/test_experimental_adapters.py` (#518; pending formalization in #522).
 6. Tool function signature: `fn(validated_input: BaseModel) -> dict[str, Any]`.
 7. `from __future__ import annotations` at the top of every module.
 8. Type annotations on all function signatures (package ships `py.typed`).
