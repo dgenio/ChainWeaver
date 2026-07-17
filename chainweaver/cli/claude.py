@@ -1,20 +1,20 @@
-"""``chainweaver opencode`` commands: observe, setup, and expose for OpenCode.
+"""``chainweaver claude`` commands: observe, setup, and expose for Claude Code.
 
-This command group is the operator-facing half of the OpenCode integration
-(issues #276, #277, #279, #280).  It stays thin: all normalization, naming, and
-config-merge logic lives in :mod:`chainweaver.opencode` so it can be unit-tested
-without a CLI runner.
+This command group is the operator-facing half of the Claude Code integration
+(issues #271, #272, #273).  It stays thin: all normalization, hook rendering,
+and config-merge logic lives in :mod:`chainweaver.claude` so it can be
+unit-tested without a CLI runner.
 
-- ``capture`` (#276) reads OpenCode plugin event JSON from stdin, normalizes it
-  via :func:`chainweaver.opencode.normalize_opencode_event` (redaction on by
-  default), and appends valid JSONL to a workspace-local sink.  Malformed input
-  fails to stderr without corrupting the sink.
-- ``setup`` (#277, #279, #280) prepares a workspace for passive observation
-  (``--observe``) and/or FlowServer exposure of active flows (``--flows``).  It
-  defaults to a dry run; ``--write`` is required to touch files and always
-  creates ``.bak`` backups first.
-- ``revert`` (#277) removes only the ChainWeaver-managed plugin / MCP entry,
-  leaving unrelated OpenCode config, traces, and flow files untouched.
+- ``capture`` (#272) reads a Claude Code ``PostToolUse`` hook payload from stdin,
+  normalizes it via :func:`chainweaver.claude.normalize_claude_hook_event`
+  (redaction on by default), and appends valid JSONL to a workspace-local sink.
+  Malformed input fails to stderr without corrupting the sink.
+- ``setup`` (#271, #273) prepares a workspace for passive observation
+  (``--observe``, a ``PostToolUse`` hook) and/or FlowServer exposure of active
+  flows (``--flows``, an ``.mcp.json`` entry).  It defaults to a dry run;
+  ``--write`` is required to touch files and always creates ``.bak`` backups.
+- ``revert`` (#271, #273) removes only the ChainWeaver-managed hook / MCP entry,
+  leaving unrelated Claude Code config, traces, and flow files untouched.
 
 Exit-code contract mirrors the rest of the CLI: ``0`` success, ``1`` logic
 error (malformed input, name collisions, nothing to do), ``2`` missing path.
@@ -30,39 +30,63 @@ from typing import Any
 import typer
 
 from chainweaver._agent_config import backup_file
+from chainweaver.claude import (
+    CLAUDE_TRACE_SINK,
+    add_flow_server_to_config,
+    add_observe_hook_to_settings,
+    normalize_claude_hook_event,
+    remove_flow_server_from_config,
+    remove_observe_hook_from_settings,
+    render_posttooluse_hook,
+)
 from chainweaver.cli._shared import (
     _emit_json,
     _iter_flow_files,
     _load_flow_file,
     app,
 )
-from chainweaver.cli.doctor import _load_json_config, _opencode_config_path
+from chainweaver.cli.doctor import _load_json_config
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
+from chainweaver.flow import FlowLifecycle
 from chainweaver.opencode import (
-    OPENCODE_OBSERVE_PLUGIN_FILENAME,
     OPENCODE_TOOL_PREFIX,
-    OPENCODE_TRACE_SINK,
-    add_flow_server_to_config,
     build_flow_mcp_entry,
     detect_tool_name_collisions,
-    exposable_flow_lifecycle,
     flow_lifecycle,
-    normalize_opencode_event,
-    remove_flow_server_from_config,
-    render_observe_plugin,
     safe_macro_tool_name,
 )
 
-opencode_app = typer.Typer(
-    name="opencode",
+# Default exposure is strictly ACTIVE flows: a REVIEWED candidate has passed
+# review but is not an approved/deployed artifact, so it must not be surfaced as
+# a live MCP tool unless the operator explicitly opts in (see #525/#526).
+_ACTIVE_ONLY: frozenset[FlowLifecycle] = frozenset({FlowLifecycle.ACTIVE})
+_ACTIVE_OR_REVIEWED: frozenset[FlowLifecycle] = frozenset(
+    {FlowLifecycle.ACTIVE, FlowLifecycle.REVIEWED}
+)
+
+claude_app = typer.Typer(
+    name="claude",
     help=(
-        "OpenCode integration: 'opencode capture' normalizes plugin events into "
-        "traces; 'opencode setup'/'revert' wire up observe mode and FlowServer "
-        "exposure (reversible, with backups)."
+        "Claude Code integration: 'claude capture' normalizes PostToolUse hook "
+        "events into traces; 'claude setup'/'revert' wire up an observe hook and "
+        "FlowServer exposure (reversible, with backups)."
     ),
     no_args_is_help=True,
 )
-app.add_typer(opencode_app, name="opencode")
+app.add_typer(claude_app, name="claude")
+
+
+# Claude Code config scopes: personal (local, git-ignored) vs shared (project).
+_SCOPE_LOCAL = "local"
+_SCOPE_PROJECT = "project"
+
+# Settings file per scope; the MCP FlowServer entry always lives in the
+# project-scoped ``.mcp.json`` that ``doctor claude`` already recognizes.
+_SETTINGS_BY_SCOPE = {
+    _SCOPE_LOCAL: (".claude", "settings.local.json"),
+    _SCOPE_PROJECT: (".claude", "settings.json"),
+}
+_MCP_CONFIG_NAME = ".mcp.json"
 
 
 # Module-level option singletons (typer pattern; keeps ``B008`` happy and
@@ -70,20 +94,31 @@ app.add_typer(opencode_app, name="opencode")
 _WORKSPACE_OPTION = typer.Option(Path("."), "--workspace", "-w", help="Workspace directory.")
 _JSON_OPTION = typer.Option(False, "--json", help="Emit the change plan as JSON.")
 _CAPTURE_SINK_OPTION = typer.Option(
-    Path(OPENCODE_TRACE_SINK), "--sink", help="Trace sink JSONL file (created if absent)."
+    Path(CLAUDE_TRACE_SINK), "--sink", help="Trace sink JSONL file (created if absent)."
 )
 _CAPTURE_REDACT_OPTION = typer.Option(
     True, "--redact/--no-redact", help="Redact argument values before writing (on by default)."
 )
-_SETUP_OBSERVE_OPTION = typer.Option(False, "--observe", help="Install the observe-mode plugin.")
+_SETUP_OBSERVE_OPTION = typer.Option(
+    False, "--observe", help="Install the PostToolUse observe hook."
+)
 _SETUP_FLOWS_OPTION = typer.Option(False, "--flows", help="Expose active flows via FlowServer.")
 _SETUP_WRITE_OPTION = typer.Option(
     False,
     "--write/--dry-run",
     help="Apply changes (with backups). Default is a dry run that writes nothing.",
 )
+_SCOPE_OPTION = typer.Option(
+    _SCOPE_LOCAL,
+    "--scope",
+    help="Observe-hook scope: 'local' (.claude/settings.local.json, personal) or "
+    "'project' (.claude/settings.json, shared/committed).",
+)
 _SETUP_SINK_OPTION = typer.Option(
-    Path(OPENCODE_TRACE_SINK), "--sink", help="Observe-mode trace sink path."
+    Path(CLAUDE_TRACE_SINK), "--sink", help="Observe-mode trace sink path."
+)
+_MATCHER_OPTION = typer.Option(
+    "", "--matcher", help="Tool-name regex the hook fires on (default: all tools)."
 )
 _FLOWS_DIR_OPTION = typer.Option(
     Path(".chainweaver/flows"), "--flows-dir", help="Directory of flow files to expose."
@@ -98,7 +133,13 @@ _SETUP_REDACT_OPTION = typer.Option(True, "--redact/--no-redact", help="Redact c
 _ALLOW_COLLISIONS_OPTION = typer.Option(
     False, "--allow-collisions", help="Expose flows even if generated names collide."
 )
-_REVERT_OBSERVE_OPTION = typer.Option(False, "--observe", help="Remove the observe-mode plugin.")
+_INCLUDE_REVIEWED_OPTION = typer.Option(
+    False,
+    "--include-reviewed",
+    help="Also expose REVIEWED (reviewed-but-not-approved) flows, not just ACTIVE. "
+    "Off by default; intended for local development and prints a warning.",
+)
+_REVERT_OBSERVE_OPTION = typer.Option(False, "--observe", help="Remove the observe hook.")
 _REVERT_FLOWS_OPTION = typer.Option(False, "--flows", help="Remove the FlowServer MCP entry.")
 _REVERT_WRITE_OPTION = typer.Option(
     False, "--write/--dry-run", help="Apply removals. Default is a dry run."
@@ -106,7 +147,7 @@ _REVERT_WRITE_OPTION = typer.Option(
 
 
 # --------------------------------------------------------------------------- #
-# capture (#276)
+# capture (#272)
 # --------------------------------------------------------------------------- #
 
 
@@ -138,12 +179,19 @@ def _decode_payloads(text: str) -> list[Any]:
     return payloads
 
 
-@opencode_app.command("capture")
+def _no_redaction() -> Any:
+    """Return a no-op redaction policy (keep raw values)."""
+    from chainweaver.log_utils import RedactionPolicy
+
+    return RedactionPolicy(redact_keys=frozenset())
+
+
+@claude_app.command("capture")
 def capture_command(
     sink: Path = _CAPTURE_SINK_OPTION,
     redact: bool = _CAPTURE_REDACT_OPTION,
 ) -> None:
-    """Normalize an OpenCode plugin event from stdin into trace JSONL (#276).
+    """Normalize a Claude Code hook event from stdin into trace JSONL (#272).
 
     Reads one JSON object, a JSON array, or JSONL from stdin; appends each
     normalized tool-execution event to ``--sink``.  Non-tool events are
@@ -156,15 +204,15 @@ def capture_command(
         events = [
             event
             for payload in payloads
-            if (event := normalize_opencode_event(payload, redaction=redaction)) is not None
+            if (event := normalize_claude_hook_event(payload, redaction=redaction)) is not None
         ]
     except ChainWeaverError as exc:
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     if not events:
-        # Nothing to record (e.g. a non-tool event) — succeed quietly so the
-        # plugin never treats observation as a failure.
+        # Nothing to record (e.g. a non-tool hook event) — succeed quietly so
+        # the hook never treats observation as a failure.
         return
 
     lines = [
@@ -176,35 +224,27 @@ def capture_command(
         handle.write("\n".join(lines) + "\n")
 
 
-def _no_redaction() -> Any:
-    """Return a no-op redaction policy (keep raw values)."""
-    from chainweaver.log_utils import RedactionPolicy
-
-    return RedactionPolicy(redact_keys=frozenset())
-
-
 # --------------------------------------------------------------------------- #
-# setup / revert (#277, #279, #280)
+# setup / revert (#271, #273)
 # --------------------------------------------------------------------------- #
 
 
-def _backup(path: Path) -> Path | None:
-    """Copy *path* to ``<path>.bak`` before modifying it; return the backup.
-
-    Thin alias over :func:`chainweaver._agent_config.backup_file`, shared with
-    the Claude Code and VS Code setup commands.
-    """
-    return backup_file(path)
+def _settings_path(workspace: Path, scope: str) -> Path:
+    """Return the Claude settings file for *scope* under *workspace*."""
+    parts = _SETTINGS_BY_SCOPE[scope]
+    return workspace.joinpath(*parts)
 
 
-def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
+def _active_flow_names(
+    flows_dir: Path, *, include_reviewed: bool = False
+) -> tuple[list[str], list[str]]:
     """Return (*exposable flow names*, *withheld names*) under *flows_dir*.
 
-    Exposable = governance lifecycle in :data:`exposable_flow_lifecycle`
-    (active / reviewed).  Drafts and archived flows are withheld by default.
-    Malformed flow files are skipped with a stderr warning rather than
-    aborting, matching ``chainweaver serve <dir>`` discovery semantics.
+    Exposable defaults to strictly ACTIVE flows; ``include_reviewed=True`` also
+    exposes REVIEWED candidates (an explicit, warned local-development override).
+    Malformed flow files are skipped with a stderr warning rather than aborting.
     """
+    exposable_set = _ACTIVE_OR_REVIEWED if include_reviewed else _ACTIVE_ONLY
     exposable: list[str] = []
     withheld: list[str] = []
     for flow_file in _iter_flow_files(flows_dir):
@@ -213,26 +253,34 @@ def _active_flow_names(flows_dir: Path) -> tuple[list[str], list[str]]:
         except FlowSerializationError as exc:
             typer.echo(f"chainweaver: skipping {flow_file}: {exc.detail}", err=True)
             continue
-        if flow_lifecycle(flow) in exposable_flow_lifecycle:
+        if flow_lifecycle(flow) in exposable_set:
             exposable.append(flow.name)
         else:
             withheld.append(flow.name)
     return sorted(set(exposable)), sorted(set(withheld))
 
 
-def _setup_observe(workspace: Path, sink: Path, *, redact: bool, write: bool) -> dict[str, Any]:
-    """Plan (and optionally apply) the observe-plugin install (#276)."""
-    plugin_path = workspace / ".opencode" / "plugin" / OPENCODE_OBSERVE_PLUGIN_FILENAME
-    content = render_observe_plugin(sink=str(sink), redact=redact)
+def _setup_observe(
+    workspace: Path, sink: Path, *, scope: str, matcher: str, redact: bool, write: bool
+) -> dict[str, Any]:
+    """Plan (and optionally apply) the PostToolUse observe-hook install (#271)."""
+    settings_path = _settings_path(workspace, scope)
+    _, settings, _ = _load_json_config(settings_path)
+    hook_entry = render_posttooluse_hook(sink=str(sink), redact=redact, matcher=matcher)
+    new_settings = add_observe_hook_to_settings(settings, hook_entry)
     change: dict[str, Any] = {
-        "action": "update plugin" if plugin_path.is_file() else "create plugin",
-        "path": str(plugin_path),
+        "action": "update settings" if settings_path.is_file() else "create settings",
+        "path": str(settings_path),
+        "scope": scope,
         "sink": str(sink),
+        "hook": hook_entry,
     }
     if write:
-        plugin_path.parent.mkdir(parents=True, exist_ok=True)
-        change["backup"] = str(_backup(plugin_path) or "")
-        plugin_path.write_text(content, encoding="utf-8")
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        change["backup"] = str(backup_file(settings_path) or "")
+        settings_path.write_text(
+            json.dumps(new_settings, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     return change
 
 
@@ -243,10 +291,22 @@ def _setup_flows(
     tools_module: str | None,
     prefix: str,
     allow_collisions: bool,
+    include_reviewed: bool,
     write: bool,
 ) -> dict[str, Any]:
-    """Plan (and optionally apply) FlowServer exposure in the OpenCode config (#279)."""
-    exposable, withheld = _active_flow_names(flows_dir)
+    """Plan (and optionally apply) FlowServer exposure in ``.mcp.json`` (#273)."""
+    # Resolve a relative --flows-dir against the workspace, not the process CWD,
+    # so both the scan and the path embedded in .mcp.json are correct when the
+    # command is run from elsewhere.
+    if not flows_dir.is_absolute():
+        flows_dir = workspace / flows_dir
+    if include_reviewed:
+        typer.echo(
+            "chainweaver: --include-reviewed also exposes REVIEWED (not-yet-approved) flows; "
+            "prefer ACTIVE-only for shared/deployed configuration.",
+            err=True,
+        )
+    exposable, withheld = _active_flow_names(flows_dir, include_reviewed=include_reviewed)
     collisions = detect_tool_name_collisions(exposable, prefix=prefix)
     if collisions and not allow_collisions:
         detail = "; ".join(f"{name}: {reason}" for name, reason in sorted(collisions.items()))
@@ -255,7 +315,7 @@ def _setup_flows(
             "Rename the flow(s), change --prefix, or pass --allow-collisions."
         )
 
-    config_path = _opencode_config_path(workspace)
+    config_path = workspace / _MCP_CONFIG_NAME
     _, config, _ = _load_json_config(config_path)
     entry = build_flow_mcp_entry(
         flows_dir=str(flows_dir), tools_module=tools_module, prefix=prefix
@@ -263,7 +323,7 @@ def _setup_flows(
     new_config = add_flow_server_to_config(config, entry)
 
     change: dict[str, Any] = {
-        "action": "update OpenCode config" if config_path.is_file() else "create OpenCode config",
+        "action": "update .mcp.json" if config_path.is_file() else "create .mcp.json",
         "path": str(config_path),
         "entry": entry,
         "exposed_tools": {name: safe_macro_tool_name(name, prefix=prefix) for name in exposable},
@@ -271,33 +331,39 @@ def _setup_flows(
         "collisions": collisions,
     }
     if write:
-        change["backup"] = str(_backup(config_path) or "")
+        change["backup"] = str(backup_file(config_path) or "")
         config_path.write_text(
             json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
     return change
 
 
-@opencode_app.command("setup")
+@claude_app.command("setup")
 def setup_command(
     observe: bool = _SETUP_OBSERVE_OPTION,
     flows: bool = _SETUP_FLOWS_OPTION,
     write: bool = _SETUP_WRITE_OPTION,
     workspace: Path = _WORKSPACE_OPTION,
+    scope: str = _SCOPE_OPTION,
     sink: Path = _SETUP_SINK_OPTION,
+    matcher: str = _MATCHER_OPTION,
     flows_dir: Path = _FLOWS_DIR_OPTION,
     tools: str | None = _TOOLS_OPTION,
     prefix: str = _PREFIX_OPTION,
     redact: bool = _SETUP_REDACT_OPTION,
     allow_collisions: bool = _ALLOW_COLLISIONS_OPTION,
+    include_reviewed: bool = _INCLUDE_REVIEWED_OPTION,
     output_json: bool = _JSON_OPTION,
 ) -> None:
-    """Wire up OpenCode observe mode and/or flow exposure (reversible) (#277, #279).
+    """Wire up Claude Code observe mode and/or flow exposure (reversible) (#271, #273).
 
     Defaults to a dry run: pass ``--write`` to modify files, which always backs
-    up the originals to ``<file>.bak`` first.  ``--observe`` installs the
-    ChainWeaver plugin; ``--flows`` adds an MCP entry exposing only active /
-    reviewed flows under a safe, prefixed namespace.
+    up the originals to ``<file>.bak`` first.  ``--observe`` installs a
+    ``PostToolUse`` hook (personal ``--scope local`` by default, so it is never
+    silently committed to shared project settings); ``--flows`` adds an
+    ``.mcp.json`` entry exposing only ACTIVE flows by default (pass
+    ``--include-reviewed`` to also expose reviewed candidates) under a safe,
+    prefixed namespace.
     """
     if not workspace.is_dir():
         typer.echo(f"chainweaver: not a directory: {workspace}", err=True)
@@ -305,11 +371,18 @@ def setup_command(
     if not (observe or flows):
         typer.echo("chainweaver: pass --observe and/or --flows", err=True)
         raise typer.Exit(code=1)
+    if scope not in _SETTINGS_BY_SCOPE:
+        typer.echo(f"chainweaver: --scope must be 'local' or 'project', got '{scope}'", err=True)
+        raise typer.Exit(code=1)
 
     changes: list[dict[str, Any]] = []
     try:
         if observe:
-            changes.append(_setup_observe(workspace, sink, redact=redact, write=write))
+            changes.append(
+                _setup_observe(
+                    workspace, sink, scope=scope, matcher=matcher, redact=redact, write=write
+                )
+            )
         if flows:
             changes.append(
                 _setup_flows(
@@ -318,6 +391,7 @@ def setup_command(
                     tools_module=tools,
                     prefix=prefix,
                     allow_collisions=allow_collisions,
+                    include_reviewed=include_reviewed,
                     write=write,
                 )
             )
@@ -328,17 +402,18 @@ def setup_command(
     _report(changes, write=write, output_json=output_json)
 
 
-@opencode_app.command("revert")
+@claude_app.command("revert")
 def revert_command(
     observe: bool = _REVERT_OBSERVE_OPTION,
     flows: bool = _REVERT_FLOWS_OPTION,
     write: bool = _REVERT_WRITE_OPTION,
     workspace: Path = _WORKSPACE_OPTION,
+    scope: str = _SCOPE_OPTION,
     output_json: bool = _JSON_OPTION,
 ) -> None:
-    """Remove only ChainWeaver-managed OpenCode config; leave the rest intact (#277).
+    """Remove only ChainWeaver-managed Claude Code config; leave the rest intact (#271, #273).
 
-    Traces and flow files are never deleted.  Unrelated MCP servers and plugins
+    Traces and flow files are never deleted.  Unrelated hooks and MCP servers
     are preserved.
     """
     if not workspace.is_dir():
@@ -347,23 +422,31 @@ def revert_command(
     if not (observe or flows):
         typer.echo("chainweaver: pass --observe and/or --flows", err=True)
         raise typer.Exit(code=1)
+    if scope not in _SETTINGS_BY_SCOPE:
+        typer.echo(f"chainweaver: --scope must be 'local' or 'project', got '{scope}'", err=True)
+        raise typer.Exit(code=1)
 
     changes: list[dict[str, Any]] = []
     if observe:
-        plugin_path = workspace / ".opencode" / "plugin" / OPENCODE_OBSERVE_PLUGIN_FILENAME
-        if plugin_path.is_file():
-            change = {"action": "remove plugin", "path": str(plugin_path)}
+        settings_path = _settings_path(workspace, scope)
+        _, settings, _ = _load_json_config(settings_path)
+        new_settings, removed = remove_observe_hook_from_settings(settings)
+        if removed:
+            change = {"action": "remove observe hook", "path": str(settings_path)}
             if write:
-                plugin_path.unlink()
+                change["backup"] = str(backup_file(settings_path) or "")
+                settings_path.write_text(
+                    json.dumps(new_settings, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                )
             changes.append(change)
     if flows:
-        config_path = _opencode_config_path(workspace)
+        config_path = workspace / _MCP_CONFIG_NAME
         _, config, _ = _load_json_config(config_path)
         new_config, removed = remove_flow_server_from_config(config)
         if removed:
             change = {"action": "remove MCP entry", "path": str(config_path)}
             if write:
-                change["backup"] = str(_backup(config_path) or "")
+                change["backup"] = str(backup_file(config_path) or "")
                 config_path.write_text(
                     json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
                 )
