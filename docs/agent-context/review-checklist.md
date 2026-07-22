@@ -63,7 +63,8 @@
 
 ## Documentation consistency
 
-- [ ] AGENTS.md repo map updated if modules were added/removed/renamed.
+- [ ] [module-map.md](module-map.md) updated if modules were added/removed/renamed (`tests/test_agent_instructions.py` enforces coverage).
+- [ ] Scoped `AGENTS.md` files and the AGENTS.md §11 index updated if a durable subsystem rule changed.
 - [ ] `architecture.md` module boundaries updated if architecture changed.
 - [ ] `workflows.md` updated if commands, CI, or conventions changed.
 - [ ] README error table updated if exceptions were added.

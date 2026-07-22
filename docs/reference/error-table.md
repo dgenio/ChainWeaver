@@ -31,7 +31,7 @@ lacks a code, a code is duplicated, or a code is missing from this table.
 | `CW-E011` | `FlowStatusError` | Execution attempted on a flow whose status is not `ACTIVE` (without `force=True`). |
 | `CW-E012` | `FlowCancelledError` | A `deadline` passed or a `CancellationToken` was cancelled at a step boundary. Carries `step_index`, the partial `result`, and `deadline_exceeded` / `token_cancelled` flags. |
 | `CW-E013` | `ContextKeyCollisionError` | A step output collides with an existing context key under `on_context_collision="error"`. |
-| `CW-E014` | `AsyncLaneUnsupportedError` | `execute_flow_async` was given a flow using features the async lane does not support (branching, `decision_candidates`, composed sub-flows). |
+| `CW-E014` | `AsyncLaneUnsupportedError` | `execute_flow_async` was given a flow using features the async lane does not support (conditional branching, `decision_candidates`). Composed sub-flows are supported on the async lane since #388. |
 | `CW-E015` | `FlowCompositionError` | A composed flow's sub-flow references form a cycle, exceed `max_composition_depth`, or point to an unregistered flow. The `reason` attribute is `"cycle"`, `"max_depth_exceeded"`, or `"unknown_flow"`. |
 | `CW-E016` | `InvalidFlowVersionError` | A flow's `version` field is not a valid PEP 440 string. |
 | `CW-E017` | `FlowSerializationError` | A `.flow.yaml` / `.flow.json` file is malformed, carries an incompatible `format_version`, or references an unresolvable class. |

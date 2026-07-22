@@ -53,7 +53,7 @@ code that doesn't exist in the repository (e.g., `tests/test_tools.py`,
 an isort config before it was added).
 
 **Prevention:** Before referencing any file or config in prose, verify it
-exists. Use the repository map in AGENTS.md or check the file system directly.
+exists. Use the [module map](module-map.md) or check the file system directly.
 
 ---
 

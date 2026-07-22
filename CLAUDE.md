@@ -5,6 +5,11 @@ coding conventions, and guardrails are maintained in a single canonical source:
 
 → **Read [AGENTS.md](AGENTS.md) before making any changes.**
 
+Path-scoped `AGENTS.md` files carry durable subsystem rules; the index in
+[AGENTS.md § 11](AGENTS.md#11-instruction-precedence-and-discovery) lists
+them — read every one that applies to the paths you touch. The detailed
+module inventory is [docs/agent-context/module-map.md](docs/agent-context/module-map.md).
+
 ## Quick invariants (also in AGENTS.md § Core invariants)
 
 1. No LLM calls in `executor.py` — deterministic by design.
