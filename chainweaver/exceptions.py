@@ -294,14 +294,15 @@ class AsyncLaneUnsupportedError(ChainWeaverError):
     uses execution features the async lane does not yet support (issue #332).
 
     The async lane (issue #80) does not implement conditional branching
-    (``branches`` / ``default_next``, #9), guided decision callbacks
-    (``decision_candidates``, #102), or composed sub-flow steps (``flow_name``,
-    #75).  Rather than executing such a flow with those directives **silently
-    dropped** — which would yield a different result than the synchronous
-    :meth:`execute_flow` and undermine the determinism promise — the executor
-    fails fast, before the first step runs, listing every unsupported construct
-    it found.  Route the flow through :meth:`execute_flow` until async parity
-    lands.
+    (``branches`` / ``default_next``, #9) or guided decision callbacks
+    (``decision_candidates``, #102).  Rather than executing such a flow with
+    those directives **silently dropped** — which would yield a different
+    result than the synchronous :meth:`execute_flow` and undermine the
+    determinism promise — the executor fails fast, before the first step
+    runs, listing every unsupported construct it found.  Route the flow
+    through :meth:`execute_flow` until async parity lands.  Composed
+    sub-flow steps (``flow_name``, #75) are supported on the async lane
+    since #388 and no longer raise this error.
 
     Attributes:
         flow_name: Name of the flow that could not run on the async lane.

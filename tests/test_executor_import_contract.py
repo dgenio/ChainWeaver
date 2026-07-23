@@ -24,7 +24,7 @@ The check has three layers:
    execution modules, none of the deterministic-execution closure may reach a
    banned in-repo source of nondeterminism / LLM behavior (``compiler_llm``,
    ``optimizer``, ``observer``, ``traces``, ``lessons``, ``service``,
-   ``_offline_llm``).
+   ``_offline_llm``, ``proposals``, ``routing``, ``opencode``).
 
 A blanket "``random`` must be absent from ``sys.modules``" check is deliberately
 *not* used: ``flow.py`` legitimately imports :mod:`random` for opt-in
@@ -75,6 +75,9 @@ BANNED_INREPO = frozenset(
         "chainweaver.lessons",
         "chainweaver.service",
         "chainweaver._offline_llm",
+        "chainweaver.proposals",
+        "chainweaver.routing",
+        "chainweaver.opencode",
     }
 )
 

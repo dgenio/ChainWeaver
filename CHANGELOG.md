@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Layered agent instructions** (#532): root `AGENTS.md` now carries only the
+  stable global contract plus an explicit instruction-precedence model and a
+  scoped-guidance index; durable subsystem rules moved to path-scoped
+  `AGENTS.md` files (`_execution/`, `flow/`, `mcp/`, `integrations/`, `cli/`,
+  `testing/`); the volatile module inventory moved to
+  `docs/agent-context/module-map.md` and the field-level execution reference
+  to `docs/agent-context/execution-semantics.md`, both freshness-checked by
+  the new `tests/test_agent_instructions.py`. No runtime behavior change.
+
+### Fixed
+
+- **Documentation drift** (#492): corrected the three stale "composition is
+  sync-only" statements (async sub-flow composition shipped in #388) in the
+  execution reference, the `AsyncLaneUnsupportedError` docstring, and the
+  `CW-E014` error-table row; added the missing `fuzz.py`, `cancellation.py`,
+  and `_versions.py` modules to the module inventory; marked the delivered
+  LangChain/LlamaIndex (#82) and `export/` (#25) entries in
+  `architecture.md`'s planned-modules table; completed the `ExecutionResult`
+  and `StepRecord` field tables; and extended the import-contract test's
+  `BANNED_INREPO` with `proposals`, `routing`, and `opencode` so the
+  documented executor ban list is fully enforced.
+
 ## [0.14.0] - 2026-07-12
 
 ### Added

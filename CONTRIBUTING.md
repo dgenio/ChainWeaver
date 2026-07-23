@@ -3,7 +3,7 @@
 Thank you for your interest in contributing to ChainWeaver!
 This guide covers everything you need to get started, whether you are a human contributor or an AI agent.
 
-For AI contributors: also read [`AGENTS.md`](AGENTS.md) and [`docs/agent-context/`](docs/agent-context/), which contain agent-specific conventions. `.github/copilot-instructions.md` is a thin wrapper that points to the same sources.
+For AI contributors: also read [`AGENTS.md`](AGENTS.md) (the stable global contract) and [`docs/agent-context/`](docs/agent-context/), which contain agent-specific conventions. Durable subsystem rules live in path-scoped `AGENTS.md` files indexed in [`AGENTS.md` § 11](AGENTS.md#11-instruction-precedence-and-discovery) — read every one covering the paths you touch. `.github/copilot-instructions.md` is a thin wrapper that points to the same sources.
 
 ---
 
@@ -59,9 +59,11 @@ behavior, and small CLI/output polish are typical starting points.
 
 **Your first change, step by step:**
 
-1. Read [`AGENTS.md`](AGENTS.md) and the per-file-type guidance in
-   [`.github/instructions/`](.github/instructions/) for the area you're
-   touching.
+1. Read [`AGENTS.md`](AGENTS.md), the path-scoped `AGENTS.md` for the area
+   you're touching (index in
+   [`AGENTS.md` § 11](AGENTS.md#11-instruction-precedence-and-discovery)),
+   and the per-file-type guidance in
+   [`.github/instructions/`](.github/instructions/).
 2. Make the smallest correct change for the issue — resist bundling adjacent
    fixes (open a follow-up issue instead; see
    [`workflows.md` § Out-of-scope discoveries](docs/agent-context/workflows.md)).
