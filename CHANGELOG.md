@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Release tagging silently skipped for non-standard release-branch names**:
+  `release.yml`'s tag job matched a merged release PR by requiring its head
+  branch to start with `release/v`, so a release PR merged from any other
+  branch name was never tagged or published — no failure, just a no-op (this
+  is exactly what happened to the v0.14.0 release: merged to `main` on
+  2026-07-12 via PR #517, never tagged or published to PyPI). Detection is
+  now based on version/tag drift (does the source version on this commit
+  already have a matching `vX.Y.Z` tag?) instead of the merging PR's branch
+  name, so it no longer depends on how the release PR was created.
+
 - **Documentation drift** (#492): corrected the three stale "composition is
   sync-only" statements (async sub-flow composition shipped in #388) in the
   execution reference, the `AsyncLaneUnsupportedError` docstring, and the
