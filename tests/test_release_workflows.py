@@ -42,7 +42,11 @@ def test_release_workflow_tags_the_untagged_source_version() -> None:
     # Detection is version/tag drift, not PR branch name or label, so a
     # release PR merged from a manually named branch still gets tagged.
     assert 'version="$(python scripts/release.py version)"' in workflow
-    assert 'git rev-parse -q --verify "refs/tags/${tag}"' in workflow
+    assert 'git rev-parse -q --verify "refs/tags/${tag}^{commit}"' in workflow
+    # An existing tag pointing at a different commit is a version-bookkeeping
+    # inconsistency, not "already released" — it must fail loudly, not skip.
+    assert 'if [ "${existing_sha}" != "${MERGE_SHA}" ]; then' in workflow
+    assert "::error::Tag ${tag} already exists at ${existing_sha}" in workflow
     assert 'startswith("release/v")' not in workflow
     assert "commits/${MERGE_SHA}/pulls" not in workflow
     assert "token: ${{ secrets.RELEASE_PR_TOKEN }}" in workflow
