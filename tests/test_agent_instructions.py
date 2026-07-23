@@ -82,11 +82,32 @@ def _scoped_files_on_disk() -> set[str]:
     }
 
 
+def _find_marker(text: str, marker: str, source: str) -> int:
+    """Locate a structural marker, failing with an actionable message if it drifted."""
+    index = text.find(marker)
+    assert index != -1, (
+        f"{source} no longer contains the structural marker {marker!r} these "
+        f"guards parse — restore it or update tests/test_agent_instructions.py "
+        f"in the same PR."
+    )
+    return index
+
+
+def _map_inventory_block() -> str:
+    """The module map's ```text inventory block, with actionable drift errors."""
+    text = _module_map_text()
+    start = _find_marker(text, "```text", "docs/agent-context/module-map.md")
+    end = _find_marker(text[start + 7 :], "```", "docs/agent-context/module-map.md")
+    return text[start : start + 7 + end]
+
+
 def _scoped_files_in_index() -> set[str]:
     """Scoped AGENTS.md paths linked from the root §11 scoped-guidance index."""
     text = _root_agents_text()
-    section = text[text.index("### Scoped guidance index") :]
-    section = section[: section.index("### Surface notes")]
+    start = _find_marker(text, "### Scoped guidance index", "AGENTS.md §11")
+    section = text[start:]
+    end = _find_marker(section, "### Surface notes", "AGENTS.md §11")
+    section = section[:end]
     return set(re.findall(r"\(((?:chainweaver|tests|docs|examples)/\S*?AGENTS\.md)\)", section))
 
 
@@ -154,8 +175,7 @@ class TestModuleMapCoverage:
         Placeholder rows (containing ``<``) and glob rows (containing ``*``)
         are skipped.
         """
-        text = _module_map_text()
-        block = text[text.index("```text") : text.index("```", text.index("```text") + 7)]
+        block = _map_inventory_block()
         entries: list[tuple[str, str]] = []
         current_pkg = ""
         for line in block.splitlines():
@@ -199,8 +219,7 @@ class TestModuleMapCoverage:
 class TestBannedListConsistency:
     def test_map_annotations_match_enforced_list(self) -> None:
         """The map's 'banned from executor.py' rows == the enforced BANNED_INREPO set."""
-        text = _module_map_text()
-        block = text[text.index("```text") : text.index("```", text.index("```text") + 7)]
+        block = _map_inventory_block()
         annotated = {
             f"chainweaver.{match.group(1)}"
             for match in re.finditer(r"[├└]── (\w+)\.py\s+.*banned from executor\.py", block)
