@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`RUF036` lint drift**: reordered two `... | None | ...` type-union members
+  (`FlowExecutor._select_branch`'s return type, `FlowRegistry.update_flow_state`'s
+  `tool_schema_hashes` parameter) so `None` is last, per Ruff's now-enabled
+  `RUF036` rule (newly caught by an unpinned `ruff>=0.8` picking up a Ruff
+  release that promoted the rule out of preview). No behavior change.
+
 ## [0.14.1] - 2026-07-23
 
 ### Changed
