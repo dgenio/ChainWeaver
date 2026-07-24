@@ -108,21 +108,22 @@ jobs:
         # Whether this main push is a pending release is a property of the
         # commit itself (source version has no matching tag yet), not of how
         # the release PR that produced it was branched or labeled — a release
-        # PR merged from a manually named branch must still be caught. If the
-        # tag already exists but points at a different commit, that is a
-        # genuine version-bookkeeping inconsistency (a reverted or reused
-        # version bump) and must fail loudly rather than silently skip.
+        # PR merged from a manually named branch must still be caught. This
+        # job runs on *every* successful CI run on main, not just release-PR
+        # merges, and the source version legitimately stays at the last
+        # released value for every ordinary commit in between — so "a tag
+        # already exists for this version" is itself the correct signal to
+        # skip, regardless of which commit it points at. Re-tagging safety
+        # (does the tag, if any, point at *this* commit) belongs in the
+        # create-tag step below, where "release=true" already means no tag
+        # existed at detection time and only a genuine race remains.
         id: release
         shell: bash
         run: |
           set -euo pipefail
           version="$(python scripts/release.py version)"
           tag="v${version}"
-          if existing_sha="$(git rev-parse -q --verify "refs/tags/${tag}^{commit}")"; then
-            if [ "${existing_sha}" != "${MERGE_SHA}" ]; then
-              echo "::error::Tag ${tag} already exists at ${existing_sha}, but commit ${MERGE_SHA} also has source version ${version}. A released version must not be reused for a different commit." >&2
-              exit 1
-            fi
+          if git rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null; then
             echo "release=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -139,6 +140,16 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${VERSION}"
+          # Race/reuse guard: the detect step saw no tag moments ago, but
+          # fail loudly rather than silently move on if one has appeared
+          # since (a concurrent run, or a genuinely reused version) and
+          # points somewhere other than this commit.
+          remote_sha="$(git ls-remote origin "refs/tags/${tag}" | cut -f1)"
+          if [ -n "${remote_sha}" ]; then
+            test "${remote_sha}" = "${MERGE_SHA}"
+            echo "created=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
           git tag "${tag}" "${MERGE_SHA}"
           git push origin "${tag}"
           echo "created=true" >> "${GITHUB_OUTPUT}"
