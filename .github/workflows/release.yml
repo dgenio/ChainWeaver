@@ -93,6 +93,11 @@ jobs:
         with:
           ref: ${{ env.MERGE_SHA }}
           fetch-depth: 0
+          # Explicit, not just implied by fetch-depth: 0 — the tag-existence
+          # check below depends on every existing tag being present locally,
+          # and a missing tag would misdetect an already-released version as
+          # pending, failing later on `git push` with a confusing error.
+          fetch-tags: true
 
       - name: Set up Python 3.10
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
