@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,12 @@ def _init_release_repo(repo: Path, *, version: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="release.yml's tag job runs on ubuntu-latest only; this executes "
+    "the real bash script, and bash-on-Windows stderr capture isn't reliable "
+    "enough on the Windows test runners to be worth chasing here",
+)
 def test_release_workflow_detect_step_skips_ordinary_merge_between_releases(
     tmp_path: Path,
 ) -> None:
@@ -138,6 +145,12 @@ def test_release_workflow_detect_step_skips_ordinary_merge_between_releases(
     assert "release=true" not in output
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="release.yml's tag job runs on ubuntu-latest only; this executes "
+    "the real bash script, and bash-on-Windows stderr capture isn't reliable "
+    "enough on the Windows test runners to be worth chasing here",
+)
 def test_release_workflow_detect_step_flags_genuine_pending_release(tmp_path: Path) -> None:
     """Sanity check: an untagged version bump is still detected as a release."""
     repo = tmp_path
