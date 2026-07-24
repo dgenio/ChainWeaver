@@ -2,9 +2,13 @@ name: Prepare release
 
 # Release PRs are generated from the authoritative package version and merged
 # through the normal branch-protection path. A successful main-branch CI run
-# creates a tag on the exact verified merge commit, then explicitly dispatches
-# publish.yml because tag pushes made with GITHUB_TOKEN do not trigger another
-# workflow.
+# checks whether the source version on that commit is already tagged; if not,
+# it verifies release metadata is consistent and tags the exact verified merge
+# commit, then explicitly dispatches publish.yml because tag pushes made with
+# GITHUB_TOKEN do not trigger another workflow. Detection is by version/tag
+# drift rather than by PR branch name or label, so a release PR merged from a
+# manually named branch (not the `release/vX.Y.Z` the `prepare` job below
+# generates) still gets tagged instead of silently skipped.
 
 on:
   workflow_dispatch:
@@ -85,42 +89,47 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       MERGE_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
-      - name: Find merged release PR
-        id: release
-        shell: bash
-        run: |
-          set -euo pipefail
-          head_ref="$(
-            gh api "repos/${GITHUB_REPOSITORY}/commits/${MERGE_SHA}/pulls" \
-              --jq '[.[] | select(.merged_at != null and (.head.ref | startswith("release/v")))] | if length == 1 then .[0].head.ref else "" end'
-          )"
-          if [ -z "${head_ref}" ]; then
-            echo "release=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          echo "release=true" >> "${GITHUB_OUTPUT}"
-          echo "version=${head_ref#release/v}" >> "${GITHUB_OUTPUT}"
-
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        if: steps.release.outputs.release == 'true'
         with:
           ref: ${{ env.MERGE_SHA }}
           fetch-depth: 0
+          # Explicit, not just implied by fetch-depth: 0 — the tag-existence
+          # check below depends on every existing tag being present locally,
+          # and a missing tag would misdetect an already-released version as
+          # pending, failing later on `git push` with a confusing error.
+          fetch-tags: true
 
       - name: Set up Python 3.10
-        if: steps.release.outputs.release == 'true'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.10"
 
-      - name: Verify merged release metadata
-        if: steps.release.outputs.release == 'true'
+      - name: Detect an untagged release version
+        # Whether this main push is a pending release is a property of the
+        # commit itself (source version has no matching tag yet), not of how
+        # the release PR that produced it was branched or labeled — a release
+        # PR merged from a manually named branch must still be caught. This
+        # job runs on *every* successful CI run on main, not just release-PR
+        # merges, and the source version legitimately stays at the last
+        # released value for every ordinary commit in between — so "a tag
+        # already exists for this version" is itself the correct signal to
+        # skip, regardless of which commit it points at. Re-tagging safety
+        # (does the tag, if any, point at *this* commit) belongs in the
+        # create-tag step below, where "release=true" already means no tag
+        # existed at detection time and only a genuine race remains.
+        id: release
         shell: bash
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          python scripts/release.py check --expected-version "${VERSION}"
+          version="$(python scripts/release.py version)"
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null; then
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          python scripts/release.py check --expected-version "${version}"
+          echo "release=true" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Create release tag
         id: tag
@@ -131,6 +140,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${VERSION}"
+          # Race/reuse guard: the detect step saw no tag moments ago, but
+          # fail loudly rather than silently move on if one has appeared
+          # since (a concurrent run, or a genuinely reused version) and
+          # points somewhere other than this commit.
           remote_sha="$(git ls-remote origin "refs/tags/${tag}" | cut -f1)"
           if [ -n "${remote_sha}" ]; then
             test "${remote_sha}" = "${MERGE_SHA}"

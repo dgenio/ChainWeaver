@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Release tagging silently skipped for non-standard release-branch names**:
+  `release.yml`'s tag job matched a merged release PR by requiring its head
+  branch to start with `release/v`, so a release PR merged from any other
+  branch name was never tagged or published — no failure, just a no-op (this
+  is exactly what happened to the v0.14.0 release: merged to `main` on
+  2026-07-12 via PR #517, never tagged or published to PyPI). Detection is
+  now based on version/tag drift (does the source version on this commit
+  already have a matching `vX.Y.Z` tag?) instead of the merging PR's branch
+  name, so it no longer depends on how the release PR was created.
+
 - **`RUF036` lint drift**: reordered two `... | None | ...` type-union members
   (`FlowExecutor._select_branch`'s return type, `FlowRegistry.update_flow_state`'s
   `tool_schema_hashes` parameter) so `None` is last, per Ruff's now-enabled

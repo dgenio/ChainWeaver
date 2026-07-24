@@ -54,9 +54,12 @@ python -m pytest tests/ -v
 3. Review and merge the generated `release/vX.Y.Z` PR after its normal required
    checks pass.
 4. The merge commit runs `CI` on `main`. After that run succeeds, `release.yml`
-   associates the SHA with the merged release PR, verifies its metadata,
-   creates `vX.Y.Z` on that exact commit, and explicitly dispatches
-   `publish.yml`.
+   checks whether the source version on that commit already has a matching
+   tag; if not, it verifies release metadata, creates `vX.Y.Z` on that exact
+   commit, and explicitly dispatches `publish.yml`. Detection keys off
+   version/tag drift, not the release PR's branch name or label — a release
+   PR merged from a manually named branch (not `release/vX.Y.Z`) is still
+   caught, rather than silently never tagged.
 5. After trusted PyPI publication and GitHub Release creation,
    `distribution-check.yml` verifies every automatable public surface.
 
