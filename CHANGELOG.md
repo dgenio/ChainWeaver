@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`RUF036` lint drift**: reordered two `... | None | ...` type-union members
+  (`FlowExecutor._select_branch`'s return type, `FlowRegistry.update_flow_state`'s
+  `tool_schema_hashes` parameter) so `None` is last, per Ruff's now-enabled
+  `RUF036` rule (newly caught by an unpinned `ruff>=0.8` picking up a Ruff
+  release that promoted the rule out of preview). No behavior change.
+
+## [0.14.1] - 2026-07-23
+
 ### Changed
 
 - **Layered agent instructions** (#532): root `AGENTS.md` now carries only the
@@ -1561,7 +1571,8 @@ flow.input_schema   # → MyInput (resolves the ref lazily)
 This file starts at 0.4.0.  See the git history for the contents of the
 0.1.0 and 0.2.0 releases.
 
-[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/dgenio/ChainWeaver/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/dgenio/ChainWeaver/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/dgenio/ChainWeaver/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/dgenio/ChainWeaver/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/dgenio/ChainWeaver/compare/v0.12.0...v0.12.1
