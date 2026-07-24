@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783798821579,
+  "lastUpdate": 1784872698818,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3816,6 +3816,78 @@ window.BENCHMARK_DATA = {
             "value": 0.8972419998940495,
             "unit": "ms",
             "extra": "min=0.86ms max=1.28ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4217f7e9e807f347eb734e85b0c689e65bb6fbb8",
+          "message": "Merge pull request #536 from dgenio/fix/ruf036-lint-drift\n\nfix: reorder None to end of type unions for RUF036",
+          "timestamp": "2026-07-24T06:56:44+01:00",
+          "tree_id": "44f7273ba75784ab6c640aaefbd32bb9c81466a1",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/4217f7e9e807f347eb734e85b0c689e65bb6fbb8"
+        },
+        "date": 1784872698222,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3322190000005776,
+            "unit": "ms",
+            "extra": "min=0.29ms max=0.54ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.25268900000696704,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.48ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.400260999995794,
+            "unit": "ms",
+            "extra": "min=0.38ms max=0.45ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.28877199997623393,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.33ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.15307300001086,
+            "unit": "ms",
+            "extra": "min=101.92ms max=102.38ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.7525779999753013,
+            "unit": "ms",
+            "extra": "min=0.69ms max=0.82ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.8444250000016,
+            "unit": "ms",
+            "extra": "min=251.57ms max=252.07ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7274430000734355,
+            "unit": "ms",
+            "extra": "min=0.62ms max=0.89ms repeats=5"
           }
         ]
       }
