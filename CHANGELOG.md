@@ -57,6 +57,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the syntax error first. Affects the shipped `opencode` command as well as the
   new `claude` / `vscode` groups.
 
+- **Free-threaded CI lane ran zero tests**: the `free-threaded smoke (Python
+  3.14t)` job installed `.[dev]`, which pulls `langchain-core` and `langgraph`
+  → `langsmith` / `langgraph-sdk` → `orjson`. `orjson` publishes no `cp314t`
+  wheel, so pip built it from source and the PyO3/cargo build failed under the
+  no-GIL interpreter — the lane died at the install step before collecting a
+  single test. Because the job is `continue-on-error: true` this was invisible:
+  a green-looking non-gating lane that had in fact stopped providing any
+  concurrency signal. It now installs the concurrency-relevant surface
+  (`.[test,yaml,mcp]` plus the pytest runners) and runs 2243 tests under the
+  free-threaded build, including every `stream_flow` / `ThreadPoolExecutor` /
+  `asyncio.to_thread` / record-replay test the lane exists for. The 84
+  integration tests that need the excluded extras skip via their existing
+  `importorskip` guards. Revert to `.[dev]` once `orjson` ships a
+  free-threaded wheel.
+
 - **Withheld-flow label contradicted the exposure policy**: `claude setup
   --flows` / `vscode setup --flows` labelled every withheld flow
   `withheld (not active/reviewed)`, but in the default ACTIVE-only mode the
