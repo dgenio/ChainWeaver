@@ -639,6 +639,23 @@ class _RequestGate:
         self._error_detail: ErrorDetail = error_detail
         self._error_redaction = error_redaction
 
+    def set_error_detail(self, mode: ErrorDetail) -> None:
+        """Change the client-facing error mode on **this** gate instance (issue #490).
+
+        Mutates in place rather than returning a new gate: every flow dispatcher
+        built by ``FlowServer._register_flow`` closes over this exact object at
+        registration time (inside ``__init__``), so replacing the server's
+        ``_gate`` attribute would leave every already-registered flow rendering
+        errors through the old instance. Used by ``FlowServer._preflight`` to
+        tighten an unset default once the serve transport is known.
+        """
+        self._error_detail = mode
+
+    @property
+    def error_detail(self) -> ErrorDetail:
+        """The client-facing error mode currently in force."""
+        return self._error_detail
+
     @property
     def has_authenticator(self) -> bool:
         return self._authenticator is not None
