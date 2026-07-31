@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Synchronous tool timeouts now return near the declared deadline** (#520): the
+  sync path ran `fn` inside `with ThreadPoolExecutor(...)`, and `__exit__` calls
+  `shutdown(wait=True)` — so when `ToolTimeoutError` propagated out of the block,
+  `__exit__` blocked for the worker's entire remaining runtime. A tool with
+  `timeout_seconds=0.05` wrapping a 2s function returned control after **2.00s**,
+  making the declared deadline meaningless and letting a slow tool block flow
+  execution far past its policy limit. It now returns at **0.05s**.
+
+  The work runs on a per-call **daemon** thread rather than a pooled worker.
+  `shutdown(wait=False)` alone would have fixed the call site but not the
+  process: `concurrent.futures.thread` spawns non-daemon workers and joins them
+  through an `atexit` hook, so a still-running tool would have stalled
+  interpreter exit (measured: call site 0.08s, process 1.58s for a 1.5s
+  function). The async lane was already correct — `asyncio.wait_for` never waited
+  on the offloaded thread — and is unchanged apart from added elapsed-time tests.
+
+  **What the timeout does and does not promise.** It bounds *the caller's wait*,
+  not the work: Python cannot safely terminate a thread running arbitrary code,
+  so a tool that ignores its environment keeps running after the timeout fires.
+  Its result is discarded and can never reach the step cache, a checkpoint, the
+  `StepRecord`, or the `FlowEvent` stream. Each timed-out call can leave one
+  worker running until its function returns; ChainWeaver keeps no registry of
+  past workers, so N timeouts leave at most N such threads, but that count is
+  driven by timeout rate and function duration rather than capped by the library.
+
+  **Behaviour change worth noting:** because the worker is now a daemon, a tool
+  still running when the process exits may be truncated without its own
+  `finally` cleanup running. Previously the non-daemon pool worker was joined at
+  interpreter exit — which is precisely what caused the hang being fixed. A tool
+  that must clean up after itself should cooperate with cancellation rather than
+  rely on being allowed to finish.
+
 ### Changed
 
 - **Timing-sensitive tests are hardened against slow CI runners** (#341): the

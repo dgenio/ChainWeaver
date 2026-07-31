@@ -14,13 +14,41 @@ A `Tool` is a **named, schema-validated callable**. Every tool carries:
 | `input_schema` | Pydantic `BaseModel` subclass; validates inputs before `fn` runs. |
 | `output_schema` | Pydantic `BaseModel` subclass; validates outputs after `fn` returns. |
 | `fn` | `Callable[[input_schema], dict]` — the actual logic. |
-| `timeout_seconds` | Optional wall-clock cap; raises `ToolTimeoutError` when exceeded. |
+| `timeout_seconds` | Optional wall-clock cap; raises `ToolTimeoutError` when exceeded. Bounds *the caller's wait*, not the work — see below. |
 | `max_output_size` | Optional cap on output dict size (JSON bytes); raises `ToolOutputSizeError`. |
 | `schema_version` | Free-form version string; surfaces in `schema_hash`. |
 | `cacheable` | Whether the executor's `StepCache` is allowed to memoize this tool. |
 
 The function signature is fixed: `fn(validated_input: BaseModel) -> dict[str, Any]`.
 Tools never receive raw kwargs and never return raw values.
+
+### What `timeout_seconds` does and does not guarantee
+
+`timeout_seconds` bounds **how long the caller waits**, not how long the work
+runs. Both lanes return control within roughly the declared deadline — the sync
+lane on a per-call daemon thread, the async lane via `asyncio.wait_for` — and
+raise `ToolTimeoutError` carrying `tool_name` and the configured
+`timeout_seconds`.
+
+What it cannot do is stop the work. Python provides no safe way to terminate a
+thread executing arbitrary code, so a tool that ignores its environment keeps
+running in the background after the timeout fires. Consequences worth planning
+around:
+
+- **A timed-out tool's result is discarded, never applied.** The executor raises
+  before any success path runs, so a late completion cannot reach the step cache,
+  a checkpoint, the `StepRecord`, or the `FlowEvent` stream.
+- **Each timed-out call can leave one worker running** until its function
+  returns. ChainWeaver keeps no registry of past workers, so N timeouts leave at
+  most N such threads — but that count is driven by your timeout rate and how
+  long the offending function runs, not capped by the library.
+- **Those workers cannot keep the process alive.** The sync lane's threads are
+  daemons deliberately. Note the async lane offloads sync functions to the event
+  loop's shared default executor, whose threads are *not* daemons, so a hung sync
+  tool invoked through the async lane can still delay interpreter exit.
+- **If you need hard cancellation**, the work must cooperate — poll a flag or a
+  `threading.Event` inside `fn` — or run in a separate process, which ChainWeaver
+  does not do for you.
 
 ## `Flow`
 

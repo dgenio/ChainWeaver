@@ -11,7 +11,12 @@ misbehaving tools:
   background thread; on expiry :class:`~chainweaver.exceptions.ToolTimeoutError`
   is raised.  Note that Python threads cannot be forcibly cancelled — a
   tool that ignores its environment will keep running in the background;
-  the timeout only protects the *caller* from waiting.
+  the timeout only protects the *caller* from waiting.  That worker is a
+  **daemon** thread (#520), so it cannot delay interpreter exit — the trade-off
+  being that a tool still running when the process exits may be truncated
+  without its own ``finally`` cleanup running.  A tool that must clean up
+  after itself should cooperate with cancellation (poll a flag or
+  :class:`threading.Event`) rather than rely on being allowed to finish.
 - ``max_output_size`` rejects oversized payloads after measuring the
   UTF-8 encoded JSON length of the raw output dict.
 
@@ -29,11 +34,10 @@ import asyncio
 import hashlib
 import inspect
 import json
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -308,7 +312,7 @@ class Tool:
 
         Raises:
             Same as :meth:`run`, except that timeout enforcement uses
-            :func:`asyncio.wait_for` instead of a worker-thread future.
+            :func:`asyncio.wait_for` instead of a worker thread.
         """
         validated_input = self.input_schema.model_validate(raw_inputs)
         raw_output = await self._call_fn_async(validated_input)
@@ -381,14 +385,55 @@ class Tool:
             assert not inspect.isawaitable(result)
             return result
 
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self.fn, validated_input)
+        # A per-call *daemon* thread, not a ThreadPoolExecutor (#520).
+        #
+        # The executor was used as a context manager, and ``__exit__`` calls
+        # ``shutdown(wait=True)``: on timeout the ToolTimeoutError propagated out
+        # of the block and ``__exit__`` then blocked for the worker's entire
+        # remaining runtime, so a 0.05s timeout returned control only after a 2s
+        # function. ``shutdown(wait=False)`` fixes the call site but not the
+        # process: ``concurrent.futures.thread`` spawns *non-daemon* workers and
+        # registers an ``atexit`` hook that joins them with no timeout, so a
+        # still-running tool would stall interpreter exit (measured: call site
+        # 0.08s, process 1.58s for a 1.5s function). A daemon thread owned by
+        # this call has neither problem.
+        #
+        # The thread still runs to completion — Python cannot safely kill a
+        # thread executing arbitrary code (see the module docstring). What this
+        # guarantees is that *control returns* near the deadline, not that the
+        # work is cancelled. Being a daemon, it cannot keep the process alive.
+        outcome: dict[str, Any] = {}
+        finished = threading.Event()
+
+        def _run_fn() -> None:
             try:
-                result = future.result(timeout=self.timeout_seconds)
-            except FuturesTimeoutError as exc:
-                raise ToolTimeoutError(self.name, self.timeout_seconds) from exc
-            assert not inspect.isawaitable(result)
-            return result
+                outcome["value"] = self.fn(validated_input)
+            except BaseException as exc:
+                # Mirrors Future.set_exception, which also captures BaseException,
+                # so a worker error surfaces to the caller unchanged.
+                outcome["exc"] = exc
+            finally:
+                finished.set()
+
+        worker = threading.Thread(
+            target=_run_fn, name=f"chainweaver-tool-{self.name}", daemon=True
+        )
+        worker.start()
+        if not finished.wait(timeout=self.timeout_seconds):
+            raise ToolTimeoutError(self.name, self.timeout_seconds)
+        if "exc" in outcome:
+            raise outcome["exc"]
+        # The box is Any-typed, so restate what ``self.fn`` declares — the same
+        # union ``Future.result()`` used to carry — and let the isawaitable
+        # assertion below narrow it. A cast rather than an ``assert isinstance``
+        # so a tool that returns a non-dict still fails where it did before, in
+        # output-schema validation, instead of at an opaque assertion here.
+        result = cast(
+            "dict[str, Any] | Awaitable[dict[str, Any]]",
+            outcome["value"],
+        )
+        assert not inspect.isawaitable(result)
+        return result
 
     async def _call_fn_async(self, validated_input: BaseModel) -> dict[str, Any]:
         """Async-native counterpart to ``_call_fn``."""
