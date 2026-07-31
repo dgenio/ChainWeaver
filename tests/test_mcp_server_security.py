@@ -615,9 +615,11 @@ class TestNetworkErrorDetailDefault:
         self, transport: str, entry: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         server = FlowServer(_ok_executor())
-        assert server.error_detail == "full"
+        before: str = server.error_detail
+        assert before == "full"
         entry(server, transport, monkeypatch)
-        assert server.error_detail == "type_only"
+        after: str = server.error_detail
+        assert after == "type_only"
 
     @pytest.mark.parametrize("transport", _NETWORK)
     def test_explicit_full_is_never_overridden(
@@ -634,9 +636,11 @@ class TestNetworkErrorDetailDefault:
         self, transport: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         server = FlowServer(_ok_executor(), profile=MCPServerProfile.trusted_network())
-        assert server.error_detail == "full"
+        before: str = server.error_detail
+        assert before == "full"
         _serve_sync(server, transport, monkeypatch)
-        assert server.error_detail == "full"
+        after: str = server.error_detail
+        assert after == "full"
 
     def test_tightening_reaches_already_registered_dispatchers(
         self, monkeypatch: pytest.MonkeyPatch
@@ -661,10 +665,11 @@ class TestNetworkErrorDetailDefault:
     def test_repeated_serves_are_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         server = FlowServer(_ok_executor())
         _serve_sync(server, "sse", monkeypatch)
-        first = server.error_detail
+        first: str = server.error_detail
         _serve_sync(server, "streamable-http", monkeypatch)
         _serve_sync(server, "stdio", monkeypatch)
-        assert server.error_detail == first == "type_only"
+        after: str = server.error_detail
+        assert after == first == "type_only"
 
 
 class TestServeTimeReadinessLogging:
@@ -696,7 +701,7 @@ class TestServeTimeReadinessLogging:
         server = FlowServer(
             _ok_executor(),
             profile=MCPServerProfile.strict(),
-            authenticator=lambda ctx: "u",
+            authenticator=lambda ctx: CallerIdentity(id="u"),
             authorizer=lambda ctx: True,
             error_detail="generic",
         )
