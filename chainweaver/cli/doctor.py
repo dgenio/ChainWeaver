@@ -25,6 +25,7 @@ from chainweaver.cli._shared import (
 )
 from chainweaver.compat import CompatibilityIssue, check_flow_compatibility
 from chainweaver.exceptions import (
+    ChainWeaverError,
     FlowSerializationError,
 )
 from chainweaver.executor import FlowExecutor
@@ -379,8 +380,9 @@ def _run_first_run_profile(fmt: OutputFormat) -> None:
 #
 # These commands are *read-only*: they inspect a workspace and report what is
 # configured for the observe → suggest → compile workflow. They never modify
-# files. ``--fix-dry-run`` prints the config that *would* be written (so the
-# actual config-writing helpers, issues #269 / #271 / #277, stay separate).
+# files. ``--fix-dry-run`` prints the config that *would* be written; the actual
+# reversible config-writing lives in the per-editor setup/revert commands
+# (``opencode`` #277/#279, ``claude`` #271/#273, ``vscode`` #269).
 # ---------------------------------------------------------------------------
 
 # A configured MCP server is treated as a ChainWeaver FlowServer when its key
@@ -449,6 +451,30 @@ def _load_json_config(path: Path) -> tuple[bool, dict[str, Any] | None, str | No
             return True, json.loads(_strip_jsonc_comments(text)), None
         except json.JSONDecodeError as exc:
             return True, None, exc.msg
+
+
+def _load_json_config_strict(path: Path) -> dict[str, Any] | None:
+    """Read a JSON / JSONC config file, refusing to proceed on a parse error.
+
+    The read-only ``doctor`` inspectors can report an unparseable config and
+    carry on, but the ``setup`` / ``revert`` writers cannot: they merge into the
+    parsed config and write the result back, so treating "present but
+    unparseable" as "absent" would silently replace the operator's file — and
+    every unrelated hook or MCP server in it — with a ChainWeaver-only config.
+    Fail closed instead and let the operator fix the syntax error first.
+
+    Returns the parsed config, or ``None`` when *path* does not exist yet.
+
+    Raises:
+        ChainWeaverError: If *path* exists but is not valid JSON / JSONC.
+    """
+    present, config, parse_error = _load_json_config(path)
+    if present and parse_error is not None:
+        raise ChainWeaverError(
+            f"refusing to modify '{path}': it is not valid JSON ({parse_error}). "
+            "Fix the syntax error (or move the file aside) and re-run."
+        )
+    return config
 
 
 def _find_flowserver(servers: dict[str, Any]) -> str | None:

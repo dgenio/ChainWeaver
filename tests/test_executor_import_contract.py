@@ -78,6 +78,9 @@ BANNED_INREPO = frozenset(
         "chainweaver.proposals",
         "chainweaver.routing",
         "chainweaver.opencode",
+        "chainweaver.claude",
+        "chainweaver.vscode",
+        "chainweaver._agent_config",
     }
 )
 

@@ -244,3 +244,36 @@ class TestRevert:
         cli.main(["opencode", "revert", "--flows", "--workspace", str(tmp_path)])
         assert "dry run" in capsys.readouterr().out
         assert "chainweaver" in config.read_text(encoding="utf-8")
+
+
+class TestMalformedConfigIsNotOverwritten:
+    """A present-but-unparseable OpenCode config must abort, not be replaced."""
+
+    _BROKEN = '{\n  "mcp": {"other": {"command": "x"}},\n}\n'
+
+    def test_setup_flows_refuses_and_leaves_config_byte_identical(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tmp_path / "opencode.json"
+        config.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["opencode", "setup", "--flows", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert "not valid JSON" in capsys.readouterr().err
+        assert config.read_text(encoding="utf-8") == self._BROKEN
+
+    def test_revert_refuses_rather_than_rewriting(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tmp_path / "opencode.json"
+        config.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["opencode", "revert", "--flows", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert config.read_text(encoding="utf-8") == self._BROKEN

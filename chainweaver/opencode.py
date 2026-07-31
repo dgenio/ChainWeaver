@@ -30,10 +30,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar
 
+from chainweaver._agent_config import add_flow_server, remove_flow_server
 from chainweaver.exceptions import ChainWeaverError
 from chainweaver.flow import DAGFlow, Flow, FlowLifecycle
 from chainweaver.log_utils import RedactionPolicy
 from chainweaver.traces import AgentTraceEvent, TraceEventKind
+
+#: Key holding the MCP server map in an OpenCode config.
+_OPENCODE_SERVERS_KEY = "mcp"
 
 __all__ = [
     "OPENCODE_OBSERVE_PLUGIN_FILENAME",
@@ -449,13 +453,10 @@ def add_flow_server_to_config(
 
     Existing, unrelated ``mcp`` servers are preserved; only the ChainWeaver
     entry (keyed by *name*) is added or replaced.  *config* is never mutated.
+    Thin OpenCode-keyed wrapper over
+    :func:`chainweaver._agent_config.add_flow_server`.
     """
-    new_config: dict[str, Any] = dict(config) if isinstance(config, Mapping) else {}
-    servers_obj = new_config.get("mcp")
-    servers = dict(servers_obj) if isinstance(servers_obj, Mapping) else {}
-    servers[name] = dict(entry)
-    new_config["mcp"] = servers
-    return new_config
+    return add_flow_server(config, entry, servers_key=_OPENCODE_SERVERS_KEY, name=name)
 
 
 def remove_flow_server_from_config(
@@ -466,18 +467,11 @@ def remove_flow_server_from_config(
     """Return (*config copy without the ChainWeaver entry*, *removed?*).
 
     Only the ChainWeaver-managed ``mcp`` entry is removed; all other OpenCode
-    config — including unrelated MCP servers — is left untouched.
+    config — including unrelated MCP servers — is left untouched.  Thin
+    OpenCode-keyed wrapper over
+    :func:`chainweaver._agent_config.remove_flow_server`.
     """
-    new_config: dict[str, Any] = dict(config) if isinstance(config, Mapping) else {}
-    servers_obj = new_config.get("mcp")
-    if not isinstance(servers_obj, Mapping) or name not in servers_obj:
-        return new_config, False
-    servers = {key: value for key, value in servers_obj.items() if key != name}
-    if servers:
-        new_config["mcp"] = servers
-    else:
-        new_config.pop("mcp", None)
-    return new_config, True
+    return remove_flow_server(config, servers_key=_OPENCODE_SERVERS_KEY, name=name)
 
 
 # --------------------------------------------------------------------------- #

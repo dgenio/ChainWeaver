@@ -90,6 +90,25 @@ enforced at the language level, don't claim it.
 
 ---
 
+### 6. Loud-failure guards for one anomaly can misfire on the common case
+
+**Pattern:** Agent fixes a silent-failure bug by adding a guard that fails
+loudly whenever a detected value differs from what's expected (e.g., "this
+SHA/version/state must match, or abort"). The guard is checked against the
+anomaly it was written for, but not against the ordinary, everyday inputs
+the same code path sees on every other run — so a rare true positive gets
+traded for a frequent false positive.
+
+**Prevention:** Before adding a "fail loudly on inconsistency" check, run its
+condition against today's actual, normal data, and check how often the
+surrounding code executes. A guard embedded in a path that runs on every
+commit/request must hold for every normal case, not just the anomaly it
+targets. A test asserting the check's *text* is present won't catch this —
+write a test that executes the real logic against a realistic "normal"
+scenario, not just the anomalous one.
+
+---
+
 ## Promotion criteria
 
 A lesson should be **promoted to invariants.md** when:
