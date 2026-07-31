@@ -54,9 +54,12 @@ python -m pytest tests/ -v
 3. Review and merge the generated `release/vX.Y.Z` PR after its normal required
    checks pass.
 4. The merge commit runs `CI` on `main`. After that run succeeds, `release.yml`
-   associates the SHA with the merged release PR, verifies its metadata,
-   creates `vX.Y.Z` on that exact commit, and explicitly dispatches
-   `publish.yml`.
+   checks whether the source version on that commit already has a matching
+   tag; if not, it verifies release metadata, creates `vX.Y.Z` on that exact
+   commit, and explicitly dispatches `publish.yml`. Detection keys off
+   version/tag drift, not the release PR's branch name or label — a release
+   PR merged from a manually named branch (not `release/vX.Y.Z`) is still
+   caught, rather than silently never tagged.
 5. After trusted PyPI publication and GitHub Release creation,
    `distribution-check.yml` verifies every automatable public surface.
 
@@ -128,7 +131,7 @@ and reruns never move an existing release tag.
   field (`Closes #N`). This field — not the branch name — is the source of
   truth for what a PR resolves.
 - PR title: imperative mood (e.g., "Add retry logic to executor").
-- Architecture changes → update AGENTS.md repo map + `architecture.md` in the same PR.
+- Architecture changes → update the [module map](module-map.md) + `architecture.md` in the same PR.
 - Coding convention changes → update this file in the same PR.
 
 The contributor-facing version of these rules lives in
@@ -206,7 +209,8 @@ When adding a new module to `chainweaver/`:
 2. Add `from __future__ import annotations` as the first code line.
 3. Add type annotations to all function signatures.
 4. Export public symbols in `chainweaver/__init__.py` `__all__`.
-5. Add the module to the AGENTS.md repository map.
+5. Add the module to the [module map](module-map.md) —
+   `tests/test_agent_instructions.py` fails if a top-level module is missing.
 6. Add the module to the `architecture.md` module-boundaries table.
 7. Create tests in `tests/test_{module}.py`.
 8. Verify all four validation commands pass.
@@ -220,7 +224,9 @@ When adding a new module to `chainweaver/`:
 
 | Trigger | Required action |
 |---------|-----------------|
-| Add/remove/rename module | Update AGENTS.md repo map + architecture.md boundaries |
+| Add/remove/rename module | Update [module-map.md](module-map.md) + architecture.md boundaries |
+| New durable subsystem rule | Add it to that subsystem's `AGENTS.md` (create one only at a stable seam) + its row in [AGENTS.md § 11](/AGENTS.md#11-instruction-precedence-and-discovery) |
+| Change executor/trace fields or semantics | Update [execution-semantics.md](execution-semantics.md) (exhaustive tables) |
 | Change coding conventions | Update workflows.md code style section |
 | Change CI config | Update workflows.md CI section |
 | Add a new exception | Update AGENTS.md common tasks + README error table |

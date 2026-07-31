@@ -190,8 +190,8 @@ files that conflict with these names:
 | ~~`integrations/weaver_spec.py`~~ | #91, #107, #233 ✅ | Consumes `weaver-contracts`; `SelectableItem` exporter + routing resolvers (delivered) |
 | ~~`integrations/contextweaver.py`~~ | #106 ✅ | `RoutingDecisionAdapter` (delivered) |
 | ~~`integrations/agent_kernel.py`~~ | #89 ✅ | `KernelBackedExecutor` (delivered) |
-| `integrations/langchain.py` / `integrations/llama_index.py` | #82 | LangChain / LlamaIndex bridge adapters |
-| `export/` | #25 | Flow export formats |
+| ~~`integrations/langchain.py` / `integrations/llamaindex.py`~~ | #82 ✅ | LangChain / LlamaIndex bridge adapters (delivered) |
+| ~~`export/`~~ | #25 ✅ | Flow export formats (delivered) |
 | `governance.py` | #13 | Governance policies |
 
 ### Weaver Stack guardrail (still in force after #89/#90/#91/#102/#106/#107)

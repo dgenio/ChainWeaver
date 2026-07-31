@@ -1,9 +1,19 @@
 # Copilot Instructions — ChainWeaver
 
-> Thin review-oriented layer. Canonical source of truth: [AGENTS.md](/AGENTS.md)
-> and [docs/agent-context/](/docs/agent-context/).
+> Thin review-oriented layer. Canonical source of truth: [AGENTS.md](/AGENTS.md),
+> the path-scoped `AGENTS.md` files it indexes, and
+> [docs/agent-context/](/docs/agent-context/).
 
 ---
+
+## Scoped guidance
+
+Path-scoped `AGENTS.md` files carry durable subsystem rules (nearest file
+applies; the root file always applies and cannot be weakened). The canonical
+index is [AGENTS.md § 11](/AGENTS.md#11-instruction-precedence-and-discovery)
+— for a change spanning several subsystems, apply **every** scoped file whose
+subtree is touched. The detailed module inventory is
+[module-map.md](/docs/agent-context/module-map.md).
 
 ## Review-critical rules
 

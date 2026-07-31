@@ -5572,7 +5572,7 @@ class FlowExecutor:
         context: dict[str, Any],
         level_outputs: dict[str, Any],
         step_outputs: dict[str, Any] | None,
-    ) -> str | None | PredicateSyntaxError:
+    ) -> str | PredicateSyntaxError | None:
         """Resolve a branching step's outgoing edge (issue #9).
 
         Builds the post-step view of the execution context (initial

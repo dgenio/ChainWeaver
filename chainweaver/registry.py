@@ -510,7 +510,7 @@ class FlowRegistry:
         *,
         version: str | None = None,
         status: FlowStatus | None = None,
-        tool_schema_hashes: dict[str, str] | None | object = _UNSET,
+        tool_schema_hashes: dict[str, str] | object | None = _UNSET,
     ) -> AnyFlow:
         """Transition a flow's mutable state without mutating the stored object (issue #335).
 

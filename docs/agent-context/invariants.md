@@ -62,9 +62,11 @@ The three hard invariants are mechanically enforced by
   `chainweaver/_execution/` must not import any banned module. The banned set
   is the network/LLM/randomness sources (`random`, `secrets`, `socket`,
   `http`, `urllib`, `requests`, `httpx`, `aiohttp`, `openai`, `anthropic`) plus
-  the in-repo modules already marked "banned from executor.py" in the repo map
-  (`compiler_llm`, `optimizer`, `observer`, `traces`, `lessons`, `service`,
-  `_offline_llm`).
+  the in-repo modules marked "banned from executor.py" in the
+  [module map](module-map.md) (`compiler_llm`, `optimizer`, `observer`,
+  `traces`, `lessons`, `service`, `_offline_llm`, `proposals`, `routing`,
+  `opencode`). The map annotations and the enforced list are kept identical
+  by `tests/test_agent_instructions.py`.
 - **Literal dynamic import patterns** — the same execution modules reject
   reviewable bypasses such as `__import__("random")`,
   `importlib.import_module("openai")`, and simple aliases when the target is
