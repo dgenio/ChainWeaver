@@ -8,7 +8,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Code and VS Code observe integrations** (#265, #269, #271, #272,
+  #273): parity with the shipped OpenCode integration for the two other coding
+  agents. New `chainweaver.claude` and `chainweaver.vscode` library modules and
+  `chainweaver claude` / `chainweaver vscode` CLI groups.
+  - **Claude Code**: `normalize_claude_hook_event(s)` maps a `PostToolUse` hook
+    payload to a vendor-neutral `AgentTraceEvent` (redaction on by default, MCP
+    `mcp__server__tool` provenance) (#272); `claude capture` appends normalized
+    trace JSONL from stdin; `claude setup`/`revert` install a reversible
+    `PostToolUse` observe hook (personal `--scope local` by default) (#271) and
+    a `.mcp.json` FlowServer entry exposing only **ACTIVE** flows by default
+    (reviewed candidates are withheld unless `--include-reviewed`, which warns)
+    (#273) — dry-run by default, `.bak` backups on `--write`.
+  - **VS Code / Copilot**: `normalize_vscode_event(s)` normalizes MCP tool-call
+    trace records (flat or OpenTelemetry-span shape); `vscode capture` reads
+    from stdin or `--from <file>`; `vscode setup --observe` **prints** the
+    `.vscode/settings.json` Copilot OpenTelemetry snippet (never written, since
+    those keys are a product-level setting) (#265); `vscode setup --flows`
+    writes a reversible `.vscode/mcp.json` FlowServer entry, ACTIVE-only by
+    default (#269).
+  - New typed errors `ClaudeCodeAdapterError` (`CW-E053`) and
+    `VSCodeAdapterError` (`CW-E054`).
+  - These vendor adapters are **experimental and namespaced**: their symbols are
+    reachable via `chainweaver.claude` / `chainweaver.vscode` but are
+    intentionally kept out of the stable top-level `chainweaver.__all__` /
+    public-API snapshot (they do not carry the `Tool` / `Flow` / `FlowExecutor`
+    compatibility promise). OpenTelemetry is the primary observation path; local
+    hooks / stdin capture are supported fallbacks. Mapping onto the unified
+    evidence model (`EvidenceEvent` / `EvidenceTrace`, provenance and
+    content-availability states) is tracked as follow-up under #334.
+  - Refactor: a private `chainweaver._agent_config` module now holds the shared
+    editor-agnostic MCP-config merge/remove/backup logic used by all three
+    adapters (OpenCode migrated onto it; its public API is unchanged).
+
 ### Fixed
+
+- **Coding-agent `setup`/`revert` could silently replace an unparseable editor
+  config**: `opencode`, `claude`, and `vscode` `setup`/`revert` read the editor
+  config through a helper that reports a present-but-invalid file as
+  `(present, None, parse_error)`. The write paths discarded `parse_error`, so a
+  config with a JSON syntax error (a trailing comma, an unclosed brace, a
+  conflict marker) was treated as "no config yet" and the merge result
+  overwrote the whole file — destroying every unrelated hook and MCP server in
+  it, with exit code 0 and an "update" message. These commands now fail closed
+  with exit code 1 and leave the file untouched, telling the operator to fix
+  the syntax error first. Affects the shipped `opencode` command as well as the
+  new `claude` / `vscode` groups.
+
+- **Free-threaded CI lane ran zero tests**: the `free-threaded smoke (Python
+  3.14t)` job installed `.[dev]`, which pulls `langchain-core` and `langgraph`
+  → `langsmith` / `langgraph-sdk` → `orjson`. `orjson` publishes no `cp314t`
+  wheel, so pip built it from source and the PyO3/cargo build failed under the
+  no-GIL interpreter — the lane died at the install step before collecting a
+  single test. Because the job is `continue-on-error: true` this was invisible:
+  a green-looking non-gating lane that had in fact stopped providing any
+  concurrency signal. It now installs the concurrency-relevant surface
+  (`.[test,yaml,mcp]` plus the pytest runners) and runs 2243 tests under the
+  free-threaded build, including every `stream_flow` / `ThreadPoolExecutor` /
+  `asyncio.to_thread` / record-replay test the lane exists for. The 84
+  integration tests that need the excluded extras skip via their existing
+  `importorskip` guards. Revert to `.[dev]` once `orjson` ships a
+  free-threaded wheel.
+
+- **Withheld-flow label contradicted the exposure policy**: `claude setup
+  --flows` / `vscode setup --flows` labelled every withheld flow
+  `withheld (not active/reviewed)`, but in the default ACTIVE-only mode the
+  withheld list *contains* REVIEWED flows — telling the operator the opposite
+  of why they were withheld. The label now reflects the policy actually in
+  force (`not active`, or `not active or reviewed` under `--include-reviewed`).
 
 - **Release tagging silently skipped for non-standard release-branch names**:
   `release.yml`'s tag job matched a merged release PR by requiring its head

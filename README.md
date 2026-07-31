@@ -790,6 +790,8 @@ entry point below ships with a runnable example or recipe.
 | **OpenAI Agents SDK** | Expose a flow as an Agents SDK `FunctionTool` | [recipe](docs/cookbook/openai-agents-tool.md) · `examples/integrations/openai_agents_tool.py` |
 | **LangChain / LlamaIndex** | Bidirectional tool bridges | `chainweaver.integrations.{langchain,llamaindex}` (see below) |
 | **OpenCode** | Observe tool runs, mine macro-flows, and expose reviewed flows back as MCP tools | [recipe](docs/cookbook/opencode-recipe.md) · [`chainweaver opencode`](chainweaver/cli/opencode.py) |
+| **Claude Code** | Capture `PostToolUse` hook traces, mine macro-flows, and expose reviewed flows back as MCP tools | [recipe](docs/cookbook/claude-code-recipe.md) · [`chainweaver claude`](chainweaver/cli/claude.py) |
+| **VS Code / Copilot** | Capture MCP tool traces (Copilot OTel) and expose reviewed flows via `.vscode/mcp.json` | [recipe](docs/cookbook/vscode-recipe.md) · [`chainweaver vscode`](chainweaver/cli/vscode.py) |
 | **GitHub Action** | Validate `.flow.yaml` / `.flow.json` files in CI with inline PR annotations | [`.github/actions/chainweaver`](.github/actions/chainweaver) · [guide](docs/github-action.md) |
 
 Install the extra you need: `pip install 'chainweaver[mcp]'` (or `langgraph`,

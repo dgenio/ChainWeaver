@@ -212,10 +212,30 @@ jobs:
           python-version: "3.14t"
 
       - name: Install dependencies
+        # NOT ".[dev]": that pulls langchain-core and langgraph, whose
+        # langsmith / langgraph-sdk require orjson, which publishes no cp314t
+        # wheel. pip then builds it from source and the PyO3/cargo build fails
+        # under the no-GIL interpreter, so the whole lane died at install and
+        # ran zero tests. Install the concurrency-relevant surface instead —
+        # the package, the pytest runners, hypothesis, PyYAML, and MCP (whose
+        # four test modules import `mcp` unguarded at module scope, so omitting
+        # it turns collection into errors rather than skips).
+        #
+        # Cost of the narrower set, measured: 2243 passed / 11 skipped versus
+        # 2327 passed / 1 skipped under ".[dev]" — the 84 difference is the
+        # langchain / langgraph / llamaindex / openai-agents / otel /
+        # weaver-contracts integration tests, which skip via their existing
+        # importorskip guards. Every test this lane exists for (stream_flow
+        # worker threads, ThreadPoolExecutor tool timeouts, asyncio.to_thread
+        # offloading, record_then_replay monkey-patching) still runs.
+        # Revisit and restore ".[dev]" once orjson ships a free-threaded wheel.
+        #
         # Pin transitive weaver-contracts to a reviewed version (#495).
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[test,yaml,mcp]" \
+            "pytest>=7.0" "pytest-cov>=4.0" "pytest-asyncio>=0.23"
 
       - name: Run tests on the free-threaded build
         # --no-cov: this is a concurrency smoke signal, not a coverage gate
