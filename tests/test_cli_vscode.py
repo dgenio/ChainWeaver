@@ -268,3 +268,65 @@ class TestRevert:
         exit_code = cli.main(["vscode", "revert", "--observe", "--workspace", str(tmp_path)])
         assert exit_code == 0
         assert "github.copilot.chat.otel" in capsys.readouterr().out
+
+
+class TestMalformedConfigIsNotOverwritten:
+    """A present-but-unparseable ``.vscode/mcp.json`` must abort, not be replaced."""
+
+    _BROKEN = '{\n  "servers": {"other": {"command": "x"}},\n}\n'
+
+    def test_setup_flows_refuses_and_leaves_config_byte_identical(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tmp_path / ".vscode" / "mcp.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["vscode", "setup", "--flows", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert "not valid JSON" in capsys.readouterr().err
+        assert config.read_text(encoding="utf-8") == self._BROKEN
+
+    def test_revert_refuses_rather_than_rewriting(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tmp_path / ".vscode" / "mcp.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["vscode", "revert", "--flows", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert config.read_text(encoding="utf-8") == self._BROKEN
+
+
+class TestWithheldReasonMatchesExposurePolicy:
+    def test_default_says_not_active(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flows = tmp_path / "flows"
+        flows.mkdir()
+        (flows / "a.flow.yaml").write_text(_flow_yaml("ship_it", "active"), encoding="utf-8")
+        (flows / "r.flow.yaml").write_text(_flow_yaml("candidate", "reviewed"), encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "vscode",
+                "setup",
+                "--flows",
+                "--workspace",
+                str(tmp_path),
+                "--flows-dir",
+                str(flows),
+            ]
+        )
+
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        assert "withheld (not active): candidate" in out
+        assert "not active/reviewed" not in out

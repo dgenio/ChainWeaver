@@ -36,7 +36,7 @@ from chainweaver.cli._shared import (
     _load_flow_file,
     app,
 )
-from chainweaver.cli.doctor import _load_json_config, _opencode_config_path
+from chainweaver.cli.doctor import _load_json_config_strict, _opencode_config_path
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
 from chainweaver.opencode import (
     OPENCODE_OBSERVE_PLUGIN_FILENAME,
@@ -256,7 +256,7 @@ def _setup_flows(
         )
 
     config_path = _opencode_config_path(workspace)
-    _, config, _ = _load_json_config(config_path)
+    config = _load_json_config_strict(config_path)
     entry = build_flow_mcp_entry(
         flows_dir=str(flows_dir), tools_module=tools_module, prefix=prefix
     )
@@ -358,7 +358,11 @@ def revert_command(
             changes.append(change)
     if flows:
         config_path = _opencode_config_path(workspace)
-        _, config, _ = _load_json_config(config_path)
+        try:
+            config = _load_json_config_strict(config_path)
+        except ChainWeaverError as exc:
+            typer.echo(f"chainweaver: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
         new_config, removed = remove_flow_server_from_config(config)
         if removed:
             change = {"action": "remove MCP entry", "path": str(config_path)}

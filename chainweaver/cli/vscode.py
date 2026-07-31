@@ -39,7 +39,7 @@ from chainweaver.cli._shared import (
     _load_flow_file,
     app,
 )
-from chainweaver.cli.doctor import _load_json_config
+from chainweaver.cli.doctor import _load_json_config_strict
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
 from chainweaver.flow import FlowLifecycle
 from chainweaver.opencode import (
@@ -247,7 +247,7 @@ def _active_flow_names(
     return sorted(set(exposable)), sorted(set(withheld))
 
 
-def _setup_observe(workspace: Path, sink: Path) -> dict[str, Any]:
+def _setup_observe(sink: Path) -> dict[str, Any]:
     """Plan the observe step: print the Copilot OTel settings snippet (#265).
 
     VS Code / Copilot exposes no writable hook for ChainWeaver, so this step is
@@ -294,7 +294,7 @@ def _setup_flows(
         )
 
     config_path = workspace.joinpath(*_VSCODE_MCP_CONFIG)
-    _, config, _ = _load_json_config(config_path)
+    config = _load_json_config_strict(config_path)
     entry = build_flow_mcp_entry(
         flows_dir=str(flows_dir), tools_module=tools_module, prefix=prefix
     )
@@ -308,6 +308,7 @@ def _setup_flows(
         "entry": entry,
         "exposed_tools": {name: safe_macro_tool_name(name, prefix=prefix) for name in exposable},
         "withheld_flows": withheld,
+        "withheld_reason": "not active or reviewed" if include_reviewed else "not active",
         "collisions": collisions,
     }
     if write:
@@ -352,7 +353,7 @@ def setup_command(
     changes: list[dict[str, Any]] = []
     try:
         if observe:
-            changes.append(_setup_observe(workspace, sink))
+            changes.append(_setup_observe(sink))
         if flows:
             changes.append(
                 _setup_flows(
@@ -409,7 +410,11 @@ def revert_command(
         )
     if flows:
         config_path = workspace.joinpath(*_VSCODE_MCP_CONFIG)
-        _, config, _ = _load_json_config(config_path)
+        try:
+            config = _load_json_config_strict(config_path)
+        except ChainWeaverError as exc:
+            typer.echo(f"chainweaver: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
         new_config, removed = remove_flow_server_from_config(config)
         if removed:
             change: dict[str, Any] = {"action": "remove MCP entry", "path": str(config_path)}
@@ -440,7 +445,8 @@ def _report(changes: list[dict[str, Any]], *, write: bool, output_json: bool) ->
             typer.echo(f"      {change['detail']}")
         if change.get("withheld_flows"):
             withheld = ", ".join(change["withheld_flows"])
-            typer.echo(f"      withheld (not active/reviewed): {withheld}")
+            reason = change.get("withheld_reason", "not exposable")
+            typer.echo(f"      withheld ({reason}): {withheld}")
         if change.get("collisions"):
             for name, reason in sorted(change["collisions"].items()):
                 typer.echo(f"      ⚠ collision: {name}: {reason}")

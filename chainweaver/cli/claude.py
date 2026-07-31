@@ -45,7 +45,7 @@ from chainweaver.cli._shared import (
     _load_flow_file,
     app,
 )
-from chainweaver.cli.doctor import _load_json_config
+from chainweaver.cli.doctor import _load_json_config_strict
 from chainweaver.exceptions import ChainWeaverError, FlowSerializationError
 from chainweaver.flow import FlowLifecycle
 from chainweaver.opencode import (
@@ -265,7 +265,7 @@ def _setup_observe(
 ) -> dict[str, Any]:
     """Plan (and optionally apply) the PostToolUse observe-hook install (#271)."""
     settings_path = _settings_path(workspace, scope)
-    _, settings, _ = _load_json_config(settings_path)
+    settings = _load_json_config_strict(settings_path)
     hook_entry = render_posttooluse_hook(sink=str(sink), redact=redact, matcher=matcher)
     new_settings = add_observe_hook_to_settings(settings, hook_entry)
     change: dict[str, Any] = {
@@ -316,7 +316,7 @@ def _setup_flows(
         )
 
     config_path = workspace / _MCP_CONFIG_NAME
-    _, config, _ = _load_json_config(config_path)
+    config = _load_json_config_strict(config_path)
     entry = build_flow_mcp_entry(
         flows_dir=str(flows_dir), tools_module=tools_module, prefix=prefix
     )
@@ -328,6 +328,7 @@ def _setup_flows(
         "entry": entry,
         "exposed_tools": {name: safe_macro_tool_name(name, prefix=prefix) for name in exposable},
         "withheld_flows": withheld,
+        "withheld_reason": "not active or reviewed" if include_reviewed else "not active",
         "collisions": collisions,
     }
     if write:
@@ -427,30 +428,35 @@ def revert_command(
         raise typer.Exit(code=1)
 
     changes: list[dict[str, Any]] = []
-    if observe:
-        settings_path = _settings_path(workspace, scope)
-        _, settings, _ = _load_json_config(settings_path)
-        new_settings, removed = remove_observe_hook_from_settings(settings)
-        if removed:
-            change = {"action": "remove observe hook", "path": str(settings_path)}
-            if write:
-                change["backup"] = str(backup_file(settings_path) or "")
-                settings_path.write_text(
-                    json.dumps(new_settings, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-                )
-            changes.append(change)
-    if flows:
-        config_path = workspace / _MCP_CONFIG_NAME
-        _, config, _ = _load_json_config(config_path)
-        new_config, removed = remove_flow_server_from_config(config)
-        if removed:
-            change = {"action": "remove MCP entry", "path": str(config_path)}
-            if write:
-                change["backup"] = str(backup_file(config_path) or "")
-                config_path.write_text(
-                    json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-                )
-            changes.append(change)
+    try:
+        if observe:
+            settings_path = _settings_path(workspace, scope)
+            settings = _load_json_config_strict(settings_path)
+            new_settings, removed = remove_observe_hook_from_settings(settings)
+            if removed:
+                change = {"action": "remove observe hook", "path": str(settings_path)}
+                if write:
+                    change["backup"] = str(backup_file(settings_path) or "")
+                    settings_path.write_text(
+                        json.dumps(new_settings, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                changes.append(change)
+        if flows:
+            config_path = workspace / _MCP_CONFIG_NAME
+            config = _load_json_config_strict(config_path)
+            new_config, removed = remove_flow_server_from_config(config)
+            if removed:
+                change = {"action": "remove MCP entry", "path": str(config_path)}
+                if write:
+                    change["backup"] = str(backup_file(config_path) or "")
+                    config_path.write_text(
+                        json.dumps(new_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                    )
+                changes.append(change)
+    except ChainWeaverError as exc:
+        typer.echo(f"chainweaver: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     _report(changes, write=write, output_json=output_json)
 
@@ -470,7 +476,8 @@ def _report(changes: list[dict[str, Any]], *, write: bool, output_json: bool) ->
         typer.echo(f"  ~ {change['action']} → {change['path']}")
         if change.get("withheld_flows"):
             withheld = ", ".join(change["withheld_flows"])
-            typer.echo(f"      withheld (not active/reviewed): {withheld}")
+            reason = change.get("withheld_reason", "not exposable")
+            typer.echo(f"      withheld ({reason}): {withheld}")
         if change.get("collisions"):
             for name, reason in sorted(change["collisions"].items()):
                 typer.echo(f"      ⚠ collision: {name}: {reason}")

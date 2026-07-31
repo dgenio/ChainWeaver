@@ -44,9 +44,11 @@ from chainweaver.traces import AgentTraceEvent, TraceEventKind
 __all__ = [
     "VSCODE_TRACE_SINK",
     "VSCodeAdapterError",
+    "add_flow_server_to_config",
     "copilot_otel_settings_snippet",
     "normalize_vscode_event",
     "normalize_vscode_events",
+    "remove_flow_server_from_config",
 ]
 
 

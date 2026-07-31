@@ -330,3 +330,115 @@ class TestRevert:
         cli.main(["claude", "revert", "--flows", "--workspace", str(tmp_path)])
         assert "dry run" in capsys.readouterr().out
         assert "chainweaver" in config.read_text(encoding="utf-8")
+
+
+class TestMalformedConfigIsNotOverwritten:
+    """A present-but-unparseable config must abort, never be silently replaced.
+
+    ``_load_json_config`` reports ``(present, None, parse_error)`` for a file
+    that exists but has a JSON syntax error. Treating that as "no config yet"
+    would merge into ``{}`` and write the result back, destroying every
+    unrelated hook / MCP server the operator had.
+    """
+
+    _BROKEN = '{\n  "permissions": {"allow": ["Bash(ls)"]},\n  "model": "opus",\n}\n'
+
+    def test_setup_observe_refuses_and_leaves_settings_byte_identical(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        settings = tmp_path / ".claude" / "settings.local.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["claude", "setup", "--observe", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert "not valid JSON" in capsys.readouterr().err
+        assert settings.read_text(encoding="utf-8") == self._BROKEN
+
+    def test_setup_flows_refuses_and_leaves_mcp_json_byte_identical(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        broken = '{\n  "mcpServers": {"github": {"command": "gh-mcp"}},\n}\n'
+        config = tmp_path / ".mcp.json"
+        config.write_text(broken, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["claude", "setup", "--flows", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert "not valid JSON" in capsys.readouterr().err
+        assert config.read_text(encoding="utf-8") == broken
+
+    def test_revert_refuses_rather_than_rewriting(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        settings = tmp_path / ".claude" / "settings.local.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(self._BROKEN, encoding="utf-8")
+
+        exit_code = cli.main(
+            ["claude", "revert", "--observe", "--write", "--workspace", str(tmp_path)]
+        )
+
+        assert exit_code == 1
+        assert settings.read_text(encoding="utf-8") == self._BROKEN
+
+
+class TestWithheldReasonMatchesExposurePolicy:
+    """The withheld-flow label must state the policy actually in force."""
+
+    def test_default_says_not_active(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flows = tmp_path / "flows"
+        flows.mkdir()
+        (flows / "a.flow.yaml").write_text(_flow_yaml("ship_it", "active"), encoding="utf-8")
+        (flows / "r.flow.yaml").write_text(_flow_yaml("candidate", "reviewed"), encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "claude",
+                "setup",
+                "--flows",
+                "--workspace",
+                str(tmp_path),
+                "--flows-dir",
+                str(flows),
+            ]
+        )
+
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        # A REVIEWED flow is withheld here *because it is not ACTIVE* — saying
+        # "not active/reviewed" would tell the operator the opposite.
+        assert "withheld (not active): candidate" in out
+        assert "not active/reviewed" not in out
+
+    def test_include_reviewed_says_not_active_or_reviewed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flows = tmp_path / "flows"
+        flows.mkdir()
+        (flows / "a.flow.yaml").write_text(_flow_yaml("ship_it", "active"), encoding="utf-8")
+        (flows / "d.flow.yaml").write_text(_flow_yaml("wip", "draft"), encoding="utf-8")
+
+        exit_code = cli.main(
+            [
+                "claude",
+                "setup",
+                "--flows",
+                "--include-reviewed",
+                "--workspace",
+                str(tmp_path),
+                "--flows-dir",
+                str(flows),
+            ]
+        )
+
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        assert "withheld (not active or reviewed): wip" in out

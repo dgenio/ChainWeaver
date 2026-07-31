@@ -41,8 +41,13 @@ from chainweaver.traces import AgentTraceEvent, TraceEventKind
 __all__ = [
     "CLAUDE_TRACE_SINK",
     "ClaudeCodeAdapterError",
+    "add_flow_server_to_config",
+    "add_observe_hook_to_settings",
+    "build_observe_hook_command",
     "normalize_claude_hook_event",
     "normalize_claude_hook_events",
+    "remove_flow_server_from_config",
+    "remove_observe_hook_from_settings",
     "render_posttooluse_hook",
 ]
 
