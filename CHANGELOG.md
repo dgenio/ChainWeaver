@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Timing-sensitive tests are hardened against slow CI runners** (#341): the
+  suite runs a wide OS x Python matrix where runner speed varies a lot, so fixed
+  durations were either over-padded or flaky. Simulated durations and the
+  timeouts they race now both route through a new `tests/helpers.py` `scaled()`
+  helper driven by `CHAINWEAVER_TEST_TIMING_MULTIPLIER` (default `1`, so normal
+  wall-clock cost is unchanged); raise it on a slow job to widen every duration
+  and its paired timeout together. `scripts/check_test_sleeps.py` enforces the
+  convention in pre-commit and CI: every `time.sleep` / `asyncio.sleep` under
+  `tests/` must be scaled or carry a `# timing: <category>` marker, keyed on
+  comments rather than a `file:line` allowlist that would rot on every edit.
+  Also narrowed the unqualified "Do NOT use `time.sleep()`" claim in
+  `.github/instructions/testing.instructions.md`, which contradicted 19
+  legitimate checked-in sleep sites. Test-only; no library behaviour change.
+
 ### Security
 
 - **`FlowServer` network transports are hardened at serve time** (#490): a

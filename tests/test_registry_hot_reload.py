@@ -180,6 +180,6 @@ class TestWatch:
                     registry.get_flow("b")
                     break
                 except FlowNotFoundError:
-                    time.sleep(0.02)
+                    time.sleep(0.02)  # timing: poll-interval
         assert registry.get_flow("b").name == "b"
         assert any("b@0.1.0" in report.added for report in seen)

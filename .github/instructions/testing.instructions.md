@@ -35,5 +35,11 @@ Copilot Code Review to avoid false-positive review comments on test patterns.
 
 ## Anti-patterns in tests
 - Do NOT mock internal ChainWeaver classes unless testing integration boundaries
-- Do NOT use `time.sleep()` — tests must be deterministic and fast
+- Do NOT `sleep()` to wait for background work to finish — poll an observable
+  condition with a deadline, or wait on a `threading.Event`. Fixed-duration sleeps
+  are allowed for event-loop yields, latency simulation, poll cadence, and
+  duration measurement; they must be routed through `helpers.scaled()` where a
+  duration is simulated and carry a `# timing: <category>` marker.
+  `scripts/check_test_sleeps.py` enforces this (issue #341; see
+  `docs/agent-context/workflows.md` § Testing conventions, which is canonical)
 - Do not use relative imports into `chainweaver` internals; import from the public `chainweaver` package API instead

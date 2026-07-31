@@ -102,6 +102,9 @@ jobs:
       - name: Check banned vocabulary (#466)
         run: python scripts/check_vocabulary.py
 
+      - name: Check test sleep discipline (#341)
+        run: python scripts/check_test_sleeps.py
+
       # actionlint (pinned to match .pre-commit-config.yaml) lints every
       # workflow; the image bundles shellcheck so `run:` scripts are checked
       # too. Docker is available on GitHub-hosted ubuntu runners.

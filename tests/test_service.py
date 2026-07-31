@@ -268,7 +268,7 @@ class TestConfigAndLoop:
             assert service.is_running
             deadline = time.time() + 2.0
             while not service.list_proposals() and time.time() < deadline:
-                time.sleep(0.02)
+                time.sleep(0.02)  # timing: poll-interval
         assert not service.is_running
         assert [p.flow.name for p in service.list_proposals()] == ["suggested__a__b"]
 

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from helpers import scaled
 from pydantic import BaseModel
 
 from chainweaver import (
@@ -283,7 +284,7 @@ async def test_chunk_after_terminal_is_rejected() -> None:
 
 async def test_streaming_tool_timeout_is_enforced() -> None:
     async def _slow_stream(inp: _Query) -> AsyncIterator[ToolChunk]:
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(scaled(0.3))  # timing: duration-sim — outlasts the tool timeout
         yield ToolChunk(data={"text": "late"}, is_final=True)
 
     registry = FlowRegistry()
@@ -303,7 +304,7 @@ async def test_streaming_tool_timeout_is_enforced() -> None:
             input_schema=_Query,
             output_schema=_Completion,
             stream_fn=_slow_stream,
-            timeout_seconds=0.05,
+            timeout_seconds=scaled(0.05),
         )
     )
     result = await ex.execute_flow_async("slow", {"prompt": "hi"})

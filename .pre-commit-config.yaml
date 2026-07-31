@@ -59,6 +59,17 @@ repos:
         types_or: [python, markdown]
         pass_filenames: false
 
+      # Sleep-discipline check (issue #341): every sleep under tests/ must be
+      # scaled or carry a '# timing: <category>' marker, so a fixed sleep never
+      # silently stands in for "the background work finished by now". Scans its
+      # own default scope, so pass_filenames is false.
+      - id: check-test-sleeps
+        name: check test sleeps
+        entry: python scripts/check_test_sleeps.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
   # ---------------------------------------------------------------------
   # Generic hygiene.
   # ---------------------------------------------------------------------
