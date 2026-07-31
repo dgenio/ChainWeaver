@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784872698818,
+  "lastUpdate": 1785480816538,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -3888,6 +3888,78 @@ window.BENCHMARK_DATA = {
             "value": 0.7274430000734355,
             "unit": "ms",
             "extra": "min=0.62ms max=0.89ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2fee128edf4f53b5e0ed44ebe8b53a01f207dc3b",
+          "message": "Merge pull request #531 from dgenio/dependabot/github_actions/main/actions/setup-python-7\n\nbuild(deps): bump actions/setup-python from 6 to 7",
+          "timestamp": "2026-07-31T07:50:32+01:00",
+          "tree_id": "ddcb18097acccb08432a16eb75c65a9ffa059e14",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/2fee128edf4f53b5e0ed44ebe8b53a01f207dc3b"
+        },
+        "date": 1785480816120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.37193600000762217,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.63ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.27881100000115566,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.55ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.590282999993974,
+            "unit": "ms",
+            "extra": "min=0.54ms max=0.61ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.38472999999328295,
+            "unit": "ms",
+            "extra": "min=0.36ms max=0.41ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.62277699999345,
+            "unit": "ms",
+            "extra": "min=102.19ms max=102.79ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8720009999763079,
+            "unit": "ms",
+            "extra": "min=0.78ms max=1.06ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.73049700001116,
+            "unit": "ms",
+            "extra": "min=251.65ms max=252.05ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7188640000492796,
+            "unit": "ms",
+            "extra": "min=0.65ms max=0.99ms repeats=5"
           }
         ]
       }
