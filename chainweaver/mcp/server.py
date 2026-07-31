@@ -108,6 +108,51 @@ _LOGGER = logging.getLogger(__name__)
 _DEFAULT_LIFECYCLES = frozenset({FlowLifecycle.ACTIVE})
 _DEFAULT_SIDE_EFFECTS = frozenset({SideEffectLevel.NONE, SideEffectLevel.READ})
 
+#: Transports that expose the server over a network, where any reachable client
+#: is an untrusted caller. ``"stdio"`` is deliberately absent: there the peer is
+#: the parent process that spawned the server (a CLI host such as Claude
+#: Desktop), so its trust model differs and its defaults are left alone.
+#: Single definition on purpose — both the ``_preflight`` warning and its
+#: readiness logging branch on this, so a partial or inverted transport check
+#: has only one place to hide (issue #490).
+_NETWORK_TRANSPORTS: frozenset[str] = frozenset({"sse", "streamable-http"})
+
+#: Error mode a network transport falls back to when the operator set none.
+#: ``"type_only"`` keeps a usable failure signal (the exception class) without
+#: returning message text, which may carry file paths or argument values.
+_NETWORK_ERROR_DETAIL: ErrorDetail = "type_only"
+
+
+def _default_readiness_profile() -> MCPServerProfile:
+    """Baseline the serve-time readiness check uses when the caller set none (#490).
+
+    Neither shipped preset fits this role. :meth:`MCPServerProfile.balanced`
+    leaves ``require_authenticator`` / ``require_authorizer`` at ``False``, so a
+    completely unauthenticated server produces *no* findings and
+    :func:`evaluate_readiness` reports ``code="ready"`` — asserting the opposite
+    of the truth for precisely the configuration this check exists to surface.
+    :meth:`MCPServerProfile.strict` requires both, but baselines
+    ``error_detail="generic"``, so a correctly hardened default server would
+    always trip a spurious ``error-detail-relaxed`` warning.
+
+    This profile therefore takes ``strict``'s authentication requirements with
+    :data:`_NETWORK_ERROR_DETAIL` as the error baseline. ``require_rate_limiter``
+    stays ``False`` to match ``strict`` itself, which does not make rate limiting
+    deployment-blocking either — a serve-time-only default should not be
+    stricter than the strictest profile the package ships.
+    """
+    return MCPServerProfile(
+        name="network-default",
+        allowed_lifecycles=_DEFAULT_LIFECYCLES,
+        allowed_side_effects=_DEFAULT_SIDE_EFFECTS,
+        allow_requires_approval=False,
+        force_expose=False,
+        error_detail=_NETWORK_ERROR_DETAIL,
+        require_authorizer=True,
+        require_authenticator=True,
+        require_rate_limiter=False,
+    )
+
 
 class FlowServer:
     """MCP server that exposes registered ChainWeaver flows as MCP tools.
@@ -209,7 +254,11 @@ class FlowServer:
             list(flow_names) if flow_names is not None else None
         )
         # Resolve profile-controlled knobs: an explicit argument always wins,
-        # then the profile's value, then the hard-coded secure default.
+        # then the profile's value, then the hard-coded fallback. Note the
+        # error_detail fallback ("full") is the *least* restrictive of the three
+        # modes, kept for stdio backward compatibility; ``_preflight`` tightens
+        # it for network transports when neither argument nor profile set it
+        # (issue #490).
         self.allowed_lifecycles = (
             frozenset(allowed_lifecycles)
             if allowed_lifecycles is not None
@@ -230,6 +279,11 @@ class FlowServer:
         )
         self.force_expose = _resolve(force_expose, profile, "force_expose", False)
         self.error_detail: ErrorDetail = _resolve(error_detail, profile, "error_detail", "full")
+        # Whether error_detail was deliberately chosen (directly or via a
+        # profile, whose error_detail field is required and always concrete) as
+        # opposed to falling back to "full". Only an unset value is eligible for
+        # the network-transport tightening in ``_preflight`` (issue #490).
+        self._error_detail_explicit = error_detail is not None or profile is not None
         self._gate = _RequestGate(
             authenticator=authenticator,
             rate_limiter=rate_limiter,
@@ -376,7 +430,12 @@ class FlowServer:
         disabled so nothing is written to stdout — a banner there would
         corrupt the stdio MCP framing.  For programmatic embedding inside
         an existing event loop, see :meth:`serve_async`.
+
+        On a network transport this first runs :meth:`_preflight`, which warns
+        about missing trust hooks, tightens an unset ``error_detail``, and logs
+        readiness findings (issue #490).
         """
+        self._preflight(transport)
         self._mcp.run(transport=transport, show_banner=False)
 
     async def serve_async(self, transport: TransportName = "stdio") -> None:
@@ -390,8 +449,73 @@ class FlowServer:
         Args:
             transport: One of ``"stdio"``, ``"sse"``, or
                 ``"streamable-http"``.
+
+        Runs the same :meth:`_preflight` as :meth:`serve`, so both entry points
+        harden and report identically (issue #490).
         """
+        self._preflight(transport)
         await self._mcp.run_async(transport=transport, show_banner=False)
+
+    def _preflight(self, transport: TransportName) -> None:
+        """Warn, harden, and report before serving on a network transport (#490).
+
+        A no-op for ``"stdio"``, whose peer is the parent process that spawned
+        the server. For ``"sse"`` / ``"streamable-http"`` any client that can
+        reach the port is an untrusted caller, so this:
+
+        1. warns when neither an authenticator nor an authorizer is configured;
+        2. tightens ``error_detail`` to :data:`_NETWORK_ERROR_DETAIL` when the
+           operator set none, so raw exception text does not reach clients;
+        3. logs :func:`evaluate_readiness` findings against the configured
+           profile, or :func:`_default_readiness_profile` when there is none.
+
+        Idempotent: re-serving re-derives the same state rather than compounding
+        it, since the tightening is gated on ``_error_detail_explicit``, which
+        this method never mutates.
+        """
+        if transport not in _NETWORK_TRANSPORTS:
+            return
+
+        if not (self._gate.has_authenticator or self._gate.has_authorizer):
+            _LOGGER.warning(
+                "FlowServer is serving on the '%s' network transport with no authenticator "
+                "and no authorizer: every client that can reach this port may call every "
+                "exposed flow. Pass authenticator=/authorizer= (or profile="
+                "MCPServerProfile.strict()) before exposing this server beyond localhost.",
+                transport,
+            )
+
+        if not self._error_detail_explicit and self.error_detail != _NETWORK_ERROR_DETAIL:
+            _LOGGER.warning(
+                "FlowServer error_detail defaulted to '%s' on the '%s' network transport, "
+                "which would return raw exception text to clients; using '%s' instead. "
+                "Pass error_detail= explicitly to override.",
+                self.error_detail,
+                transport,
+                _NETWORK_ERROR_DETAIL,
+            )
+            self.error_detail = _NETWORK_ERROR_DETAIL
+            # Mutate the shared gate in place: every flow dispatcher closed over
+            # this exact instance at registration time, so reassigning _gate
+            # would leave them all rendering through the old error mode.
+            self._gate.set_error_detail(_NETWORK_ERROR_DETAIL)
+
+        for finding in evaluate_readiness(
+            self.profile if self.profile is not None else _default_readiness_profile(),
+            has_authorizer=self._gate.has_authorizer,
+            has_authenticator=self._gate.has_authenticator,
+            has_rate_limiter=self._gate.has_rate_limiter,
+            error_detail=self.error_detail,
+            exposed_side_effects=self._exposed_side_effects,
+        ):
+            level = logging.WARNING if finding.severity in ("error", "warning") else logging.INFO
+            _LOGGER.log(
+                level,
+                "FlowServer readiness [%s] %s: %s",
+                finding.severity,
+                finding.code,
+                finding.message,
+            )
 
     def readiness_report(self) -> list[ReadinessFinding]:
         """Check this server against its configured profile (issue #446).

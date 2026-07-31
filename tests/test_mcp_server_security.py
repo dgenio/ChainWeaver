@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any
 
@@ -535,3 +536,184 @@ class TestReadiness:
                 message="Server configuration satisfies profile 'balanced'.",
             )
         ]
+
+
+# ---------------------------------------------------------------------------
+# Network-transport serve-time hardening (issue #490)
+# ---------------------------------------------------------------------------
+
+_SERVER_LOGGER = "chainweaver.mcp.server"
+_NETWORK = ["sse", "streamable-http"]
+
+
+def _serve_sync(server: FlowServer, transport: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive serve() through the real entry point with the transport stubbed out."""
+    monkeypatch.setattr(server._mcp, "run", lambda **kwargs: None)
+    server.serve(transport=transport)  # type: ignore[arg-type]
+
+
+def _serve_async(server: FlowServer, transport: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same, for serve_async(), so both entry points are exercised identically."""
+
+    async def _noop(**kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(server._mcp, "run_async", _noop)
+    _run(server.serve_async(transport=transport))  # type: ignore[arg-type]
+
+
+_ENTRY_POINTS = [_serve_sync, _serve_async]
+
+
+class TestNetworkTransportWarning:
+    @pytest.mark.parametrize("transport", _NETWORK)
+    @pytest.mark.parametrize("entry", _ENTRY_POINTS)
+    def test_warns_when_unauthenticated(
+        self,
+        transport: str,
+        entry: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        server = FlowServer(_ok_executor())
+        with caplog.at_level(logging.WARNING, logger=_SERVER_LOGGER):
+            entry(server, transport, monkeypatch)
+        assert any("no authenticator" in r.getMessage() for r in caplog.records), caplog.text
+        assert transport in caplog.text
+
+    @pytest.mark.parametrize("entry", _ENTRY_POINTS)
+    def test_stdio_is_never_warned_about(
+        self,
+        entry: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        server = FlowServer(_ok_executor())
+        with caplog.at_level(logging.INFO, logger=_SERVER_LOGGER):
+            entry(server, "stdio", monkeypatch)
+        assert caplog.records == []
+        # stdio keeps the historical developer-friendly default.
+        assert server.error_detail == "full"
+
+    @pytest.mark.parametrize("transport", _NETWORK)
+    def test_no_auth_warning_when_authorizer_configured(
+        self,
+        transport: str,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        server = FlowServer(_ok_executor(), authorizer=lambda ctx: True)
+        with caplog.at_level(logging.WARNING, logger=_SERVER_LOGGER):
+            _serve_sync(server, transport, monkeypatch)
+        assert "no authenticator" not in caplog.text
+
+
+class TestNetworkErrorDetailDefault:
+    @pytest.mark.parametrize("transport", _NETWORK)
+    @pytest.mark.parametrize("entry", _ENTRY_POINTS)
+    def test_unset_default_is_tightened(
+        self, transport: str, entry: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = FlowServer(_ok_executor())
+        assert server.error_detail == "full"
+        entry(server, transport, monkeypatch)
+        assert server.error_detail == "type_only"
+
+    @pytest.mark.parametrize("transport", _NETWORK)
+    def test_explicit_full_is_never_overridden(
+        self, transport: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = FlowServer(_boom_executor(), error_detail="full")
+        _serve_sync(server, transport, monkeypatch)
+        assert server.error_detail == "full"
+        # And the deliberate choice still reaches the client.
+        assert "abc123" in _content_text(_call(server, "boom", {"n": 1}))
+
+    @pytest.mark.parametrize("transport", _NETWORK)
+    def test_profile_supplied_value_is_treated_as_deliberate(
+        self, transport: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = FlowServer(_ok_executor(), profile=MCPServerProfile.trusted_network())
+        assert server.error_detail == "full"
+        _serve_sync(server, transport, monkeypatch)
+        assert server.error_detail == "full"
+
+    def test_tightening_reaches_already_registered_dispatchers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The gate must be mutated in place, not replaced.
+
+        Every flow dispatcher closes over the gate instance at registration time
+        (inside ``__init__``), so a fix that rebinds ``self._gate`` would leave
+        the registered flows rendering full error text while the attribute
+        claimed otherwise. Assert on the *rendered* text, not the attribute.
+        """
+        server = FlowServer(_boom_executor())
+        assert "abc123" in _content_text(_call(server, "boom", {"n": 1}))
+        _serve_sync(server, "sse", monkeypatch)
+        text = _content_text(_call(server, "boom", {"n": 1}))
+        assert "abc123" not in text
+        assert "/etc/passwd" not in text
+        # type_only keeps the class name and drops the message text entirely.
+        assert "FlowExecutionError" in text
+        assert "token=" not in text
+
+    def test_repeated_serves_are_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        server = FlowServer(_ok_executor())
+        _serve_sync(server, "sse", monkeypatch)
+        first = server.error_detail
+        _serve_sync(server, "streamable-http", monkeypatch)
+        _serve_sync(server, "stdio", monkeypatch)
+        assert server.error_detail == first == "type_only"
+
+
+class TestServeTimeReadinessLogging:
+    def test_stock_network_server_reports_missing_hooks_and_not_ready(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A bare server must be reported as missing authn/authz — never "ready".
+
+        ``MCPServerProfile.balanced()`` would produce an empty finding list here,
+        which ``evaluate_readiness`` turns into ``code="ready"`` — the exact
+        opposite of the truth for an unauthenticated server.
+        """
+        server = FlowServer(_ok_executor())
+        with caplog.at_level(logging.INFO, logger=_SERVER_LOGGER):
+            _serve_sync(server, "sse", monkeypatch)
+        codes = {
+            finding
+            for finding in ("missing-authorizer", "missing-authenticator", "ready")
+            if finding in caplog.text
+        }
+        assert codes == {"missing-authorizer", "missing-authenticator"}
+        # The tightened default must match the fallback profile's baseline, so a
+        # correctly hardened server is not also nagged about error detail.
+        assert "error-detail-relaxed" not in caplog.text
+
+    def test_configured_profile_is_used_when_supplied(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = FlowServer(
+            _ok_executor(),
+            profile=MCPServerProfile.strict(),
+            authenticator=lambda ctx: "u",
+            authorizer=lambda ctx: True,
+            error_detail="generic",
+        )
+        with caplog.at_level(logging.INFO, logger=_SERVER_LOGGER):
+            _serve_sync(server, "sse", monkeypatch)
+        assert "ready" in caplog.text
+        assert "missing-authenticator" not in caplog.text
+
+    def test_readiness_report_public_contract_is_unchanged(self) -> None:
+        """Serve-time readiness must not alter the documented no-profile behaviour."""
+        server = FlowServer(_ok_executor())
+        assert [f.code for f in server.readiness_report()] == ["no-profile"]
+
+    def test_stdio_logs_no_readiness_findings(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = FlowServer(_ok_executor())
+        with caplog.at_level(logging.INFO, logger=_SERVER_LOGGER):
+            _serve_sync(server, "stdio", monkeypatch)
+        assert "missing-authenticator" not in caplog.text

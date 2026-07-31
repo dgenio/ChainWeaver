@@ -349,9 +349,28 @@ server.serve(transport="streamable-http")
   filters apply to **explicitly named** flows too. Bypassing them is a
   deliberate, reviewable `force_expose=True` rather than an easy-to-miss log line.
 * **Error redaction (#347):** `error_detail` controls how much of a failing
-  flow's error reaches the client — `"full"` (default), `"type_only"`, or
+  flow's error reaches the client — `"full"`, `"type_only"`, or
   `"generic"` (a fixed message). `error_redaction=RedactionPolicy(...)` scrubs the
-  message text under `"full"`.
+  message text under `"full"`. The **default is transport-dependent** (#490): see
+  below.
+* **Network-transport defaults (#490):** `serve()` / `serve_async()` run a
+  preflight check when the transport is `"sse"` or `"streamable-http"`, where any
+  client that can reach the port is an untrusted caller:
+
+  | Behaviour | `stdio` | `sse` / `streamable-http` |
+  |---|---|---|
+  | Default `error_detail` (when neither argument nor profile sets it) | `"full"` | **`"type_only"`** |
+  | Warning logged when no authenticator *and* no authorizer is configured | no | **yes** |
+  | Readiness findings logged at serve time | no | **yes** |
+
+  An `error_detail` you pass explicitly — or one supplied by a `profile` — is
+  always respected and never tightened, so `trusted_network()` still yields
+  `"full"`. `stdio` is unchanged: there the peer is the parent process that
+  spawned the server, so its trust model differs. The serve-time readiness check
+  uses your `profile` when you supply one, and otherwise an internal
+  `network-default` baseline that requires an authenticator and an authorizer —
+  `balanced()` is deliberately *not* used for this, because it requires neither
+  and would report a wide-open server as `ready`.
 * **Profile packs (#446):** `MCPServerProfile.strict()` /
   `.balanced()` / `.trusted_network()` bundle secure defaults; explicit
   arguments always override the profile. `profile.diff(other)` supports audit
