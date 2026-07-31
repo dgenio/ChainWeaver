@@ -463,26 +463,47 @@ class FlowServer:
         the server. For ``"sse"`` / ``"streamable-http"`` any client that can
         reach the port is an untrusted caller, so this:
 
-        1. warns when neither an authenticator nor an authorizer is configured;
+        1. warns for **each** missing trust hook, naming it;
         2. tightens ``error_detail`` to :data:`_NETWORK_ERROR_DETAIL` when the
            operator set none, so raw exception text does not reach clients;
         3. logs :func:`evaluate_readiness` findings against the configured
            profile, or :func:`_default_readiness_profile` when there is none.
 
-        Idempotent: re-serving re-derives the same state rather than compounding
-        it, since the tightening is gated on ``_error_detail_explicit``, which
-        this method never mutates.
+        The warning names each hook that is absent rather than staying silent as
+        soon as one of the two is present: authentication and authorization
+        defend different things (*who is calling* versus *what they may call*),
+        ``_authorize`` is a no-op without an authorizer, and
+        :func:`_default_readiness_profile` requires **both** before it calls a
+        server ready — so keying the warning on "either is missing" keeps the two
+        signals consistent.
+
+        Idempotent for a given transport, and the tightening only ever narrows
+        what reaches a client. Note that ``error_detail`` is *instance* state: an
+        instance that has already served a network transport keeps the tightened
+        value for any later :meth:`serve` call on that same object, including a
+        ``stdio`` one. That direction is deliberate (it never loosens), and
+        ``serve`` normally blocks for the process lifetime, so the sequence
+        mainly arises in tests.
         """
         if transport not in _NETWORK_TRANSPORTS:
             return
 
-        if not (self._gate.has_authenticator or self._gate.has_authorizer):
+        missing = [
+            name
+            for name, present in (
+                ("authenticator", self._gate.has_authenticator),
+                ("authorizer", self._gate.has_authorizer),
+            )
+            if not present
+        ]
+        if missing:
             _LOGGER.warning(
-                "FlowServer is serving on the '%s' network transport with no authenticator "
-                "and no authorizer: every client that can reach this port may call every "
-                "exposed flow. Pass authenticator=/authorizer= (or profile="
+                "FlowServer is serving on the '%s' network transport with no %s: every client "
+                "that can reach this port may call every exposed flow. Pass %s (or profile="
                 "MCPServerProfile.strict()) before exposing this server beyond localhost.",
                 transport,
+                " and no ".join(missing),
+                "/".join(f"{name}=" for name in missing),
             )
 
         if not self._error_detail_explicit and self.error_detail != _NETWORK_ERROR_DETAIL:

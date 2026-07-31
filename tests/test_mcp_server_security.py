@@ -595,17 +595,32 @@ class TestNetworkTransportWarning:
         # stdio keeps the historical developer-friendly default.
         assert server.error_detail == "full"
 
-    @pytest.mark.parametrize("transport", _NETWORK)
-    def test_no_auth_warning_when_authorizer_configured(
-        self,
-        transport: str,
-        monkeypatch: pytest.MonkeyPatch,
-        caplog: pytest.LogCaptureFixture,
+    def test_names_only_the_missing_hook(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """A rubber-stamp authorizer must not silence the authentication gap.
+
+        Authentication and authorization defend different things, and
+        ``_default_readiness_profile`` requires both, so the warning names each
+        hook that is absent instead of going quiet once either is present.
+        """
         server = FlowServer(_ok_executor(), authorizer=lambda ctx: True)
         with caplog.at_level(logging.WARNING, logger=_SERVER_LOGGER):
-            _serve_sync(server, transport, monkeypatch)
-        assert "no authenticator" not in caplog.text
+            _serve_sync(server, "sse", monkeypatch)
+        assert "no authenticator" in caplog.text
+        assert "authorizer" not in caplog.text.split("Pass ")[0]
+
+    def test_no_warning_when_both_hooks_present(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = FlowServer(
+            _ok_executor(),
+            authenticator=lambda ctx: CallerIdentity(id="u"),
+            authorizer=lambda ctx: True,
+        )
+        with caplog.at_level(logging.WARNING, logger=_SERVER_LOGGER):
+            _serve_sync(server, "sse", monkeypatch)
+        assert "may call every exposed flow" not in caplog.text
 
 
 class TestNetworkErrorDetailDefault:
@@ -710,9 +725,16 @@ class TestServeTimeReadinessLogging:
         assert "ready" in caplog.text
         assert "missing-authenticator" not in caplog.text
 
-    def test_readiness_report_public_contract_is_unchanged(self) -> None:
-        """Serve-time readiness must not alter the documented no-profile behaviour."""
+    def test_readiness_report_public_contract_survives_preflight(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Serve-time readiness must not alter the documented no-profile behaviour.
+
+        Runs the preflight first — asserting on a freshly built server would pass
+        whether or not ``_preflight`` existed, and so would prove nothing.
+        """
         server = FlowServer(_ok_executor())
+        _serve_sync(server, "sse", monkeypatch)
         assert [f.code for f in server.readiness_report()] == ["no-profile"]
 
     def test_stdio_logs_no_readiness_findings(

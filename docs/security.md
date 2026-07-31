@@ -365,8 +365,15 @@ server.serve(transport="streamable-http")
 
   An `error_detail` you pass explicitly — or one supplied by a `profile` — is
   always respected and never tightened, so `trusted_network()` still yields
-  `"full"`. `stdio` is unchanged: there the peer is the parent process that
-  spawned the server, so its trust model differs. The serve-time readiness check
+  `"full"`. A fresh server's `stdio` defaults are unchanged: there the peer is
+  the parent process that spawned the server, so its trust model differs. Note
+  the tightening is *instance* state — once an instance has served a network
+  transport it keeps the tightened `error_detail` for any later `serve()` call on
+  that same object, including a `stdio` one. It only ever narrows what reaches a
+  client, and `serve()` normally blocks for the process lifetime, so this mainly
+  shows up when a single instance is reused across calls in tests. The
+  warning names **each** missing trust hook, so configuring only an authorizer
+  still reports the absent authenticator. The serve-time readiness check
   uses your `profile` when you supply one, and otherwise an internal
   `network-default` baseline that requires an authenticator and an authorizer —
   `balanced()` is deliberately *not* used for this, because it requires neither

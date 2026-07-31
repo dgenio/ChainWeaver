@@ -17,19 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values) reached any client that could open a connection. `readiness_report()`
   would have flagged the gap, but only ran when a profile was explicitly
   supplied, so nothing warned the operator. `serve()` / `serve_async()` now run a
-  preflight on network transports that: logs a warning when neither an
-  authenticator nor an authorizer is configured; **defaults `error_detail` to
-  `"type_only"`**; and logs `evaluate_readiness()` findings against the caller's
-  profile, or an internal `network-default` baseline requiring an authenticator
-  and authorizer when none was given.
+  preflight on network transports that: logs a warning naming **each** missing
+  trust hook (so configuring only an authorizer still reports the absent
+  authenticator); **defaults `error_detail` to `"type_only"`**; and logs
+  `evaluate_readiness()` findings against the caller's profile, or an internal
+  `network-default` baseline requiring an authenticator and authorizer when none
+  was given.
 
   **Behaviour change for existing deployments:** clients of a network-transport
   server that never set `error_detail` (or a profile) will now receive the
   exception class name instead of `"{type}: {message}"`. Pass `error_detail="full"`
-  explicitly to restore the previous text. `stdio` is unaffected — its peer is
-  the parent process that spawned it, so its trust model differs and its defaults
-  are unchanged. An `error_detail` set explicitly or via a `profile` is always
-  respected and never tightened.
+  explicitly to restore the previous text. A fresh server's `stdio` defaults are
+  unchanged — its peer is the parent process that spawned it, so its trust model
+  differs. The tightening is instance state, so an instance that has already
+  served a network transport keeps the tightened value for a later `stdio`
+  `serve()` call on that same object; it only ever narrows what reaches a client.
+  An `error_detail` set explicitly or via a `profile` is always respected and
+  never tightened.
 
 ### Added
 
