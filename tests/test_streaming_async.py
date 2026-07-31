@@ -28,12 +28,12 @@ class _Out(BaseModel):
 
 
 async def _async_inc(inp: _NIn) -> dict[str, Any]:
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # timing: yield
     return {"value": inp.n + 1}
 
 
 async def _async_double(inp: _Out) -> dict[str, Any]:
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # timing: yield
     return {"value": inp.value * 2}
 
 

@@ -105,6 +105,24 @@ and reruns never move an existing release tag.
 - **Assertion density:** one logical assertion per test when practical.
 - **Mocking:** no mocking of internal ChainWeaver classes unless testing integration boundaries.
 - **Coverage:** test both success and failure/error paths.
+- **Timing (#341):** never wait on the clock for work you can observe, and never
+  assert on a wall-clock duration you did not deliberately create.
+  - To wait for background work, poll an **observable condition** with a deadline
+    (`while not cond and time.monotonic() < deadline`) or wait on a
+    `threading.Event`. The deadline is a give-up bound, not a delay — a generous
+    value costs nothing on the happy path, so use `helpers.BARRIER_TIMEOUT_S`.
+  - To simulate latency, route the duration through `helpers.scaled()` **and**
+    scale the timeout or deadline it races against by the same call. Scaling one
+    side alone changes the behaviour under test, not just its headroom. Scale the
+    literal offset, never a computed absolute time: `time.time() + scaled(0.05)`,
+    never `scaled(time.time() + 0.05)`. Remember any third reference to the same
+    number, such as an assertion echoing a configured timeout.
+  - Set `CHAINWEAVER_TEST_TIMING_MULTIPLIER` above `1` to widen every scaled
+    duration on a slow job; it defaults to `1`.
+  - Every `time.sleep` / `asyncio.sleep` under `tests/` must be scaled or carry a
+    `# timing: yield | duration-sim | poll-interval | measurement` marker
+    explaining which legitimate category it is.
+    `scripts/check_test_sleeps.py` enforces this in pre-commit and CI.
 - **Property tests:** Hypothesis-based determinism tests live in
   `tests/property/` and are tagged `@pytest.mark.property`. They run by
   default and additionally as a separate `pytest -m property` CI step on

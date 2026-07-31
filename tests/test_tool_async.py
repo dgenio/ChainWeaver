@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from helpers import scaled
 from pydantic import BaseModel
 
 from chainweaver.exceptions import ToolDefinitionError, ToolTimeoutError
@@ -25,7 +26,7 @@ def _sync_double(inp: _Input) -> dict[str, Any]:
 
 
 async def _async_double(inp: _Input) -> dict[str, Any]:
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # timing: yield
     return {"value": inp.n * 2}
 
 
@@ -99,7 +100,7 @@ class TestToolRunAsync:
 
     async def test_async_timeout_raises(self) -> None:
         async def _slow(inp: _Input) -> dict[str, Any]:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(scaled(1.0))  # timing: duration-sim — outlasts the tool timeout
             return {"value": 0}
 
         tool = Tool(
@@ -108,7 +109,7 @@ class TestToolRunAsync:
             input_schema=_Input,
             output_schema=_Output,
             fn=_slow,
-            timeout_seconds=0.05,
+            timeout_seconds=scaled(0.05),
         )
         with pytest.raises(ToolTimeoutError):
             await tool.run_async({"n": 1})
@@ -117,7 +118,7 @@ class TestToolRunAsync:
         import time
 
         def _slow(inp: _Input) -> dict[str, Any]:
-            time.sleep(0.3)
+            time.sleep(scaled(0.3))  # timing: duration-sim — blocking, outlasts the tool timeout
             return {"value": 0}
 
         tool = Tool(
@@ -126,7 +127,7 @@ class TestToolRunAsync:
             input_schema=_Input,
             output_schema=_Output,
             fn=_slow,
-            timeout_seconds=0.05,
+            timeout_seconds=scaled(0.05),
         )
         with pytest.raises(ToolTimeoutError):
             await tool.run_async({"n": 1})

@@ -85,6 +85,9 @@ class TestDurationCapture:
     def test_duration_inferred_when_omitted(self) -> None:
         recorder = TraceRecorder()
         trace_id = recorder.start_trace(source="t")
+        # timing: measurement — the elapsed duration IS under test, not a wait for
+        # background work. The assertion below is a lower bound, so a slow runner
+        # only makes it pass more easily; scaling one side alone would break it.
         time.sleep(0.02)
         recorder.record_step(trace_id, "step1", inputs={}, outputs={})
         trace = recorder.end_trace(trace_id)

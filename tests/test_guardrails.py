@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 import pytest
-from helpers import NumberInput, ValueOutput
+from helpers import NumberInput, ValueOutput, scaled
 from pydantic import BaseModel
 
 from chainweaver.exceptions import ToolOutputSizeError, ToolTimeoutError
@@ -45,7 +45,7 @@ class TestToolRunGuardrails:
 
     def test_timeout_fires_for_slow_fn(self) -> None:
         def slow(_: NumberInput) -> dict[str, Any]:
-            time.sleep(0.5)
+            time.sleep(scaled(0.5))  # timing: duration-sim — must outlast the tool timeout
             return {"value": 1}
 
         tool = Tool(
@@ -54,12 +54,12 @@ class TestToolRunGuardrails:
             input_schema=NumberInput,
             output_schema=ValueOutput,
             fn=slow,
-            timeout_seconds=0.05,
+            timeout_seconds=scaled(0.05),
         )
         with pytest.raises(ToolTimeoutError) as exc_info:
             tool.run({"number": 1})
         assert exc_info.value.tool_name == "slow"
-        assert exc_info.value.timeout_seconds == 0.05
+        assert exc_info.value.timeout_seconds == scaled(0.05)
 
     def test_timeout_not_triggered_for_fast_fn(self) -> None:
         tool = Tool(
@@ -144,7 +144,7 @@ def _build_executor(tool: Tool) -> FlowExecutor:
 class TestExecutorRecordsGuardrailErrors:
     def test_timeout_recorded_with_specific_error_type(self) -> None:
         def slow(_: NumberInput) -> dict[str, Any]:
-            time.sleep(0.5)
+            time.sleep(scaled(0.5))  # timing: duration-sim — must outlast the tool timeout
             return {"value": 1}
 
         tool = Tool(
@@ -153,7 +153,7 @@ class TestExecutorRecordsGuardrailErrors:
             input_schema=NumberInput,
             output_schema=ValueOutput,
             fn=slow,
-            timeout_seconds=0.05,
+            timeout_seconds=scaled(0.05),
         )
         ex = _build_executor(tool)
         result = ex.execute_flow("guardrail_flow", {"number": 1})

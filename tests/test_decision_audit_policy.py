@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from helpers import NumberInput, ValueInput, ValueOutput, _add_ten_fn, _double_fn
+from helpers import NumberInput, ValueInput, ValueOutput, _add_ten_fn, _double_fn, scaled
 
 from chainweaver.contracts import DeterminismLevel
 from chainweaver.decisions import (
@@ -231,14 +231,14 @@ def test_decision_policy_defaults_to_error_on_timeout() -> None:
 
 
 def _slow_callback(ctx: DecisionContext) -> str:
-    time.sleep(0.3)
+    time.sleep(scaled(0.3))  # timing: duration-sim — outlasts the decision timeout
     return ctx.default_tool_name
 
 
 def test_timeout_error_fails_the_step() -> None:
     ex = _executor(
         callback=_slow_callback,
-        policy=DecisionPolicy(timeout_s=0.05, on_timeout="error"),
+        policy=DecisionPolicy(timeout_s=scaled(0.05), on_timeout="error"),
     )
     result = ex.execute_flow("picky", {"number": 5})
     assert result.success is False
@@ -250,7 +250,7 @@ def test_timeout_error_fails_the_step() -> None:
 def test_timeout_default_falls_back_to_static_tool() -> None:
     ex = _executor(
         callback=_slow_callback,
-        policy=DecisionPolicy(timeout_s=0.05, on_timeout="default"),
+        policy=DecisionPolicy(timeout_s=scaled(0.05), on_timeout="default"),
     )
     result = ex.execute_flow("picky", {"number": 5})
     assert result.success is True
@@ -265,7 +265,7 @@ def test_timeout_default_falls_back_to_static_tool() -> None:
 def test_timed_out_callback_does_not_corrupt_later_runs() -> None:
     ex = _executor(
         callback=_slow_callback,
-        policy=DecisionPolicy(timeout_s=0.05, on_timeout="default"),
+        policy=DecisionPolicy(timeout_s=scaled(0.05), on_timeout="default"),
     )
     first = ex.execute_flow("picky", {"number": 5})
     assert first.success is True

@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import pytest
+from helpers import BARRIER_TIMEOUT_S, scaled
 from pydantic import BaseModel, ValidationError
 
 from chainweaver import (
@@ -28,7 +29,7 @@ from chainweaver.exceptions import (
 # Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
 # never to trip on a loaded CI runner, yet bounded so a logic error fails fast
 # instead of hanging the suite.
-_BARRIER_TIMEOUT_S = 5.0
+_BARRIER_TIMEOUT_S = BARRIER_TIMEOUT_S
 
 # ---------------------------------------------------------------------------
 # Schemas + tools
@@ -417,7 +418,7 @@ def _slow_subflow_executor(
             entered.set()
             proceed.wait(timeout=_BARRIER_TIMEOUT_S)
         elif sleep_a:
-            time.sleep(sleep_a)
+            time.sleep(scaled(sleep_a))  # timing: duration-sim — races the deadline
         return {"a": inp.n + 1}
 
     def _plus(inp: _AIn) -> dict[str, Any]:
@@ -475,7 +476,7 @@ class TestCompositionCancellation:
     def test_deadline_observed_between_subflow_steps(self) -> None:
         ex = _slow_subflow_executor(sleep_a=0.15)
         with pytest.raises(FlowCancelledError) as exc_info:
-            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + scaled(0.05))
         err = exc_info.value
         # The deadline fired *inside* the sub-flow, but the error is re-anchored
         # to the parent: parent name, parent step index, and a parent partial
@@ -523,7 +524,7 @@ class TestCompositionCancellation:
     def test_dag_deadline_observed_in_subflow(self) -> None:
         ex = _slow_subflow_executor(sleep_a=0.15)
         with pytest.raises(FlowCancelledError) as exc_info:
-            ex.execute_flow("dag_parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+            ex.execute_flow("dag_parent_slow", {"n": 1}, deadline=time.time() + scaled(0.05))
         err = exc_info.value
         assert err.deadline_exceeded is True
         assert err.flow_name == "dag_parent_slow"
@@ -554,7 +555,7 @@ class TestCompositionCancellation:
         ex = _slow_subflow_executor(sleep_a=0.15)
         ex.add_middleware(_RecordEnds())
         with pytest.raises(FlowCancelledError):
-            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + 0.05)
+            ex.execute_flow("parent_slow", {"n": 1}, deadline=time.time() + scaled(0.05))
         # Both the sub-flow and the parent must have fired flow_end exactly once.
         assert ended.count("sub_slow") == 1
         assert ended.count("parent_slow") == 1

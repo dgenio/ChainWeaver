@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 import pytest
-from helpers import NumberInput, ValueInput, ValueOutput, _add_ten_fn, _double_fn
+from helpers import NumberInput, ValueInput, ValueOutput, _add_ten_fn, _double_fn, scaled
 from pydantic import BaseModel
 
 from chainweaver import (
@@ -227,7 +227,8 @@ async def test_async_subflow_deadline_forwarded_into_subflow() -> None:
     """A deadline that lands *between* the sub-flow's own steps must fire."""
 
     async def _slow(inp: _NIn) -> dict[str, Any]:
-        time.sleep(0.05)  # push past the deadline within the sub-flow
+        # timing: duration-sim — pushes past the deadline within the sub-flow
+        time.sleep(scaled(0.05))
         return {"value": inp.n + 1}
 
     async def _passthrough(inp: _Out) -> dict[str, Any]:
@@ -267,7 +268,7 @@ async def test_async_subflow_deadline_forwarded_into_subflow() -> None:
         )
     )
 
-    deadline = time.time() + 0.02
+    deadline = time.time() + scaled(0.02)
     with pytest.raises(FlowCancelledError) as excinfo:
         await ex.execute_flow_async("parent", {"n": 1}, deadline=deadline)
     # The cancellation is re-anchored to the parent flow.

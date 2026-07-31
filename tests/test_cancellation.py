@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import pytest
+from helpers import BARRIER_TIMEOUT_S, scaled
 from pydantic import BaseModel
 
 from chainweaver import (
@@ -24,7 +25,7 @@ from chainweaver.exceptions import FlowCancelledError
 # Upper bound for the deterministic cancel-barrier waits (#244). Generous enough
 # never to trip on a loaded CI runner, yet bounded so a logic error fails fast
 # instead of hanging the suite.
-_BARRIER_TIMEOUT_S = 5.0
+_BARRIER_TIMEOUT_S = BARRIER_TIMEOUT_S
 
 # ---------------------------------------------------------------------------
 # Schemas + tools
@@ -70,7 +71,7 @@ def _make_executor(
             entered.set()
             proceed.wait(timeout=_BARRIER_TIMEOUT_S)
         elif sleep_a:
-            time.sleep(sleep_a)
+            time.sleep(scaled(sleep_a))  # timing: duration-sim — races the deadline
         return {"a": inp.n + 1}
 
     def _fast_b(inp: _AIn) -> dict[str, Any]:
@@ -168,7 +169,7 @@ class TestLinearCancellation:
     def test_deadline_cancels_after_first_step(self) -> None:
         executor = _make_executor(sleep_a=0.15)
         with pytest.raises(FlowCancelledError) as exc_info:
-            executor.execute_flow("slow_then_fast", {"n": 1}, deadline=time.time() + 0.05)
+            executor.execute_flow("slow_then_fast", {"n": 1}, deadline=time.time() + scaled(0.05))
         err = exc_info.value
         # Raised at the boundary before step 1, after step 0 completed.
         assert err.step_index == 1
@@ -242,7 +243,7 @@ class TestDagCancellation:
     def test_deadline_cancels_between_levels(self) -> None:
         executor = _make_executor(sleep_a=0.15)
         with pytest.raises(FlowCancelledError) as exc_info:
-            executor.execute_flow("slow_dag", {"n": 1}, deadline=time.time() + 0.05)
+            executor.execute_flow("slow_dag", {"n": 1}, deadline=time.time() + scaled(0.05))
         err = exc_info.value
         # Level 0 (step A) completed in-flight; B was never started.
         assert err.result.success is False
@@ -267,7 +268,7 @@ class TestAsyncCancellation:
         executor = _make_executor(sleep_a=0.15)
         with pytest.raises(FlowCancelledError) as exc_info:
             await executor.execute_flow_async(
-                "slow_then_fast", {"n": 1}, deadline=time.time() + 0.05
+                "slow_then_fast", {"n": 1}, deadline=time.time() + scaled(0.05)
             )
         err = exc_info.value
         assert err.step_index == 1

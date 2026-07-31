@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from helpers import scaled
 from pydantic import BaseModel
 
 from chainweaver import (
@@ -34,12 +35,12 @@ def _double(inp: _Inp) -> dict[str, Any]:
 
 
 async def _async_increment(inp: _Inp) -> dict[str, Any]:
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # timing: yield
     return {"value": inp.n + 1}
 
 
 async def _async_double_value(inp: _Out) -> dict[str, Any]:
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # timing: yield
     return {"value": inp.value * 2}
 
 
@@ -453,7 +454,8 @@ class TestExecuteFlowAsyncEventLoopUnblocked:
         def _slow_double(inp: _Inp) -> dict[str, Any]:
             import time
 
-            time.sleep(0.1)  # blocking, on purpose
+            # timing: duration-sim — blocking on purpose; paired with the ticker below
+            time.sleep(scaled(0.1))
             return {"value": inp.n * 2}
 
         executor.register_tool(
@@ -471,7 +473,9 @@ class TestExecuteFlowAsyncEventLoopUnblocked:
 
         async def _ticker() -> None:
             for _ in range(5):
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(
+                    scaled(0.01)
+                )  # timing: duration-sim — paired with _slow_double
                 tick_counter[0] += 1
 
         result, _ = await asyncio.gather(
