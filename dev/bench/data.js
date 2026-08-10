@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786350293097,
+  "lastUpdate": 1786384642320,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4104,6 +4104,78 @@ window.BENCHMARK_DATA = {
             "value": 0.7502219999935278,
             "unit": "ms",
             "extra": "min=0.70ms max=0.88ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com",
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc724d38f629a2253e305039831350f94e8ecea0",
+          "message": "chore(ci): bump actions/checkout (#548)\n\nBumps the actions-nonmajor group with 1 update in the / directory: [actions/checkout](https://github.com/actions/checkout).\n\n\nUpdates `actions/checkout` from 7.0.0 to 7.0.1\n- [Release notes](https://github.com/actions/checkout/releases)\n- [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/actions/checkout/compare/9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0...3d3c42e5aac5ba805825da76410c181273ba90b1)\n\n---\nupdated-dependencies:\n- dependency-name: actions/checkout\n  dependency-version: 7.0.1\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n  dependency-group: actions-nonmajor\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+          "timestamp": "2026-08-10T18:55:28+01:00",
+          "tree_id": "31df3dc8f00d8cc2a34e148b0a800ca32e04e8c0",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/fc724d38f629a2253e305039831350f94e8ecea0"
+        },
+        "date": 1786384641164,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3189239999983329,
+            "unit": "ms",
+            "extra": "min=0.27ms max=0.48ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2340370000126768,
+            "unit": "ms",
+            "extra": "min=0.18ms max=0.39ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.5532999999928734,
+            "unit": "ms",
+            "extra": "min=0.49ms max=0.64ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.33804999998210405,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.43ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.6014669999995,
+            "unit": "ms",
+            "extra": "min=102.35ms max=102.77ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8316110000095023,
+            "unit": "ms",
+            "extra": "min=0.81ms max=0.96ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.43577099998993,
+            "unit": "ms",
+            "extra": "min=251.39ms max=251.73ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.5117549999908988,
+            "unit": "ms",
+            "extra": "min=0.49ms max=0.81ms repeats=5"
           }
         ]
       }
