@@ -8,28 +8,18 @@ updates:
       time: "06:00"
       timezone: Etc/UTC
     target-branch: main
-    open-pull-requests-limit: 5
-    cooldown:
-      default-days: 7
+    # Library requirements are compatibility ranges. Routine releases are
+    # exercised by CI; only vulnerability remediation may rewrite the manifest.
+    open-pull-requests-limit: 0
     groups:
-      python-nonmajor:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-      python-security-nonmajor:
+      python-security:
         applies-to: security-updates
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
     labels:
       - dependencies
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
 
   - package-ecosystem: github-actions
     directory: "/"
