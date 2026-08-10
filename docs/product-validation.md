@@ -23,7 +23,8 @@ review, security, drift, or portability lifecycle** adds enough value to justify
 another dependency.
 
 The primary validation experiment is tracked in
-[#553](https://github.com/dgenio/ChainWeaver/issues/553).
+[#553](https://github.com/dgenio/ChainWeaver/issues/553). Independent participants
+can follow the concrete [validation participant guide](validation-participant-guide.md).
 
 ## The baseline ChainWeaver must beat
 
@@ -68,6 +69,11 @@ For each workload:
 A flattering demo is not the objective. Workloads where ChainWeaver finds
 nothing useful belong in the result set.
 
+The repository includes a structured **Independent validation result** issue form
+so reports capture the pre-analysis baseline, privacy mode, rejected/missed
+candidates, manual comparison, security result, and keep/uninstall verdict rather
+than only positive outcomes.
+
 ## Security invariant
 
 > **ChainWeaver may remove unnecessary reasoning boundaries. It must never
@@ -80,7 +86,11 @@ of the child operations unless a reviewer explicitly approves a different
 policy.
 
 The detailed contract and adversarial cases are tracked in
-[#554](https://github.com/dgenio/ChainWeaver/issues/554).
+[#554](https://github.com/dgenio/ChainWeaver/issues/554), with the current
+implementation/gap described in
+[Macro-capability security boundary](macro-capability-security.md). An independent
+threat-model review is requested in
+[#558](https://github.com/dgenio/ChainWeaver/issues/558).
 
 At minimum:
 
@@ -91,6 +101,16 @@ At minimum:
 - policy or safety-contract drift suspends governed execution rather than
   rewriting historical approval evidence;
 - audit evidence makes the macro-level and child-level decisions reconstructable.
+
+### Current limitation
+
+Today `FlowServer` can authenticate a caller and authorize the flow/MCP-tool
+invocation, while `FlowExecutor` can independently enforce child
+`ToolSafetyContract` approval and side-effect rules. The authenticated caller is
+not yet threaded into the executor's per-step approval context, so ChainWeaver
+does **not** currently claim generic caller-specific child authorization for a
+macro invocation. That missing compositional principal/policy seam is a v1
+blocker under #554, not a documentation caveat to wave away.
 
 ## Privacy invariant
 
@@ -130,8 +150,13 @@ to overcome.
 
 [#555](https://github.com/dgenio/ChainWeaver/issues/555) explores whether an
 approved capability can preserve identity, provenance, schemas, and the
-portable subset of governance guarantees while executing as a normal Python
-callable, MCP tool, or host-framework primitive.
+portable subset of governance guarantees while executing outside the
+ChainWeaver runtime.
+
+The repository already has adapter portability (`flow_to_callable`, OpenAI /
+Anthropic tool schemas, LangGraph and Agents SDK recipes) that lets other hosts
+**call ChainWeaver's executor**. #555 is intentionally about the harder question
+of true **execution portability** if validation creates demand for it.
 
 Do not build a broad adapter matrix before user evidence demands it.
 
@@ -142,9 +167,13 @@ and additional framework adapters are useful only after the product thesis and
 name are sufficiently stable.
 
 The naming/search decision is tracked in
-[#556](https://github.com/dgenio/ChainWeaver/issues/556). Distribution work may
-continue when it directly supports a validation participant, but it should not
-out-prioritize the validation program.
+[#556](https://github.com/dgenio/ChainWeaver/issues/556). The immediate
+validation-phase decision is to keep the current technical identifiers and
+qualify the public brand/category; the final keep-vs-rename gate happens after
+#553 and before broad launch/v1 distribution.
+
+Distribution work may continue when it directly supports a validation
+participant, but it should not out-prioritize the validation program.
 
 ## Success, kill, and pivot signals
 
