@@ -16,8 +16,6 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
-    labels:
-      - dependencies
     commit-message:
       prefix: "fix(deps)"
 
@@ -44,7 +42,5 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
-    labels:
-      - dependencies
     commit-message:
       prefix: "chore(ci)"
