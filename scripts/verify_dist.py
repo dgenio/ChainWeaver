@@ -78,7 +78,8 @@ def _verify_sdist(path: Path, expected_version: str) -> None:
         extracted = archive.extractfile(members[0])
         if extracted is None:  # pragma: no cover - guarded by member.isfile
             raise ValueError(f"{path.name}: could not read PKG-INFO")
-        raw = extracted.read()
+        with extracted:
+            raw = extracted.read()
         name = _metadata_value(raw, "Name", artifact=path)
         version = _metadata_value(raw, "Version", artifact=path)
         if name.lower() != _PROJECT:
