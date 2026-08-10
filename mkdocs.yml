@@ -101,6 +101,7 @@ nav:
       - When ChainWeaver fits: boundaries.md
       - Product validation & adoption gates: product-validation.md
       - Independent validation guide: validation-participant-guide.md
+      - API tiers & v1 compatibility: api-tiers.md
       - Macro-capability security boundary: macro-capability-security.md
       - Data integrity guarantees: data-integrity.md
       - Runtime responsibilities for hosts: runtime-responsibilities.md
