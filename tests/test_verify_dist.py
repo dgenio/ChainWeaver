@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import tarfile
 import zipfile
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from scripts.verify_dist import verify_dist
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_verify_dist() -> ModuleType:
+    """Load the release helper without making ``scripts`` a Python package."""
+    path = _ROOT / "scripts" / "verify_dist.py"
+    spec = importlib.util.spec_from_file_location("chainweaver_verify_dist", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+verify_dist = _load_verify_dist().verify_dist
 
 
 def _metadata(version: str) -> bytes:
