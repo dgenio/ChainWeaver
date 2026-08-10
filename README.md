@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.dgenio/chainweaver -->
 
-**Observe the tool paths your agent repeats. Compile them into typed, deterministic flows. Replace the LLM-in-the-loop with governed, auditable execution.**
+**Find where your agent no longer needs to reason. Review the evidence. Turn the accepted path into a governed deterministic capability.**
 
 [![PyPI](https://img.shields.io/pypi/v/chainweaver)](https://pypi.org/project/chainweaver/)
 [![CI](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml/badge.svg)](https://github.com/dgenio/ChainWeaver/actions/workflows/ci.yml)
@@ -15,24 +15,32 @@
   <img src="docs/assets/quickstart.svg" alt="ChainWeaver quick start: pip install, run a flow, and see the LLM-free step log" width="760">
 </p>
 
-**The moat — observe → compile → replace.** Point ChainWeaver at the tool paths
-your agent already repeats. `ChainAnalyzer` maps every schema-compatible chain
-among your tools; you compile the ones worth keeping into typed `Flow` objects;
-and `FlowExecutor` *replaces* the per-step LLM round-trips with deterministic,
-schema-validated execution — no model in the loop. You compile the path the
-analyzer surfaces instead of hand-wiring it.
+**Product thesis under validation — observe → prove → review → compile.**
+ChainWeaver can inspect repeated tool behavior, surface candidates, and execute
+reviewed deterministic paths with typed contracts. Deterministic execution by
+itself is **not** the moat: if you already know the exact workflow, a normal
+Python function, LangGraph node, or provider-native tool may be simpler. The
+hypothesis being tested is that **trace-derived evidence, useful rejection,
+governed promotion, security-boundary preservation, and drift detection** make
+ChainWeaver worth adopting. See [Product validation & adoption
+gates](docs/product-validation.md) and [#553](https://github.com/dgenio/ChainWeaver/issues/553).
 
-**Governance for tool flows.** Typed I/O at every step, file-serializable
-flows, schema-drift detection, determinism *attestation*, property fuzzing, and
-structured audit traces — disciplined, auditable, portable deterministic
-execution.
+**Remove reasoning boundaries, never security boundaries.** Compiling several
+tool calls into one capability must not silently aggregate privileges or erase
+child approval requirements. That invariant is tracked explicitly in
+[#554](https://github.com/dgenio/ChainWeaver/issues/554).
 
-> **Quantified and reproducible.** In the repo's
-> [benchmark report](benchmarks/results/latest.md), compiled flows show **0%
-> data corruption** versus **61–96%** for naive LLM-in-the-loop chaining, and
-> avoid **~$0.06** of LLM spend per 10-step flow. Regenerate it yourself with
-> `python benchmarks/report.py`. Saving LLM calls is a *consequence* — not the
-> headline.
+**Governance for deterministic tool paths.** Typed I/O at every step,
+file-serializable flows, schema-drift detection, determinism *attestation*,
+property fuzzing, and structured audit traces provide a disciplined execution
+substrate for paths that have actually earned deterministic promotion.
+
+> **Benchmarks are evidence about the executor, not proof of product-market fit.**
+> The repo's [benchmark report](benchmarks/results/latest.md) is reproducible and
+> shows the deterministic core avoiding model-mediated transitions in its
+> synthetic comparison. It does **not** establish that every repeated path should
+> be compiled, or that ChainWeaver beats the obvious plain-Python implementation.
+> The independent validation program requires that manual baseline explicitly.
 
 ```python
 from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
@@ -55,53 +63,50 @@ result = executor.execute_flow("calc", {"number": 5})
 
 > See the [full example](#quick-start) below or run `python examples/simple_linear_flow.py`
 
-**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Quick Start](#quick-start) · [Playground](#interactive-playground) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
+**[Installation](#installation) · [Why ChainWeaver?](#why-chainweaver) · [Is this for me?](#is-this-for-me) · [Product validation](docs/product-validation.md) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Docs site](https://chainweaver.readthedocs.io/) · [Roadmap](#roadmap)**
 
 ---
 
 ## See it in 30 seconds
 
-**The problem.** Your agent keeps doing the same path —
-`search → extract → validate → format` — but on every single turn it
-round-trips through the LLM between each tool call to "decide" what to
-do next.  That's four model calls to execute one deterministic
-operation.
+The deterministic executor solves a simple problem: once a path has been shown
+to need no intermediate reasoning, stop paying a model to re-decide the same
+plumbing on every run.
 
-**Before — naive agent loop, 4 model-mediated decisions:**
+**Before — a model-mediated path:**
 
 ```
 turn 1   ─►  LLM("plan")    ─►  search(query)         ─► 12 results
 turn 2   ─►  LLM("next?")   ─►  extract(results)      ─► 8 facts
 turn 3   ─►  LLM("next?")   ─►  validate(facts)       ─► 7 facts
 turn 4   ─►  LLM("next?")   ─►  format(facts)         ─► answer
-                                                          ⏱  ~6 s, 4 LLM calls
 ```
 
-**After — same path, compiled once into a named ChainWeaver flow:**
+**After review — the accepted path can run deterministically:**
 
 ```
 turn 1   ─►  LLM("plan")    ─►  search_summarize_flow(query)
                                   └─ search ─► extract ─► validate ─► format
-                                                          ⏱  ~1 s, 1 LLM call
 ```
 
-The agent still decides *which* flow to invoke (that part stays
-open-ended).  The four tool calls inside the flow no longer round-trip
-through the model — `FlowExecutor` runs them with strict Pydantic
-validation between every step and zero LLM involvement.
+The agent still decides *which* capability to invoke. The deterministic steps
+inside it run with strict Pydantic validation and no LLM involvement.
 
-**Copy-paste quick path:**
+The harder product question comes **before** this diagram: should this path be
+compiled at all? A useful ChainWeaver analysis must be able to show why a
+candidate is recurrent and structurally safe **and** reject paths where semantic
+judgment, side effects, authorization, or approval boundaries still matter. That
+claim is currently being tested on independent traces in #553.
+
+**Copy-paste executor path:**
 
 ```bash
 pip install 'chainweaver[yaml]'
 python examples/simple_linear_flow.py
 ```
 
-The summary below is a condensed view of the real
-`ExecutionResult` the script produces — the actual stdout also
-includes per-step timestamps and the executor's structured step
-log, but the values, the step order, and the final output are
-exactly what you get on disk:
+The summary below is a condensed view of the real `ExecutionResult` the script
+produces:
 
 ```
 flow=double_add_format success=True
@@ -111,45 +116,40 @@ step 1 add_ten         {'value': 20}
 step 2 format_result   {'result': 'Final value: 20'}
 ```
 
-Three tool calls, no LLM in the loop, fully reproducible from
-`examples/double_add_format.flow.yaml`.  Jump
-to the [Quick Start](#quick-start) for the Python version, or to the
-[Command-line interface](#command-line-interface) for the no-Python
-path.
-
 ---
 
 ## Why ChainWeaver?
 
+### Why not just write a Python function?
+
+Often, you should.
+
+If your team already knows the workflow is fixed, a normal function or the
+workflow primitives in your existing framework are usually the lowest-complexity
+answer. ChainWeaver should earn another dependency only when its lifecycle adds
+meaningful value—for example:
+
+- discovering non-obvious repeated model-mediated paths from real traces;
+- showing evidence for recurrence, dataflow compatibility, and counterexamples;
+- rejecting tempting paths that still require semantic judgment;
+- preserving approval and authorization constraints during promotion;
+- producing reproducible review evidence and artifact identity;
+- detecting schema/safety/policy drift after promotion;
+- exporting or executing the accepted capability without pretending that fewer
+  model calls automatically means greater correctness.
+
+Whether those advantages are strong enough in real teams is a **falsifiable
+product hypothesis**, not a README assumption. See
+[docs/product-validation.md](docs/product-validation.md).
+
 When an LLM-powered agent routes tools together — `fetch_data → transform → store` — a
-common pattern is to insert an LLM call between *every* step so the model can "decide"
-what to do next.
+common pattern is to insert an LLM call between steps so the model can decide
+what to do next. For a path that has been **demonstrated and reviewed as fully
+deterministic**, those intermediate calls can add latency, cost, and variability
+without adding useful judgment.
 
-```
-User request
-    │
-    ▼
-LLM call ──► Tool A
-    │
-    ▼
-LLM call ──► Tool B
-    │
-    ▼
-LLM call ──► Tool C
-    │
-    ▼
-Response
-```
-
-For flows that are **fully deterministic** (the next step is always the same given the
-previous output) these intermediate LLM calls add:
-
-- **Latency** — each round-trip costs hundreds of milliseconds.
-- **Cost** — every call consumes tokens and credits.
-- **Unpredictability** — a language model might route differently on each invocation.
-
-ChainWeaver compiles deterministic multi-tool flows into **executable flows** that run
-without any LLM involvement between steps:
+ChainWeaver's executor can run an accepted deterministic path without any LLM
+involvement between steps:
 
 ```
 User request
@@ -161,41 +161,30 @@ FlowExecutor ──► Tool A ──► Tool B ──► Tool C
 Response
 ```
 
-Think of it as the difference between an **interpreter** and a **compiler**:
-
-| Criterion | Naive LLM loop | ChainWeaver |
+| Criterion | Model-mediated path | ChainWeaver deterministic path |
 |---|---|---|
-| LLM calls per step | 1 per step | 0 |
-| Latency | O(n × LLM RTT) | O(n × tool RTT) |
-| Cost | O(n × token cost) | Fixed infra cost |
-| Reproducibility | Non-deterministic | Deterministic |
-| Schema validation | Ad-hoc / none | Pydantic enforced |
-| Observability | Prompt logs only | Structured step logs |
-| Reusability | Prompt templates | Registered, versioned flows |
+| LLM calls between deterministic steps | potentially one or more | 0 |
+| Reproducibility | depends on model decisions | deterministic path |
+| Schema validation | framework/application dependent | Pydantic enforced |
+| Observability | framework/application dependent | structured step logs |
+| Reusability | application dependent | registered, versioned flows |
 
 ### How is this different from LangChain / LangGraph / Prefect / Dagster / Temporal?
 
-Short answer: those frameworks each make a different design choice that's
-right for their own audience. ChainWeaver makes one specific trade-off —
-**no LLM calls between steps, enforced at the framework level** — and
-aligns the rest of the design (Pydantic-validated I/O, file-serializable
-flows, no server) around it.
+Those frameworks can also execute deterministic code. ChainWeaver should **not**
+be selected because deterministic execution is impossible elsewhere. Its current
+product thesis is narrower: start from observed agent/tool behavior, establish
+which regions no longer need reasoning, make the evidence and rejections
+reviewable, then promote accepted paths into governed deterministic
+capabilities.
 
-| | ChainWeaver | LangChain LCEL | LangGraph | Prefect 3 | Dagster | Temporal |
-|---|---|---|---|---|---|---|
-| LLM-free between steps | ✅ hard invariant | ⚠️ possible, not enforced | ⚠️ possible, not enforced | ✅ N/A | ✅ N/A | ✅ N/A |
-| Pydantic-validated I/O | ✅ required | ⚠️ optional | ✅ | ✅ Pydantic 2 native | ⚠️ Dagster `Config` | ⚠️ optional |
-| Lean dep set | ✅ 5 runtime pkgs | ❌ heavy | ❌ heavy | ❌ heavy | ❌ very heavy | ❌ heavy |
-| File-serializable flows | ✅ YAML / JSON | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Standalone (no server) | ✅ | ✅ | ✅ | ⚠️ ephemeral mode | ⚠️ needs daemon | ❌ server required |
-| Stateful long-running workflows | ❌ by design | ❌ | ⚠️ partial | ✅ | ✅ | ✅ |
-| Graph branches on LLM output | ❌ by design | ⚠️ limited | ✅ | ✅ N/A | ✅ N/A | ✅ N/A |
+The execution substrate remains deliberately small and LLM-free between steps,
+but the project is testing whether the evidence/governance lifecycle—not the
+mere existence of another workflow runtime—is the part users value.
 
-See [docs/comparisons.md](docs/comparisons.md) (also on the
-[hosted site](https://chainweaver.readthedocs.io/en/latest/comparisons/)) for
-the full matrix — version pins, citations to each alternative's own docs, and
-a "when to pick which" guide. Re-evaluated on each minor release of any of the
-projects above.
+See [docs/comparisons.md](docs/comparisons.md) for the detailed, versioned
+comparison and [docs/product-validation.md](docs/product-validation.md) for the
+criteria that can falsify this positioning.
 
 ---
 
@@ -207,27 +196,31 @@ the nuances; the short version:
 
 **Use ChainWeaver when**
 
-- The flow is predictable — you can name the next tool from the previous output
-  without asking a model to decide.
-- Determinism matters — same input must produce the same output, same execution path,
-  same trace.
-- You want strict schemas, audit-grade traces, and zero LLM calls between deterministic
-  steps.
+- You have real agent/tool traces and suspect parts of the path are repeated
+  plumbing rather than useful model judgment.
+- You want evidence and review around **which** paths deserve deterministic
+  promotion, not only a runtime for a workflow you already know.
+- Determinism, strict schemas, auditability, and drift detection matter once a
+  path is promoted.
+- You are prepared to keep security and approval boundaries explicit rather
+  than treating a macro-tool invocation as blanket child authorization.
 
 **Don't use ChainWeaver when**
 
+- You already know the workflow and a normal Python function or your existing
+  framework expresses it clearly enough.
 - Every step requires open-ended reasoning to pick the next one (use an agent
   framework: LangGraph, the OpenAI / Anthropic SDK tool-use loops).
 - You need a general workflow engine for scheduled / durable jobs across time
   (use Prefect, Dagster, or Temporal).
 - You expect the executor to call an LLM. It deliberately doesn't.
+- You cannot preserve the authorization/approval semantics of a side-effecting
+  path during compilation.
 
-The framework comparison table above (and the full one-paragraph-per-tool
-matrix in [docs/comparisons.md](docs/comparisons.md)) covers how ChainWeaver
-relates to its neighbours — LangChain, LangGraph, Prefect, Dagster, and
-Temporal.
+The product thesis, validation protocol, and kill/pivot criteria are public in
+[docs/product-validation.md](docs/product-validation.md).
 
-For the correctness argument behind the design, see
+For the correctness argument behind the deterministic execution design, see
 [docs/data-integrity.md](docs/data-integrity.md).
 
 ### Part of the Weaver Stack
@@ -462,7 +455,7 @@ def format_result(value: int) -> FormattedOutput:
 
 flow = Flow(
     name="double_add_format",
-    description="Doubles a number, adds 10, and formats the result.",
+    description="Doubles a number, adds 10, and formats.",
     steps=[
         FlowStep(tool_name="double",        input_mapping={"number": "number"}),
         FlowStep(tool_name="add_ten",       input_mapping={"value": "value"}),
@@ -744,43 +737,37 @@ initial_input (dict)
 
 ## MCP Integration Concept
 
-ChainWeaver is designed to sit **between** an MCP server and your agent loop:
+ChainWeaver can sit between agent/tool observation and deterministic execution:
 
 ```
-MCP Agent
-   │  (observes tool call sequence at runtime)
+Agent / tool traces
+   │  (observe repeated paths)
    ▼
-ChainWeaver FlowRegistry
-   │  (matches pattern → retrieves compiled flow)
+Candidate analysis + human review
+   │  (prove/reject; preserve security boundaries)
    ▼
-FlowExecutor
-   │  (runs deterministic steps without LLM involvement)
+Governed deterministic capability
+   │  (FlowExecutor and/or supported export)
    ▼
-MCP Tool Results
+MCP / host-framework invocation
 ```
 
-In practice:
+MCP is an interoperability surface, not the product category. The current
+runtime can expose reviewed flows as MCP tools, while #555 explores whether
+portable outputs should let the same approved capability execute through other
+hosts without requiring ChainWeaver to own the runtime.
 
-1. An agent calls `tool_a`, then `tool_b`, then `tool_c` several times with
-   the same routing logic.
-2. A higher-level observer detects the pattern and registers a named `Flow`.
-3. On subsequent invocations the executor runs the entire flow in a single
-   call — no intermediate LLM calls required.
-
-ChainWeaver is **the library you embed**, not the runtime that owns
-your trace store, auth, side-effect policy, or MCP wiring.  Host
-authors should read
-[`docs/runtime-responsibilities.md`](docs/runtime-responsibilities.md)
-to see which responsibilities stay on their side of the seam (deciding
-when to invoke, persisting traces, redacting sensitive outputs,
-idempotency of side-effect tools, MCP authorisation).
+ChainWeaver is **a library you embed**, not the runtime that owns your trace
+store, identity system, or enterprise authorization control plane. Host authors
+should read [`docs/runtime-responsibilities.md`](docs/runtime-responsibilities.md).
 
 ---
 
 ## Integrations
 
-ChainWeaver plugs into the MCP ecosystem and the major agent frameworks. Every
-entry point below ships with a runnable example or recipe.
+ChainWeaver plugs into the MCP ecosystem and major agent frameworks. Existing
+integrations remain supported; new adapter breadth is deliberately lower
+priority than independent product validation.
 
 | Integration | What it does | Entry point |
 |---|---|---|
@@ -799,7 +786,9 @@ Install the extra you need: `pip install 'chainweaver[mcp]'` (or `langgraph`,
 extra raises a clear `ImportError`.
 
 Looking to publish or list ChainWeaver in the MCP registry / awesome-lists / framework
-directories? See [`docs/distribution.md`](docs/distribution.md).
+directories? See [`docs/distribution.md`](docs/distribution.md). Broad distribution
+is intentionally gated behind the naming decision (#556) and validation evidence
+(#553).
 
 ---
 
@@ -922,6 +911,10 @@ stale prices are visible. Unknown `(provider, model)` pairs raise
 `ExecutionResult`. Prices are refreshed by a maintainer-reviewed PR
 (`.github/workflows/update-prices.yml`) — never auto-merged.
 
+These reports are **estimates** unless their inputs come from observed trace
+measurements. They must not be presented as evidence that a candidate should be
+compiled; #377 tracks calibration of assumed versus measured model mediation.
+
 ---
 
 ## Export adapters
@@ -1017,9 +1010,11 @@ Runnable example: [`examples/plugin_discovery.py`](examples/plugin_discovery.py)
 
 ## Runtime learning
 
-You don't have to hand-author every flow. ChainWeaver can watch what your
-agent actually does and **propose** compiled flows for the repeated,
-deterministic paths — all offline, with no LLM in the loop.
+ChainWeaver can watch what an agent does and **propose** deterministic-flow
+candidates for repeated paths. A repeated sequence is not proof that the path
+is safe or valuable to compile; proposals require review, and the product
+validation program is explicitly measuring false positives, false negatives,
+and useful rejections.
 
 ```python
 from chainweaver import ChainObserver, FlowRegistry
@@ -1035,48 +1030,50 @@ observer.end_trace()
 
 registry = FlowRegistry()
 for suggestion in observer.suggest_flows(min_occurrences=3):
-    # Suggestions are proposals — review, then promote explicitly.
+    # Suggestions are proposals — review; never treat confidence as authorization.
     print(suggestion.flow.name, suggestion.confidence,
           suggestion.estimated_llm_calls_avoided)
     registry.register_flow(suggestion.flow)
 ```
 
-- **`ChainObserver`** (#78) mines repeated tool sequences from runtime traces
-  and emits ranked `FlowSuggestion`s — never auto-registered.
-- **`chainweaver record`** (#226) does the same from a recorded JSONL trace on
-  the command line, writing candidate `.flow.yaml` files ranked by projected
-  LLM calls avoided. Candidates persist as `draft`; use `chainweaver flows
-  promote ... --to reviewed`, then `--to active`. Ignored candidates remain
-  suppressed in later runs unless `--include-ignored` is passed.
-- **`ChainWeaverService`** (#101) ties the observer, the static
-  [`ChainAnalyzer`](#core-abstractions), and an optional offline LLM proposer
-  into a continuous *analyze → propose → govern → promote* loop with an
-  in-process governance gate and adoption metrics.
+- **`ChainObserver`** (#78) mines repeated tool sequences from runtime traces and
+  emits ranked `FlowSuggestion`s — never auto-registered.
+- **`chainweaver record`** (#226) mines recorded JSONL traces and writes candidate
+  flow files for explicit review/promotion.
+- **`ChainWeaverService`** (#101) ties observation, static analysis, and optional
+  offline proposals into an *analyze → propose → govern → promote* loop.
 
-Runnable example: [`examples/chain_observer.py`](examples/chain_observer.py).
+See [Product validation & adoption gates](docs/product-validation.md) before
+interpreting a suggestion as proof that a path should become deterministic.
 
 ---
 
 ## Roadmap
 
-Milestones below mirror the [GitHub milestones](https://github.com/dgenio/ChainWeaver/milestones); see
-[CHANGELOG.md](CHANGELOG.md) for a per-release feature breakdown.
+The current roadmap is **validation-first**, not feature-count-first. The latest
+published release is `v0.14.1`; newer work on `main` remains unreleased until a
+subsequent release is cut.
 
-| Milestone | Theme | Status |
-|-----------|-------|--------|
-| **v0.1.0** — Harden Foundation & Streamline DX | Infra, docs, DX APIs, CI | shipped |
-| **v0.2.0** — Build Core Execution & MCP Bridge | DAG execution, MCP adapter/server, guardrails | shipped |
-| **v0.3.0** — Enable Composition, Resilience & Observation | Sub-flows, retry, serialization, governance workflow | shipped |
-| **v0.4.0** — Add Async, Persistence & Visualization | File-backed registry store, JSON/YAML flow serialization, ASCII/DOT visualization, multi-OS CI matrix | shipped |
-| **v0.5.0** — Enforce Schema Governance & Maturity | Fingerprinting, drift detection, structured traces | shipped |
-| **v0.6.0** — Expand Integrations & Ecosystem Reach | Replay, VirtualTool, export, LangChain/LlamaIndex bridges | shipped |
-| **v0.7.0** — Ship CLI & Validate Performance | CLI polish, benchmarks, observed-determinism `attest` | shipped |
-| **v0.8.0** — Advisory Optimization | `suggest` optimizer (CW001–CW004 families) | shipped |
-| **v0.9.0** — MCP Integration & Editor Tooling | `chainweaver.mcp` adapter + flow server, `doctor`, `dump-schema` | **shipped (current)** |
-| **v1.0.0** — Finalize Stable Release | Ecosystem research, release criteria | planned (see [docs/v1-release-criteria.md](docs/v1-release-criteria.md)) |
+| Priority | Work | Why |
+|---|---|---|
+| **P0** | [#553 independent product falsification](https://github.com/dgenio/ChainWeaver/issues/553) | Establish whether trace-derived discovery/governance beats human inspection + a plain-function baseline. |
+| **P0** | [#554 authorization/approval preservation](https://github.com/dgenio/ChainWeaver/issues/554) | Compilation may remove reasoning boundaries, never silently security boundaries. |
+| **P0** | [#522 stable/supported/experimental API tiers](https://github.com/dgenio/ChainWeaver/issues/522) | Keep the compatibility promise smaller than the implementation surface. |
+| **P0** | [#519 release coherence](https://github.com/dgenio/ChainWeaver/issues/519) | Source, package, tag, release, docs, and artifacts must agree. |
+| **P1** | [#527 privacy profiles](https://github.com/dgenio/ChainWeaver/issues/527) | Trace analysis must work with minimized/local evidence. |
+| **Gate on #553** | [#334 canonical evidence architecture](https://github.com/dgenio/ChainWeaver/issues/334) | Build the large lifecycle model only after users validate the job. |
+| **Gate on #553** | [#498 production golden path](https://github.com/dgenio/ChainWeaver/issues/498) | Turn validated needs into one canonical end-to-end proof. |
+| **Explore if demanded** | [#555 portable compiled capabilities](https://github.com/dgenio/ChainWeaver/issues/555) | If users value analysis but not `FlowExecutor`, make the accepted artifact portable. |
+| **Before broad distribution** | [#556 naming/search decision](https://github.com/dgenio/ChainWeaver/issues/556) | Resolve discoverability/ambiguity while migration is still cheap. |
 
-Curious how ChainWeaver compares to LangChain, LangGraph, Prefect,
-Dagster, or Temporal? See [docs/comparisons.md](docs/comparisons.md).
+Broad directory submissions, hosted-playground investment, and additional
+framework-adapter breadth are deliberately lower priority until these gates
+produce evidence.
+
+`v1.0.0` is also evidence-gated: independent workloads/adopters, a manual
+baseline, an external security review, repeated use, a downstream integration,
+and a 30-day RC compatibility soak are required by
+[docs/v1-release-criteria.md](docs/v1-release-criteria.md).
 
 ---
 
