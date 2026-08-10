@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785497138364,
+  "lastUpdate": 1786350293097,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4032,6 +4032,78 @@ window.BENCHMARK_DATA = {
             "value": 0.8617230000140808,
             "unit": "ms",
             "extra": "min=0.85ms max=1.01ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8bddec91bc4043841cbfb6862722b66ea0dfd089",
+          "message": "chore(deps): harden dependency automation and Action pins (#547)\n\nGroup routine and security dependency maintenance, add cooldowns, leave breaking majors separate, SHA-pin workflow dependencies, and absorb the superseded PyPI publisher patch.",
+          "timestamp": "2026-08-10T09:23:16+01:00",
+          "tree_id": "52f1f1d612579e684bf3ef0feaaab9a77582fef5",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/8bddec91bc4043841cbfb6862722b66ea0dfd089"
+        },
+        "date": 1786350292595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3648209999767005,
+            "unit": "ms",
+            "extra": "min=0.32ms max=0.59ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.28237699996225274,
+            "unit": "ms",
+            "extra": "min=0.25ms max=0.51ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.4924239999866131,
+            "unit": "ms",
+            "extra": "min=0.47ms max=0.52ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.3430170000342514,
+            "unit": "ms",
+            "extra": "min=0.34ms max=0.36ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.61828700001274,
+            "unit": "ms",
+            "extra": "min=102.55ms max=102.66ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8991089999881297,
+            "unit": "ms",
+            "extra": "min=0.87ms max=0.96ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.96413000000462,
+            "unit": "ms",
+            "extra": "min=251.77ms max=252.06ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7502219999935278,
+            "unit": "ms",
+            "extra": "min=0.70ms max=0.88ms repeats=5"
           }
         ]
       }
