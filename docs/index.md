@@ -1,26 +1,37 @@
 # ChainWeaver
 
-**Observe the tool paths your agent repeats. Compile them into typed, deterministic flows. Replace the LLM-in-the-loop with governed, auditable execution.**
+**Find where your agent no longer needs to reason. Review the evidence. Turn the accepted path into a governed deterministic capability.**
 
-`ChainAnalyzer` maps the schema-compatible chains among your tools; you compile the ones
-worth keeping into typed `Flow` objects; and `FlowExecutor` runs them as a graph runner,
-not a reasoning engine — zero LLM calls, zero network I/O, zero randomness between steps,
-by design. Every step is Pydantic-validated, drift-detected, determinism-*attested*, and
-emits a structured audit trace, so the result is a disciplined, auditable flow rather
-than an opaque sequence of calls. (Saving LLM calls is a *consequence* — see the
-[reproducible benchmark](https://github.com/dgenio/ChainWeaver/blob/main/benchmarks/results/latest.md).)
+ChainWeaver's deterministic executor is intentionally LLM-free between steps, but
+**deterministic execution alone is not the product thesis**. If you already know a
+workflow is fixed, a normal Python function or your existing agent/workflow framework
+may be the simpler choice.
+
+The hypothesis being tested is that ChainWeaver earns its place by starting from real
+agent/tool behavior and adding value around **discovery, evidence, useful rejection,
+review, security-boundary preservation, and drift detection** before a repeated path is
+promoted to deterministic execution.
+
+Read the public [Product validation & adoption gates](product-validation.md) for the
+independent-trace experiment, manual-function baseline, security invariant, and
+kill/pivot criteria.
+
+> **Security boundary:** ChainWeaver may remove unnecessary reasoning boundaries. It
+> must never silently remove authorization or approval boundaries.
 
 ```mermaid
 flowchart LR
-    subgraph before ["❌ Naive Agent Loop · N LLM calls"]
-        R1([Request]) --> L1[LLM] --> T1[Tool A] --> L2[LLM] --> T2[Tool B] --> L3[LLM] --> T3[Tool C]
-    end
-    subgraph after ["✅ ChainWeaver · 0 LLM calls"]
-        R2([Request]) --> E[FlowExecutor] --> U1[Tool A] --> U2[Tool B] --> U3[Tool C]
-    end
+    traces[Agent / tool traces] --> analysis[Candidate analysis]
+    analysis --> review{Human review}
+    review -->|reject| rejected[Keep reasoning / fix boundary]
+    review -->|accept| capability[Governed deterministic capability]
+    capability --> host[MCP / agent framework / host]
 ```
 
-## In 30 seconds
+## In 30 seconds: the execution substrate
+
+Once a path has actually earned deterministic promotion, the runtime is deliberately
+simple:
 
 ```python
 from chainweaver import Tool, Flow, FlowStep, FlowRegistry, FlowExecutor
@@ -48,33 +59,66 @@ result = executor.execute_flow("calc", {"number": 5})
 # result.final_output → {"number": 5, "value": 10}
 ```
 
+No model call is made between deterministic steps. Inputs and outputs are validated,
+execution is traceable, and drift/safety contracts can be checked around governed
+promotion and deployment.
+
+## Why not just write a function?
+
+Often, you should.
+
+ChainWeaver should be adopted only when its lifecycle adds enough value beyond the
+manual baseline. The current validation program explicitly compares accepted candidates
+against plain Python or the host framework and asks whether independent users would keep
+ChainWeaver installed.
+
+Potential advantages being tested include:
+
+- discovering useful repeated model-mediated paths that were not already obvious;
+- proving recurrence and cumulative dataflow from real evidence;
+- rejecting paths that still require semantic judgment or unsafe privilege aggregation;
+- producing reproducible review evidence and stable artifact identity;
+- suspending governed execution when schema, safety, or policy contracts drift;
+- optionally exporting the accepted capability to the host that already owns the agent.
+
+If those advantages do not survive independent validation, the project should pivot
+before v1 rather than redefining success.
+
 ## Install
 
 ```bash
 pip install chainweaver
 ```
 
-Optional extras: `chainweaver[yaml]`, `chainweaver[otel]`, `chainweaver[docs]`.
+Optional extras include `chainweaver[yaml]`, `chainweaver[otel]`,
+`chainweaver[mcp]`, and framework-specific integrations.
 
 ## Where to next
 
 <div class="grid cards" markdown>
 
--   **New here?**
+-   **Evaluating the product?**
 
-    Start with [Your first flow](getting-started/first-flow.md), then walk the
+    Start with [Product validation & adoption gates](product-validation.md) and
+    [When ChainWeaver fits](boundaries.md). They include the explicit reasons to use a
+    normal function or another framework instead.
+
+-   **Trying the deterministic core?**
+
+    Use [Your first flow](getting-started/first-flow.md), then the
     [Cookbook](cookbook/index.md).
 
--   **Evaluating?**
+-   **Comparing alternatives?**
 
-    [When ChainWeaver fits](boundaries.md) and
-    [vs LangChain / Prefect / Dagster / Temporal / LangGraph](comparisons.md) cover
-    the fit question.
+    [vs LangChain / Prefect / Dagster / Temporal / LangGraph](comparisons.md) covers the
+    fit question. ChainWeaver does not claim those systems cannot execute deterministic
+    code.
 
--   **Need correctness guarantees?**
+-   **Need correctness/security boundaries?**
 
-    [Data integrity guarantees](data-integrity.md) lists the five formal properties
-    compiled flows preserve.
+    [Data integrity guarantees](data-integrity.md),
+    [Runtime responsibilities](runtime-responsibilities.md), and
+    [Security policy](security.md) document the current guarantees and host boundary.
 
 -   **Looking up an API?**
 
@@ -83,19 +127,19 @@ Optional extras: `chainweaver[yaml]`, `chainweaver[otel]`, `chainweaver[docs]`.
 
 </div>
 
-## Core idea
+## Current strategic gates
 
-ChainWeaver treats agent orchestration as a **compilation problem**, not a reasoning
-problem:
+The roadmap is validation-first:
 
-| | Naive LLM loop | ChainWeaver |
-|---|---|---|
-| LLM calls per step | 1 per step | **0** |
-| Latency | O(n × LLM RTT) | O(n × tool RTT) |
-| Reproducibility | Non-deterministic | **Deterministic** |
-| Schema validation | Ad-hoc / none | **Pydantic enforced** |
-| Observability | Prompt logs only | **Structured step records** |
-| Reusability | Prompt templates | **Registered, versioned flows** |
+1. independent product falsification on real agent workloads (#553);
+2. preserve authorization and approval boundaries during macro-capability compilation
+   (#554);
+3. reduce the v1 compatibility promise through explicit API tiers (#522);
+4. make release/package/docs state coherent (#519);
+5. make minimized/shape-only trace handling the safe default (#527);
+6. build the large canonical evidence architecture (#334) and production golden path
+   (#498) only after validation justifies them.
 
-ChainWeaver does not replace your agent. It sits **between** the agent's reasoning step
-and the underlying tools: once you know the flow, compile it.
+The measurable v1 bar is in [v1-release-criteria.md](v1-release-criteria.md). Stars are
+not a release criterion; independent use, repeated adoption, security review, and
+compatibility stability are.
