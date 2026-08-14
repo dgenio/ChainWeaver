@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786384642320,
+  "lastUpdate": 1786745290404,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4176,6 +4176,78 @@ window.BENCHMARK_DATA = {
             "value": 0.5117549999908988,
             "unit": "ms",
             "extra": "min=0.49ms max=0.81ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0001ad1bfce0076d0a31819ff8cef3db63d32b20",
+          "message": "Snapshot StepRecord inputs and outputs at record time (#561)\n\nCentralize point-in-time snapshot semantics at the StepRecord boundary so later mutation of nested live-context data cannot rewrite historical trace records. Includes nested mutation and serde regressions, data-integrity documentation, and benchmark verification.\n\nCloses #398.",
+          "timestamp": "2026-08-14T23:06:42+01:00",
+          "tree_id": "983c2d0f99c1375482d3341caaf4d7f08cea1c8c",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/0001ad1bfce0076d0a31819ff8cef3db63d32b20"
+        },
+        "date": 1786745289714,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3414729999917654,
+            "unit": "ms",
+            "extra": "min=0.30ms max=0.55ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2818739999952413,
+            "unit": "ms",
+            "extra": "min=0.24ms max=0.48ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.4217930000436354,
+            "unit": "ms",
+            "extra": "min=0.41ms max=0.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.3076320000445776,
+            "unit": "ms",
+            "extra": "min=0.30ms max=0.33ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.34937699999591,
+            "unit": "ms",
+            "extra": "min=102.30ms max=102.43ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8589369998617258,
+            "unit": "ms",
+            "extra": "min=0.85ms max=0.88ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 252.04275499999085,
+            "unit": "ms",
+            "extra": "min=251.78ms max=252.15ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.8427939999933187,
+            "unit": "ms",
+            "extra": "min=0.70ms max=0.96ms repeats=5"
           }
         ]
       }
