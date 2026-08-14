@@ -1,7 +1,7 @@
 # Data integrity guarantees
 
 ChainWeaver's most durable property is **provable data integrity** between tool steps.
-This page enumerates the five guarantees a compiled flow preserves, the things it does
+This page enumerates the six guarantees a compiled flow preserves, the things it does
 **not** guarantee, and how the LLM-mediated alternative breaks each one.
 
 These guarantees apply to the **standard `FlowExecutor.execute_flow` path on a
@@ -130,6 +130,26 @@ forwards the initial-input dict, but unannounced fields slip through unvalidated
 
 ---
 
+## Guarantee 6 — Historical step records are point-in-time snapshots
+
+> Once a `StepRecord` is created, its `inputs` and `outputs` describe that step at
+> that moment. Later mutation of nested lists/dicts in the live execution context,
+> a cache consumer, or caller-owned data cannot retroactively rewrite an earlier
+> trace record.
+
+**Mechanism:** `StepRecord` takes defensive deep copies of `inputs` and `outputs`
+inside a single Pydantic `mode="before"` validator. Every executor lane constructs
+the same model, so linear, async, DAG, fallback, checkpoint/replay, and cache paths
+inherit one snapshot boundary rather than relying on scattered `deepcopy()` calls.
+Only the two persisted step fields are copied; the cumulative execution context is
+not duplicated on every tool invocation.
+
+**Where it can break:** custom opaque Python objects may define unusual deep-copy
+semantics. Persisted traces are intended to contain ordinary serializable/Pydantic
+data; objects that cannot be copied or serialized are outside the trace contract.
+
+---
+
 ## Non-guarantees
 
 ChainWeaver guarantees the **envelope**. It deliberately does not guarantee:
@@ -163,6 +183,7 @@ ChainWeaver guarantees the **envelope**. It deliberately does not guarantee:
 | G3 — Type safety | **No** unless the prompt enforces a structured-output schema *and* validation runs after every call. | **Yes** by Pydantic validation. |
 | G4 — Deterministic routing | **No.** Same input may yield different flows. | **Yes** by construction. |
 | G5 — Schema-validated context | **No.** Context is free-form prompt history. | **Yes** at every boundary. |
+| G6 — Immutable historical trace snapshots | **No inherent guarantee.** A mutable in-process record can drift unless copied/frozen explicitly. | **Yes.** `StepRecord` snapshots nested inputs/outputs when the record is created. |
 
 The cost difference (zero vs N LLM calls per flow) is the headline number, but the
 **correctness** difference is the durable one: LLM speed and price improve over time;
@@ -183,7 +204,7 @@ Three concrete patterns confirm the guarantees hold in production:
    `attest_flow(flow=flow, executor=executor, n=50, repeats=3, seed=...)` periodically
    and assert that `aggregate_fingerprint` is non-empty (all repeats agreed). This is
    observed determinism, not proved determinism, but it catches every regression that
-   breaks any of the five guarantees above.
+   breaks any of the six guarantees above.
 
 ## Cross-references
 

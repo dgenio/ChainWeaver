@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Execution traces now snapshot nested step inputs and outputs at record time** (#398):
+  `StepRecord` defensively deep-copies its persisted `inputs`/`outputs` at the
+  model boundary. A later tool mutating a shared nested list/dict in the live
+  context can no longer retroactively rewrite an earlier trace. This is a
+  correctness change for code that incorrectly relied on object identity between
+  caller/context containers and recorded trace data; well-behaved flow semantics
+  are unchanged. The copy is paid once per recorded step, not for the whole
+  cumulative context before every invocation.
+
 - **Synchronous tool timeouts now return near the declared deadline** (#520): the
   sync path ran `fn` inside `with ThreadPoolExecutor(...)`, and `__exit__` calls
   `shutdown(wait=True)` — so when `ToolTimeoutError` propagated out of the block,

@@ -555,6 +555,26 @@ class StepRecord(BaseModel):
     approval: ApprovalRecord | None = None
     decision: DecisionRecord | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _snapshot_inputs_and_outputs(cls, data: Any) -> Any:
+        """Capture immutable point-in-time snapshots for trace data.
+
+        The live execution context deliberately reuses validated dictionaries for
+        efficiency. A later tool may mutate a nested container it receives, but
+        that must never rewrite the historical inputs/outputs of an earlier step.
+        Centralizing the copy here covers linear, async, DAG, replay/checkpoint,
+        cache, fallback, and direct StepRecord construction paths uniformly.
+        """
+        if not isinstance(data, dict):
+            return data
+        snapshot = dict(data)
+        if "inputs" in snapshot:
+            snapshot["inputs"] = copy.deepcopy(snapshot["inputs"])
+        if snapshot.get("outputs") is not None:
+            snapshot["outputs"] = copy.deepcopy(snapshot["outputs"])
+        return snapshot
+
     @model_validator(mode="after")
     def _fill_error_code(self) -> StepRecord:
         """Derive ``error_code`` from ``error_type`` when not set explicitly.
