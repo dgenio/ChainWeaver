@@ -60,8 +60,8 @@ jobs:
 
           replace_once(
               "CHANGELOG.md",
-              '''### Fixed\n\n''',
-              '''### Fixed\n\n- **Execution traces now snapshot nested step inputs and outputs at record time** (#398):\n  `StepRecord` defensively deep-copies its persisted `inputs`/`outputs` at the\n  model boundary. A later tool mutating a shared nested list/dict in the live\n  context can no longer retroactively rewrite an earlier trace. This is a\n  correctness change for code that incorrectly relied on object identity between\n  caller/context containers and recorded trace data; well-behaved flow semantics\n  are unchanged. The copy is paid once per recorded step, not for the whole\n  cumulative context before every invocation.\n\n''',
+              '''## [Unreleased]\n\n### Fixed\n\n''',
+              '''## [Unreleased]\n\n### Fixed\n\n- **Execution traces now snapshot nested step inputs and outputs at record time** (#398):\n  `StepRecord` defensively deep-copies its persisted `inputs`/`outputs` at the\n  model boundary. A later tool mutating a shared nested list/dict in the live\n  context can no longer retroactively rewrite an earlier trace. This is a\n  correctness change for code that incorrectly relied on object identity between\n  caller/context containers and recorded trace data; well-behaved flow semantics\n  are unchanged. The copy is paid once per recorded step, not for the whole\n  cumulative context before every invocation.\n\n''',
           )
           PY
           git diff --check
