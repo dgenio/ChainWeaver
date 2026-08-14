@@ -22,6 +22,7 @@ from chainweaver.exceptions import (
     FlowSerializationError,
 )
 from chainweaver.flow import DAGFlow
+from chainweaver.log_utils import RedactionPolicy
 from chainweaver.observer import ChainObserver
 from chainweaver.traces import (
     CandidateScore,
@@ -67,6 +68,27 @@ _TRACES_BACKTEST_TRACE_OPTION = typer.Option(
     "--trace",
     help="Path to the coding-agent JSONL trace to backtest against.",
 )
+_TRACES_REDACT_OPTION = typer.Option(
+    None,
+    "--redact",
+    case_sensitive=False,
+    help="Redact imported payloads before analysis: 'recommended' or 'strict'.",
+)
+
+
+def _trace_redaction_policy(name: str | None) -> RedactionPolicy | None:
+    if name is None or name.lower() == "none":
+        return None
+    normalized = name.lower()
+    if normalized == "recommended":
+        return RedactionPolicy.recommended()
+    if normalized == "strict":
+        return RedactionPolicy.strict()
+    typer.echo(
+        "chainweaver: --redact must be one of: recommended, strict, none",
+        err=True,
+    )
+    raise typer.Exit(code=1)
 
 
 def _mine_scored_candidates(
@@ -75,11 +97,15 @@ def _mine_scored_candidates(
     min_occurrences: int,
     min_length: int,
     max_length: int | None,
+    redact: str | None = None,
 ) -> tuple[list[Any], list[CandidateScore]]:
     """Load a trace, mine repeated tool sequences, and score each candidate."""
     _require_existing_file(trace_file)
     try:
-        events = load_agent_trace(trace_file)
+        events = load_agent_trace(
+            trace_file,
+            redaction_policy=_trace_redaction_policy(redact),
+        )
     except AgentTraceImportError as exc:
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -106,12 +132,14 @@ def traces_mine_command(
     max_length: int | None = _TRACES_MAX_LEN_OPTION,
     limit: int | None = _TRACES_LIMIT_OPTION,
     output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+    redact: str | None = _TRACES_REDACT_OPTION,
 ) -> None:
     """Mine and score candidate macro-flows from a coding-agent trace (#256, #266).
 
-    Reads a JSONL trace, mines repeated tool sequences offline, scores each
-    by token savings, success rate, schema stability, determinism, and
-    safety, and prints a ranked human-friendly report (or JSON).
+    Reads a JSONL trace, optionally redacts data-bearing payload values at the
+    ingestion boundary, mines repeated tool sequences offline, scores each by
+    token savings, success rate, schema stability, determinism, and safety,
+    and prints a ranked human-friendly report (or JSON).
 
     Exit codes: 0 = ran successfully, 1 = malformed trace, 2 = file not found.
     """
@@ -120,12 +148,14 @@ def traces_mine_command(
         min_occurrences=min_occurrences,
         min_length=min_length,
         max_length=max_length,
+        redact=redact,
     )
     shown = scores[:limit] if limit is not None else scores
     if output_format is OutputFormat.JSON:
         _emit_json(
             {
                 "trace_file": str(trace_file),
+                "redaction": redact,
                 "candidate_count": len(shown),
                 "candidates": [score.model_dump(mode="json") for score in shown],
             }
@@ -142,12 +172,14 @@ def traces_draft_flows_command(
     min_length: int = _TRACES_MIN_LEN_OPTION,
     max_length: int | None = _TRACES_MAX_LEN_OPTION,
     output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+    redact: str | None = _TRACES_REDACT_OPTION,
 ) -> None:
     """Generate reviewable draft .flow.yaml files from mined candidates (#257).
 
     Each draft is written in ``draft`` lifecycle with a ``.json`` sidecar of
     candidate metadata and warnings. Without ``--output-dir`` the command is
-    a dry run that only reports what would be written.
+    a dry run that only reports what would be written. ``--redact`` sanitizes
+    imported payloads before any mining/drafting consumer receives them.
 
     Exit codes: 0 = ran successfully, 1 = malformed trace, 2 = file not found.
     """
@@ -156,6 +188,7 @@ def traces_draft_flows_command(
         min_occurrences=min_occurrences,
         min_length=min_length,
         max_length=max_length,
+        redact=redact,
     )
     drafts = [draft_flow_from_candidate(events, score) for score in scores]
 
@@ -182,6 +215,7 @@ def traces_draft_flows_command(
         _emit_json(
             {
                 "trace_file": str(trace_file),
+                "redaction": redact,
                 "output_dir": str(output_dir) if output_dir is not None else None,
                 "draft_count": len(drafts),
                 "drafts": [
@@ -218,10 +252,13 @@ def traces_backtest_command(
     flow_file: Path = _FLOW_FILE_ARG,
     trace: Path = _TRACES_BACKTEST_TRACE_OPTION,
     output_format: OutputFormat = _TRACES_FORMAT_OPTION,
+    redact: str | None = _TRACES_REDACT_OPTION,
 ) -> None:
     """Replay past traces against a draft flow before promotion (#267).
 
     A deterministic, offline shape/sequence check — no tool is executed.
+    ``--redact`` applies the same ingestion-boundary payload policy used by
+    ``mine`` and ``draft-flows``.
 
     Exit codes: 0 = all examples reproduced, 1 = mismatches found or malformed
     input, 2 = file not found.
@@ -237,7 +274,10 @@ def traces_backtest_command(
         typer.echo("chainweaver: backtest supports linear flows only.", err=True)
         raise typer.Exit(code=1)
     try:
-        events = load_agent_trace(trace)
+        events = load_agent_trace(
+            trace,
+            redaction_policy=_trace_redaction_policy(redact),
+        )
     except AgentTraceImportError as exc:
         typer.echo(f"chainweaver: {exc}", err=True)
         raise typer.Exit(code=1) from exc
