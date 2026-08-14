@@ -47,9 +47,7 @@ def test_step_record_snapshots_nested_inputs_and_outputs_on_construction() -> No
 
 
 def test_recorded_outputs_do_not_change_when_live_context_mutates_later() -> None:
-    outputs: dict[str, object] = {
-        "customer": {"tags": ["new"], "profile": {"tier": "standard"}}
-    }
+    outputs: dict[str, object] = {"customer": {"tags": ["new"], "profile": {"tier": "standard"}}}
     record = _record(inputs={}, outputs=outputs)
 
     # Reproduce the executor hazard: the live context receives the same nested
@@ -65,9 +63,7 @@ def test_recorded_outputs_do_not_change_when_live_context_mutates_later() -> Non
     assert isinstance(profile, dict)
     profile["tier"] = "gold"
 
-    assert record.outputs == {
-        "customer": {"tags": ["new"], "profile": {"tier": "standard"}}
-    }
+    assert record.outputs == {"customer": {"tags": ["new"], "profile": {"tier": "standard"}}}
 
 
 def test_snapshot_semantics_survive_json_round_trip() -> None:
