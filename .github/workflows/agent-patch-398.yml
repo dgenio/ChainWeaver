@@ -68,7 +68,7 @@ jobs:
       - name: Install and run focused regression
         run: |
           python -m pip install -e . pytest pytest-cov
-          python -m pytest -q tests/test_step_record_snapshots.py
+          python -m pytest -q -o addopts='' tests/test_step_record_snapshots.py
       - name: Run representative benchmark
         run: python benchmarks/bench_naive_vs_compiled.py --steps 5 --llm-ms 10 --repeats 5
       - name: Commit verified patch
