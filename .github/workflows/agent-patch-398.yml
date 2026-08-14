@@ -35,29 +35,28 @@ jobs:
           replace_once(
               "chainweaver/executor.py",
               '''    decision: DecisionRecord | None = None\n\n    @model_validator(mode="after")\n''',
-              '''    decision: DecisionRecord | None = None\n\n    @model_validator(mode="before")\n    @classmethod\n    def _snapshot_inputs_and_outputs(cls, data: Any) -> Any:\n        """Capture immutable point-in-time snapshots for trace data.\n\n        The live execution context deliberately reuses validated dictionaries for\n        efficiency.  A later tool may mutate a nested container it receives, but\n        that must never rewrite the historical inputs/outputs of an earlier step.\n        Centralizing the copy here covers linear, async, DAG, replay/checkpoint,\n        cache, fallback, and direct StepRecord construction paths uniformly.\n        """\n        if not isinstance(data, dict):\n            return data\n        snapshot = dict(data)\n        if "inputs" in snapshot:\n            snapshot["inputs"] = copy.deepcopy(snapshot["inputs"])\n        if snapshot.get("outputs") is not None:\n            snapshot["outputs"] = copy.deepcopy(snapshot["outputs"])\n        return snapshot\n\n    @model_validator(mode="after")\n''',
+              '''    decision: DecisionRecord | None = None\n\n    @model_validator(mode="before")\n    @classmethod\n    def _snapshot_inputs_and_outputs(cls, data: Any) -> Any:\n        """Capture immutable point-in-time snapshots for trace data.\n\n        The live execution context deliberately reuses validated dictionaries for\n        efficiency. A later tool may mutate a nested container it receives, but\n        that must never rewrite the historical inputs/outputs of an earlier step.\n        Centralizing the copy here covers linear, async, DAG, replay/checkpoint,\n        cache, fallback, and direct StepRecord construction paths uniformly.\n        """\n        if not isinstance(data, dict):\n            return data\n        snapshot = dict(data)\n        if "inputs" in snapshot:\n            snapshot["inputs"] = copy.deepcopy(snapshot["inputs"])\n        if snapshot.get("outputs") is not None:\n            snapshot["outputs"] = copy.deepcopy(snapshot["outputs"])\n        return snapshot\n\n    @model_validator(mode="after")\n''',
           )
 
-          replace_once(
-              "docs/data-integrity.md",
-              '''This page enumerates the five guarantees a compiled flow preserves, the things it does\n**not** guarantee, and how the LLM-mediated alternative breaks each one.\n''',
-              '''This page enumerates the six guarantees a compiled flow preserves, the things it does\n**not** guarantee, and how the LLM-mediated alternative breaks each one.\n''',
+          p = Path("docs/data-integrity.md")
+          text = p.read_text(encoding="utf-8")
+          if text.count("five guarantees") != 2:
+              raise SystemExit(f"unexpected guarantee-count wording: {text.count('five guarantees')}")
+          text = text.replace("five guarantees", "six guarantees")
+          marker = "## Non-guarantees\n"
+          if text.count(marker) != 1:
+              raise SystemExit(f"unexpected Non-guarantees heading count: {text.count(marker)}")
+          guarantee = '''## Guarantee 6 — Historical step records are point-in-time snapshots\n\n> Once a `StepRecord` is created, its `inputs` and `outputs` describe that step at\n> that moment. Later mutation of nested lists/dicts in the live execution context,\n> a cache consumer, or caller-owned data cannot retroactively rewrite an earlier\n> trace record.\n\n**Mechanism:** `StepRecord` takes defensive deep copies of `inputs` and `outputs`\ninside a single Pydantic `mode="before"` validator. Every executor lane constructs\nthe same model, so linear, async, DAG, fallback, checkpoint/replay, and cache paths\ninherit one snapshot boundary rather than relying on scattered `deepcopy()` calls.\nOnly the two persisted step fields are copied; the cumulative execution context is\nnot duplicated on every tool invocation.\n\n**Where it can break:** custom opaque Python objects may define unusual deep-copy\nsemantics. Persisted traces are intended to contain ordinary serializable/Pydantic\ndata; objects that cannot be copied or serialized are outside the trace contract.\n\n---\n\n'''
+          text = text.replace(marker, guarantee + marker, 1)
+          row = '| G5 — Schema-validated context | **No.** Context is free-form prompt history. | **Yes** at every boundary. |\n'
+          if text.count(row) != 1:
+              raise SystemExit(f"unexpected G5 row count: {text.count(row)}")
+          text = text.replace(
+              row,
+              row + '| G6 — Immutable historical trace snapshots | **No inherent guarantee.** A mutable in-process record can drift unless copied/frozen explicitly. | **Yes.** `StepRecord` snapshots nested inputs/outputs when the record is created. |\n',
+              1,
           )
-          replace_once(
-              "docs/data-integrity.md",
-              '''---\n\n## Non-guarantees\n''',
-              '''---\n\n## Guarantee 6 — Historical step records are point-in-time snapshots\n\n> Once a `StepRecord` is created, its `inputs` and `outputs` describe that step at\n> that moment. Later mutation of nested lists/dicts in the live execution context,\n> a cache consumer, or caller-owned data cannot retroactively rewrite an earlier\n> trace record.\n\n**Mechanism:** `StepRecord` takes defensive deep copies of `inputs` and `outputs`\ninside a single Pydantic `mode="before"` validator. Every executor lane constructs\nthe same model, so linear, async, DAG, fallback, checkpoint/replay, and cache paths\ninherit one snapshot boundary rather than relying on scattered `deepcopy()` calls.\nOnly the two persisted step fields are copied; the cumulative execution context is\nnot duplicated on every tool invocation.\n\n**Where it can break:** custom opaque Python objects may define unusual deep-copy\nsemantics. Persisted traces are intended to contain ordinary serializable/Pydantic\ndata; objects that cannot be copied or serialized are outside the trace contract.\n\n---\n\n## Non-guarantees\n''',
-          )
-          replace_once(
-              "docs/data-integrity.md",
-              '''| G5 — Schema-validated context | **No.** Context is free-form prompt history. | **Yes** at every boundary. |\n\nThe cost difference''',
-              '''| G5 — Schema-validated context | **No.** Context is free-form prompt history. | **Yes** at every boundary. |\n| G6 — Immutable historical trace snapshots | **No inherent guarantee.** A mutable in-process record can drift unless copied/frozen explicitly. | **Yes.** `StepRecord` snapshots nested inputs/outputs when the record is created. |\n\nThe cost difference''',
-          )
-          replace_once(
-              "docs/data-integrity.md",
-              '''every regression that\nbreaks any of the five guarantees above.\n''',
-              '''every regression that\nbreaks any of the six guarantees above.\n''',
-          )
+          p.write_text(text, encoding="utf-8")
 
           replace_once(
               "CHANGELOG.md",
