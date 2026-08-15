@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from typer.testing import CliRunner
 
@@ -14,7 +15,7 @@ _CANARY = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
 
 
 def _write_trace(path: Path) -> None:
-    records: list[dict] = []
+    records: list[dict[str, Any]] = []
     for index in range(3):
         records.extend(
             [
