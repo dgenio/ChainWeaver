@@ -26,10 +26,16 @@ class LoadScopedTraceRedactor:
     this instance is alive.  Callers should create one instance per imported
     trace load; :func:`chainweaver.traces.parse_agent_trace` does this
     automatically when a ``redaction_policy`` is supplied.
+
+    Placeholder ordinals deliberately have no identity across loads: an
+    independent load starts again at ``<redacted:1>`` for whichever sensitive
+    value it encounters first.  Only this instance's ephemeral map gives a
+    placeholder meaning.
     """
 
     def __init__(self, policy: RedactionPolicy) -> None:
         self.policy = policy
+        self._redact_keys = frozenset(key.lower() for key in policy.redact_keys)
         self._placeholders: dict[tuple[str, str], str] = {}
 
     @property
@@ -40,6 +46,12 @@ class LoadScopedTraceRedactor:
     def redact_payload(self, value: Any) -> Any:
         """Return a redacted copy of one data-bearing payload value."""
         return self._apply(value)
+
+    def redact_mapping(self, value: dict[str, Any]) -> dict[str, Any]:
+        """Return a typed redacted copy of a mapping payload."""
+        result = self._apply(value)
+        assert isinstance(result, dict)
+        return result
 
     def _placeholder(self, value: Any) -> str:
         identity = (type(value).__name__, self._stable_identity(value))
@@ -53,18 +65,19 @@ class LoadScopedTraceRedactor:
     @staticmethod
     def _stable_identity(value: Any) -> str:
         try:
-            return json.dumps(
+            encoded = json.dumps(
                 value,
                 sort_keys=True,
                 separators=(",", ":"),
                 ensure_ascii=False,
                 default=str,
             )
+            return str(encoded)
         except (TypeError, ValueError):
             return repr(value)
 
     def _apply(self, value: Any, *, key: str | None = None) -> Any:
-        if key is not None and key.lower() in self.policy.redact_keys:
+        if key is not None and key.lower() in self._redact_keys:
             return self._placeholder(value)
 
         if isinstance(value, dict):
