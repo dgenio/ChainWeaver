@@ -96,7 +96,23 @@ def _pipeline_snapshot(events: list) -> dict:
             for suggestion in suggestions
         ],
         "scores": [score.model_dump(mode="json") for score in scored],
-        "drafts": [draft.flow.model_dump(mode="json") for draft in drafts],
+        "drafts": [
+            {
+                "name": draft.flow.name,
+                "version": draft.flow.version,
+                "lifecycle": draft.flow.governance.lifecycle.value,
+                "steps": [
+                    {
+                        "tool_name": step.tool_name,
+                        "input_mapping": step.input_mapping,
+                        "output_mapping": step.output_mapping,
+                    }
+                    for step in draft.flow.steps
+                ],
+                "warnings": list(draft.warnings),
+            }
+            for draft in drafts
+        ],
         "sidecars": [draft.sidecar for draft in drafts],
         "backtests": [report.model_dump(mode="json") for report in backtests],
         "report": render_candidate_report(scored),
@@ -154,15 +170,18 @@ def test_placeholders_preserve_equality_only_inside_one_load() -> None:
             {
                 "session_id": "s3",
                 "tool": "read",
-                "args": {"secret": "secret-b"},
+                "args": {"secret": "different-secret-c"},
             }
         ),
         redaction_policy=policy,
     )
 
-    within_first = first_load[0].args["secret"]
-    assert within_first == first_load[1].args["secret"]
-    assert within_first != second_load[0].args["secret"]
+    assert first_load[0].args["token"] == "<redacted:1>"
+    assert first_load[0].args["secret"] == "<redacted:2>"
+    assert first_load[1].args["secret"] == "<redacted:2>"
+    # A new load restarts ordinal allocation. The same placeholder can therefore
+    # denote a different secret and is not a durable cross-load identifier.
+    assert second_load[0].args["secret"] == "<redacted:1>"
     assert first_load[0].session_id != first_load[1].session_id
 
 
