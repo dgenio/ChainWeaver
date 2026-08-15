@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from chainweaver.log_utils import RedactionPolicy
 from chainweaver.observer import ChainObserver
 from chainweaver.traces import (
+    AgentTraceEvent,
     agent_trace_to_traces,
     backtest_flow,
     draft_flow_from_candidate,
@@ -21,7 +23,7 @@ _UUID = "123e4567-e89b-12d3-a456-426614174000"
 _BASE64 = "VGhpcy1pcy1hLWxlZ2l0aW1hdGUtaWQ="
 
 
-def _line(payload: dict) -> str:
+def _line(payload: dict[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
 
@@ -74,7 +76,7 @@ def _golden_trace() -> str:
     return "\n".join(lines)
 
 
-def _pipeline_snapshot(events: list) -> dict:
+def _pipeline_snapshot(events: list[AgentTraceEvent]) -> dict[str, Any]:
     observer = ChainObserver.from_traces(agent_trace_to_traces(events))
     suggestions = observer.suggest_flows(
         min_occurrences=3,
