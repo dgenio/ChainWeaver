@@ -297,6 +297,7 @@ def _coerce_event(
     args = obj.get("args", obj.get("inputs", {}))
     if not isinstance(args, dict):
         raise AgentTraceImportError("'args' must be a JSON object", source=source, line=line)
+    args_payload: dict[str, Any] = {str(key): value for key, value in args.items()}
 
     outputs = obj.get("outputs")
     output_keys = obj.get("output_keys")
@@ -306,9 +307,15 @@ def _coerce_event(
         tuple(str(key) for key in output_keys) if isinstance(output_keys, (list, tuple)) else ()
     )
 
-    metadata = {key: value for key, value in obj.items() if key not in _KNOWN_EVENT_KEYS}
-    safe_args = redactor.redact_payload(args) if redactor is not None else dict(args)
-    safe_metadata = redactor.redact_payload(metadata) if redactor is not None else metadata
+    metadata: dict[str, Any] = {
+        str(key): value for key, value in obj.items() if key not in _KNOWN_EVENT_KEYS
+    }
+    safe_args: dict[str, Any] = (
+        redactor.redact_mapping(args_payload) if redactor is not None else args_payload
+    )
+    safe_metadata: dict[str, Any] = (
+        redactor.redact_mapping(metadata) if redactor is not None else metadata
+    )
 
     return AgentTraceEvent(
         session_id=session,
