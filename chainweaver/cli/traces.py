@@ -89,7 +89,6 @@ def _trace_redaction_policy(name: str | None) -> RedactionPolicy | None:
         err=True,
     )
     raise typer.Exit(code=1)
-    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _mine_scored_candidates(
