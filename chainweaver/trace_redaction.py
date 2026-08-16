@@ -50,7 +50,8 @@ class LoadScopedTraceRedactor:
     def redact_mapping(self, value: dict[str, Any]) -> dict[str, Any]:
         """Return a typed redacted copy of a mapping payload."""
         result = self._apply(value)
-        assert isinstance(result, dict)
+        if not isinstance(result, dict):
+            raise TypeError("mapping redaction must preserve the mapping container")
         return result
 
     def _placeholder(self, value: Any) -> str:
