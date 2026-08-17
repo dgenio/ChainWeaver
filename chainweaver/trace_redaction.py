@@ -13,6 +13,7 @@ persisted or reused across loads, avoiding a durable cross-report identifier.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from chainweaver.log_utils import RedactionPolicy
@@ -37,6 +38,13 @@ class LoadScopedTraceRedactor:
         self.policy = policy
         self._redact_keys = frozenset(key.lower() for key in policy.redact_keys)
         self._placeholders: dict[tuple[str, str], str] = {}
+        key_pattern = "|".join(
+            re.escape(key) for key in sorted(self._redact_keys, key=len, reverse=True)
+        )
+        self._labeled_secret_pattern = re.compile(
+            rf"(?i)\b(?P<label>{key_pattern})(?P<separator>\s*[:=]\s*)"
+            r"(?P<value>bearer\s+[^\s,;]+|[^\s,;]+)"
+        )
 
     @property
     def masked_values(self) -> int:
@@ -98,7 +106,14 @@ class LoadScopedTraceRedactor:
         return value
 
     def _apply_string(self, value: str) -> str:
-        result = value
+        def replace_labeled_secret(match: re.Match[str]) -> str:
+            secret = match.group("value")
+            return (
+                f'{match.group("label")}{match.group("separator")}'
+                f"{self._placeholder(secret)}"
+            )
+
+        result = self._labeled_secret_pattern.sub(replace_labeled_secret, value)
         pattern = self.policy.redact_pattern
         if pattern is not None:
             result = pattern.sub(lambda match: self._placeholder(match.group(0)), result)
