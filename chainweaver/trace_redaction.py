@@ -41,10 +41,12 @@ class LoadScopedTraceRedactor:
         key_pattern = "|".join(
             re.escape(key) for key in sorted(self._redact_keys, key=len, reverse=True)
         )
-        self._labeled_secret_pattern = re.compile(
-            rf"(?i)\b(?P<label>{key_pattern})(?P<separator>\s*[:=]\s*)"
-            r"(?P<value>bearer\s+[^\s,;]+|[^\s,;]+)"
-        )
+        self._labeled_secret_pattern: re.Pattern[str] | None = None
+        if key_pattern:
+            self._labeled_secret_pattern = re.compile(
+                rf"(?i)\b(?P<label>{key_pattern})(?P<separator>\s*[:=]\s*)"
+                r"(?P<value>bearer\s+[^\s,;]+|[^\s,;]+)"
+            )
 
     @property
     def masked_values(self) -> int:
@@ -113,7 +115,9 @@ class LoadScopedTraceRedactor:
                 f"{self._placeholder(secret)}"
             )
 
-        result = self._labeled_secret_pattern.sub(replace_labeled_secret, value)
+        result = value
+        if self._labeled_secret_pattern is not None:
+            result = self._labeled_secret_pattern.sub(replace_labeled_secret, result)
         pattern = self.policy.redact_pattern
         if pattern is not None:
             result = pattern.sub(lambda match: self._placeholder(match.group(0)), result)
