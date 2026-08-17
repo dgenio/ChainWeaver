@@ -72,7 +72,7 @@ _TRACES_REDACT_OPTION = typer.Option(
     None,
     "--redact",
     case_sensitive=False,
-    help="Redact imported payloads before analysis: 'recommended' or 'strict'.",
+    help="Redact imported payloads before analysis: 'recommended', 'strict', or 'none'.",
 )
 
 
