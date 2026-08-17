@@ -30,3 +30,12 @@ def test_labeled_and_structured_values_share_load_scoped_placeholder() -> None:
     textual = redactor.redact_payload("api_key=abc123")
 
     assert textual == f"api_key={structured}"
+
+
+def test_empty_redact_keys_do_not_match_arbitrary_labeled_text() -> None:
+    redactor = LoadScopedTraceRedactor(RedactionPolicy(redact_keys=frozenset()))
+
+    text = "ordinary=value"
+
+    assert redactor.redact_payload(text) == text
+    assert redactor.masked_values == 0
