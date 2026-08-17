@@ -8,6 +8,9 @@ redacts only explicitly selected data-bearing payloads supplied by the importer
 Each :class:`LoadScopedTraceRedactor` owns a fresh placeholder map.  Repeated
 sensitive values compare equal within that one load, but the map is never
 persisted or reused across loads, avoiding a durable cross-report identifier.
+The display/logging-only ``max_value_length`` setting is intentionally not
+applied at ingestion because truncating benign payloads can change equality and
+therefore trace-mining semantics.
 """
 
 from __future__ import annotations
@@ -121,9 +124,6 @@ class LoadScopedTraceRedactor:
         pattern = self.policy.redact_pattern
         if pattern is not None:
             result = pattern.sub(lambda match: self._placeholder(match.group(0)), result)
-        max_length = self.policy.max_value_length
-        if max_length is not None and len(result) > max_length:
-            result = result[:max_length] + "…(truncated)"
         return result
 
 
