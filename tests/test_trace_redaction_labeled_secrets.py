@@ -39,3 +39,12 @@ def test_empty_redact_keys_do_not_match_arbitrary_labeled_text() -> None:
 
     assert redactor.redact_payload(text) == text
     assert redactor.masked_values == 0
+
+
+def test_ingestion_redaction_does_not_truncate_benign_payloads() -> None:
+    redactor = LoadScopedTraceRedactor(RedactionPolicy(max_value_length=3))
+
+    text = "benign-long-value"
+
+    assert redactor.redact_payload(text) == text
+    assert redactor.masked_values == 0
