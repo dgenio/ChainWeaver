@@ -72,6 +72,7 @@ BANNED_INREPO = frozenset(
         "chainweaver.optimizer",
         "chainweaver.observer",
         "chainweaver.traces",
+        "chainweaver.trace_redaction",
         "chainweaver.lessons",
         "chainweaver.service",
         "chainweaver._offline_llm",

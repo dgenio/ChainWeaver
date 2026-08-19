@@ -1971,7 +1971,7 @@
       "kind": "function",
       "module": "chainweaver.traces",
       "qualname": "load_agent_trace",
-      "signature": "(source: str | Path) -> list[AgentTraceEvent]"
+      "signature": "(source: str | Path, *, redaction_policy: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
     },
     "lookup_price": {
       "kind": "function",
@@ -2025,7 +2025,7 @@
       "kind": "function",
       "module": "chainweaver.traces",
       "qualname": "parse_agent_trace",
-      "signature": "(text: str, *, source: str | None = None) -> list[AgentTraceEvent]"
+      "signature": "(text: str, *, source: str | None = None, redaction_policy: RedactionPolicy | None = None) -> list[AgentTraceEvent]"
     },
     "read_provenance": {
       "kind": "function",

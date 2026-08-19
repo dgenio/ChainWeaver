@@ -113,10 +113,7 @@ class LoadScopedTraceRedactor:
     def _apply_string(self, value: str) -> str:
         def replace_labeled_secret(match: re.Match[str]) -> str:
             secret = match.group("value")
-            return (
-                f'{match.group("label")}{match.group("separator")}'
-                f"{self._placeholder(secret)}"
-            )
+            return f"{match.group('label')}{match.group('separator')}{self._placeholder(secret)}"
 
         result = value
         if self._labeled_secret_pattern is not None:
