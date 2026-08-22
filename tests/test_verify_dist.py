@@ -68,7 +68,7 @@ def test_verify_dist_rejects_missing_py_typed(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("chainweaver-1.2.3.dist-info/METADATA", _metadata("1.2.3"))
 
-    with pytest.raises(ValueError, match="py.typed"):
+    with pytest.raises(ValueError, match=r"py\.typed"):
         verify_dist(dist, "1.2.3")
 
 
