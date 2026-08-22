@@ -29,17 +29,24 @@ def _metadata(version: str) -> bytes:
     return f"Metadata-Version: 2.4\nName: chainweaver\nVersion: {version}\n\n".encode()
 
 
-def _build_fixture(dist: Path, version: str, *, metadata_version: str | None = None) -> None:
+def _build_fixture(
+    dist: Path,
+    version: str,
+    *,
+    wheel_metadata_version: str | None = None,
+    sdist_metadata_version: str | None = None,
+) -> None:
     dist.mkdir()
-    effective = metadata_version or version
+    wheel_version = wheel_metadata_version or version
+    sdist_version = sdist_metadata_version or version
 
     wheel = dist / f"chainweaver-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr(f"chainweaver-{version}.dist-info/METADATA", _metadata(effective))
+        archive.writestr(f"chainweaver-{version}.dist-info/METADATA", _metadata(wheel_version))
         archive.writestr("chainweaver/py.typed", b"")
 
     sdist = dist / f"chainweaver-{version}.tar.gz"
-    raw = _metadata(effective)
+    raw = _metadata(sdist_version)
     info = tarfile.TarInfo(name=f"chainweaver-{version}/PKG-INFO")
     info.size = len(raw)
     with tarfile.open(sdist, "w:gz") as archive:
@@ -53,9 +60,17 @@ def test_verify_dist_accepts_matching_wheel_and_sdist(tmp_path: Path) -> None:
     verify_dist(dist, "1.2.3")
 
 
-def test_verify_dist_rejects_metadata_version_drift(tmp_path: Path) -> None:
+def test_verify_dist_rejects_wheel_metadata_version_drift(tmp_path: Path) -> None:
     dist = tmp_path / "dist"
-    _build_fixture(dist, "1.2.3", metadata_version="1.2.2")
+    _build_fixture(dist, "1.2.3", wheel_metadata_version="1.2.2")
+
+    with pytest.raises(ValueError, match="metadata Version"):
+        verify_dist(dist, "1.2.3")
+
+
+def test_verify_dist_rejects_sdist_metadata_version_drift(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    _build_fixture(dist, "1.2.3", sdist_metadata_version="1.2.2")
 
     with pytest.raises(ValueError, match="metadata Version"):
         verify_dist(dist, "1.2.3")
