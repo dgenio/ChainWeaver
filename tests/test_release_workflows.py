@@ -179,7 +179,8 @@ def test_publish_workflow_accepts_tag_push_or_explicit_dispatch() -> None:
     assert "fetch-tags: true" in workflow
     assert 'git rev-parse "${tag}^{commit}"' in workflow
     assert 'test "${tag_commit}" = "${head_commit}"' in workflow
-    assert "ref: v${{ needs.release.outputs.version }}" in workflow
+    assert workflow.count("ref: ${{ needs.release.outputs.commit }}") == 3
+    assert "ref: v${{ needs.release.outputs.version }}" not in workflow
     assert 'python scripts/verify_dist.py "${RELEASE_VERSION}"' in workflow
     assert "skip-existing: true" in workflow
     assert "tag_name: v${{ needs.release.outputs.version }}" in workflow
