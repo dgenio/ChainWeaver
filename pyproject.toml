@@ -126,6 +126,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.3",
     "ruff>=0.8",
     "mypy>=1.0",
     "pyyaml>=6.0",
@@ -174,6 +175,26 @@ markers = [
     "conformance: weaver-spec conformance gate (issue #91); run with -m conformance",
     "property: Hypothesis property-based determinism test (also run via `pytest -m property`)",
 ]
+# Per-test ceiling (issue #543). A give-up bound for a hang, NOT a performance
+# budget: #341 moved the concurrency tests from sleeps to events, so a signal
+# that never fires no longer trips a timing assertion -- it burns the runner's
+# global timeout and reports nothing useful. This turns that into a named
+# failure with a traceback.
+#
+# Choosing 60s. The relationship worth keeping true:
+#   * slowest healthy test, measured at multiplier 1:        4.34s
+#   * tests/helpers.py BARRIER_TIMEOUT_S give-up bound:      5.00s
+#     -- fixed, and deliberately NOT scaled by the multiplier
+#   * scaled() offsets are sub-second, so even
+#     CHAINWEAVER_TEST_TIMING_MULTIPLIER=10 adds only single-digit seconds
+# 60s therefore leaves >12x headroom over the slowest healthy test and clears
+# BARRIER_TIMEOUT_S by an order of magnitude, so it cannot become a flake
+# source itself. Raise it here if a genuinely slow lane ever approaches it --
+# do not scatter per-test overrides, and do not lower it to police speed.
+timeout = 60
+# thread, not signal: a test blocked in a C-level call is not interruptible by
+# SIGALRM, and those are exactly the hangs this is meant to catch.
+timeout_method = "thread"
 
 [tool.ruff]
 target-version = "py310"
