@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786745290404,
+  "lastUpdate": 1787947195034,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4248,6 +4248,78 @@ window.BENCHMARK_DATA = {
             "value": 0.8427939999933187,
             "unit": "ms",
             "extra": "min=0.70ms max=0.96ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "67cd7451214886488b049b1fe020ba10a0ee7bf2",
+          "message": "test: bound every test with pytest-timeout so a hang fails fast (#543) (#563)\n\n#341 moved the concurrency tests from clock-based sleeps to events. That\nremoved the flake but moved the failure mode: an Event.wait() whose signal\nnever fires no longer trips a timing assertion, it burns the runner's global\ntimeout and reports nothing attributable. #341's own risk note anticipated it.\n\nAdds pytest-timeout to the dev extra and a 60s per-test ceiling with\ntimeout_method = \"thread\", chosen from measurement rather than taste:\n\n  slowest healthy test, measured at multiplier 1        4.34s\n  tests/helpers.py BARRIER_TIMEOUT_S give-up bound      5.00s\n  scaled() offsets                                      sub-second\n\n60s leaves >12x headroom over the slowest healthy test and clears\nBARRIER_TIMEOUT_S by an order of magnitude, so it cannot become a flake source\nitself. thread rather than signal because a test blocked in a C-level call is\nnot interruptible by SIGALRM, and those are exactly the hangs this catches.\nThe reasoning is recorded next to the setting, not just here.\n\nOne correction to the issue: it asks that the ceiling clear \"BARRIER_TIMEOUT_S\nmultiplied by the largest CHAINWEAVER_TEST_TIMING_MULTIPLIER\". BARRIER_TIMEOUT_S\nis a fixed 5.0 and is deliberately NOT scaled -- helpers.py says so explicitly.\nThe real relationship is BARRIER_TIMEOUT_S plus scaled work, so the ceiling is\nset against that instead. The multiplier is also not set anywhere under\n.github/, so CI runs at 1 today.\n\nNo per-lane override added: at a 4.34s worst case nothing comes close to 60s,\nso overrides would be unused machinery. Raise the single value if that changes.\n\nVerified the ceiling actually fires rather than assuming it -- a throwaway test\ncalling threading.Event().wait() produced a named Timeout with a traceback at\nthe blocking line, not a hang. Probe removed before commit.\n\nSame test count with and without this change, identical flags:\n  main            2372 passed, 1 skipped\n  this branch     2372 passed, 1 skipped\n  ruff check      All checks passed!\n  ruff format     263 files already formatted\n  mypy            Success: no issues found in 256 source files\n  coverage        93.57% (gate 80)\n\nCloses #543\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T20:58:20+01:00",
+          "tree_id": "dc6f6ef303af48ed46d1efbd386d8842049120cb",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/67cd7451214886488b049b1fe020ba10a0ee7bf2"
+        },
+        "date": 1787947194369,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.31434400000307505,
+            "unit": "ms",
+            "extra": "min=0.30ms max=0.83ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.24474799988638551,
+            "unit": "ms",
+            "extra": "min=0.23ms max=0.72ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.4382120000059331,
+            "unit": "ms",
+            "extra": "min=0.42ms max=0.46ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.31349400001090544,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.35ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.2969269999976,
+            "unit": "ms",
+            "extra": "min=102.04ms max=102.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 0.8476919999225174,
+            "unit": "ms",
+            "extra": "min=0.79ms max=0.95ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.72062100000403,
+            "unit": "ms",
+            "extra": "min=251.65ms max=251.93ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.7186659999547373,
+            "unit": "ms",
+            "extra": "min=0.69ms max=0.85ms repeats=5"
           }
         ]
       }
