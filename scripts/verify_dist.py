@@ -14,8 +14,8 @@ import re
 import sys
 import tarfile
 import zipfile
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath
 
 _PROJECT = "chainweaver"
 _VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -44,7 +44,9 @@ def _verify_wheel(path: Path, expected_version: str) -> None:
         )
 
     with zipfile.ZipFile(path) as archive:
-        metadata_names = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+        metadata_names = [
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        ]
         if len(metadata_names) != 1:
             raise ValueError(
                 f"{path.name}: expected one .dist-info/METADATA, found {len(metadata_names)}"
@@ -68,10 +70,13 @@ def _verify_sdist(path: Path, expected_version: str) -> None:
         raise ValueError(f"sdist filename is {path.name!r}, expected {expected_name!r}")
 
     with tarfile.open(path, mode="r:gz") as archive:
+        # Only the sdist's own top-level PKG-INFO. setuptools also ships
+        # `<pkg>.egg-info/PKG-INFO` inside the archive, so matching on the
+        # suffix alone finds two and rejects every real sdist.
         members = [
             member
             for member in archive.getmembers()
-            if member.isfile() and member.name.endswith("/PKG-INFO")
+            if member.isfile() and PurePosixPath(member.name).parts[1:] == ("PKG-INFO",)
         ]
         if len(members) != 1:
             raise ValueError(f"{path.name}: expected one PKG-INFO, found {len(members)}")
@@ -98,18 +103,14 @@ def verify_dist(dist_dir: Path, expected_version: str) -> None:
             invariants do not match *expected_version*.
     """
     if _VERSION_RE.fullmatch(expected_version) is None:
-        raise ValueError(
-            f"version {expected_version!r} must use X.Y.Z semantic-version format"
-        )
+        raise ValueError(f"version {expected_version!r} must use X.Y.Z semantic-version format")
     if not dist_dir.is_dir():
         raise ValueError(f"distribution directory does not exist: {dist_dir}")
 
     wheel = _one(sorted(dist_dir.glob("*.whl")), kind="wheel")
     sdist = _one(sorted(dist_dir.glob("*.tar.gz")), kind="sdist")
     unexpected = sorted(
-        path.name
-        for path in dist_dir.iterdir()
-        if path.is_file() and path not in {wheel, sdist}
+        path.name for path in dist_dir.iterdir() if path.is_file() and path not in {wheel, sdist}
     )
     if unexpected:
         raise ValueError(f"unexpected files in distribution directory: {', '.join(unexpected)}")

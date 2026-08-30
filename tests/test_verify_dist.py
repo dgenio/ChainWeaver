@@ -49,8 +49,14 @@ def _build_fixture(
     raw = _metadata(sdist_version)
     info = tarfile.TarInfo(name=f"chainweaver-{version}/PKG-INFO")
     info.size = len(raw)
+    # setuptools ships the .egg-info directory inside the sdist, so a real
+    # archive carries a second PKG-INFO. The fixture models that: without it
+    # these tests pass against a shape no `python -m build` ever produces.
+    egg = tarfile.TarInfo(name=f"chainweaver-{version}/chainweaver.egg-info/PKG-INFO")
+    egg.size = len(raw)
     with tarfile.open(sdist, "w:gz") as archive:
         archive.addfile(info, io.BytesIO(raw))
+        archive.addfile(egg, io.BytesIO(raw))
 
 
 def test_verify_dist_accepts_matching_wheel_and_sdist(tmp_path: Path) -> None:
@@ -94,3 +100,24 @@ def test_verify_dist_rejects_extra_distribution_files(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unexpected files"):
         verify_dist(dist, "1.2.3")
+
+
+def test_the_nested_egg_info_pkg_info_is_not_mistaken_for_the_sdist_metadata(
+    tmp_path: Path,
+) -> None:
+    """A real sdist carries two PKG-INFO files; only the top-level one counts.
+
+    Verified against a genuine `python -m build` sdist, whose members are
+    `chainweaver-X/PKG-INFO` and `chainweaver-X/chainweaver.egg-info/PKG-INFO`.
+    Selecting on the `/PKG-INFO` suffix alone finds both and rejects every real
+    distribution — which would have failed the build job on the next tag push,
+    before upload.
+    """
+    dist = tmp_path / "dist"
+    _build_fixture(dist, "1.2.3")
+
+    with tarfile.open(dist / "chainweaver-1.2.3.tar.gz") as archive:
+        names = [m.name for m in archive.getmembers() if m.name.endswith("/PKG-INFO")]
+    assert len(names) == 2, f"fixture must model a real sdist, got {names}"
+
+    verify_dist(dist, "1.2.3")
