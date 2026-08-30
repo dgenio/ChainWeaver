@@ -46,7 +46,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chainweaver.exceptions import AgentTraceImportError
 from chainweaver.flow import Flow, FlowGovernance, FlowLifecycle, FlowStep
+from chainweaver.log_utils import RedactionPolicy
 from chainweaver.observation import ObservedStep, ObservedTrace
+from chainweaver.trace_redaction import LoadScopedTraceRedactor
 
 # Tool-name verbs used by the heuristic safety classifier (#256, #263).  These
 # are deliberately conservative: anything that is not clearly read-only stays
@@ -123,7 +125,8 @@ class AgentTraceEvent(BaseModel):
         turn_id: Optional id for the model turn the event belongs to.
         event: Whether this is a ``tool_call`` or a ``model_call``.
         tool: Tool name for ``tool_call`` events (``None`` for model calls).
-        args: Redacted argument *shape* / values supplied to the tool.
+        args: Argument shape / values supplied to the tool. Values are
+            redacted only when ingestion receives a ``redaction_policy``.
         result_status: ``"ok"`` / ``"error"`` for completed tool calls, or
             ``None`` when not recorded.
         output_keys: Field names observed in the tool result, when recorded.
@@ -133,9 +136,9 @@ class AgentTraceEvent(BaseModel):
         tool_source: Origin of the tool (``"mcp"``, ``"builtin"``,
             ``"custom"``, ``"unknown"``), when recorded.
         timestamp: UTC timestamp of the event, when recorded.
-        metadata: Any record keys that are not part of the normalized schema,
-            preserved verbatim so vendor-specific fields survive a round-trip
-            and stay available for future compatibility (see #278).
+        metadata: Record keys outside the normalized schema. Vendor payload
+            values are redacted when ingestion receives a ``redaction_policy``;
+            structural normalized fields remain untouched.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -236,7 +239,7 @@ class BacktestMismatch(BaseModel):
 
 
 class BacktestReport(BaseModel):
-    """Result of replaying past traces against a draft flow (issue #267).
+    """Result of replaying past traces against a draft flow (#267).
 
     The backtest is a deterministic, offline shape/sequence check — no tool
     is invoked.  It answers "would this draft flow have reproduced what the
@@ -266,7 +269,13 @@ class BacktestReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTraceEvent:
+def _coerce_event(
+    obj: Any,
+    *,
+    line: int | None,
+    source: str | None,
+    redactor: LoadScopedTraceRedactor | None = None,
+) -> AgentTraceEvent:
     """Validate one decoded JSON object into an :class:`AgentTraceEvent`."""
     if not isinstance(obj, dict):
         raise AgentTraceImportError("expected a JSON object", source=source, line=line)
@@ -288,6 +297,7 @@ def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTra
     args = obj.get("args", obj.get("inputs", {}))
     if not isinstance(args, dict):
         raise AgentTraceImportError("'args' must be a JSON object", source=source, line=line)
+    args_payload: dict[str, Any] = {str(key): value for key, value in args.items()}
 
     outputs = obj.get("outputs")
     output_keys = obj.get("output_keys")
@@ -297,14 +307,22 @@ def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTra
         tuple(str(key) for key in output_keys) if isinstance(output_keys, (list, tuple)) else ()
     )
 
-    metadata = {key: value for key, value in obj.items() if key not in _KNOWN_EVENT_KEYS}
+    metadata: dict[str, Any] = {
+        str(key): value for key, value in obj.items() if key not in _KNOWN_EVENT_KEYS
+    }
+    safe_args: dict[str, Any] = (
+        redactor.redact_mapping(args_payload) if redactor is not None else args_payload
+    )
+    safe_metadata: dict[str, Any] = (
+        redactor.redact_mapping(metadata) if redactor is not None else metadata
+    )
 
     return AgentTraceEvent(
         session_id=session,
         turn_id=str(turn) if turn not in (None, "") else None,
         event=kind,
         tool=tool if isinstance(tool, str) and tool else None,
-        args=dict(args),
+        args=safe_args,
         result_status=_opt_str(obj.get("result_status", obj.get("status"))),
         output_keys=keys,
         input_tokens=_opt_int(obj.get("input_tokens")),
@@ -312,7 +330,7 @@ def _coerce_event(obj: Any, *, line: int | None, source: str | None) -> AgentTra
         latency_ms=_opt_float(obj.get("latency_ms")),
         tool_source=_opt_str(obj.get("tool_source")),
         timestamp=_opt_dt(obj.get("timestamp")),
-        metadata=metadata,
+        metadata=safe_metadata,
     )
 
 
@@ -341,16 +359,29 @@ def _opt_dt(value: Any) -> datetime | None:
         return None
 
 
-def load_agent_trace(source: str | Path) -> list[AgentTraceEvent]:
-    """Read a coding-agent JSONL tool-use trace into normalized events (#254).
+def load_agent_trace(
+    source: str | Path,
+    *,
+    redaction_policy: RedactionPolicy | None = None,
+) -> list[AgentTraceEvent]:
+    """Read a coding-agent JSONL tool-use trace into normalized events (#254/#376).
 
     Each non-blank line is one JSON object.  A ``tool_call`` record must carry
     a ``tool`` (alias ``tool_name``); a ``model_call`` record typically
-    carries ``input_tokens`` / ``output_tokens``.  Unknown fields are ignored
-    so the format can grow without breaking older readers.
+    carries ``input_tokens`` / ``output_tokens``.  Unknown fields are retained
+    under ``metadata`` so the format can grow without breaking older readers.
+
+    When ``redaction_policy`` is supplied, only data-bearing ``args`` and
+    vendor ``metadata`` payloads are sanitized. Structural fields used by
+    mining/scoring (session, tool, event kind, status, token counts, output
+    keys) are intentionally left untouched. Sensitive values receive
+    load-scoped placeholders, preserving equality within this load without
+    creating a persisted cross-load mapping.
 
     Args:
         source: Path to a ``.jsonl`` file.
+        redaction_policy: Optional policy applied at ingestion before any
+            downstream mining/report/draft/backtest consumer sees payload data.
 
     Returns:
         Events in file order.
@@ -365,12 +396,22 @@ def load_agent_trace(source: str | Path) -> list[AgentTraceEvent]:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise AgentTraceImportError(str(exc), source=str(path)) from exc
-    return parse_agent_trace(text, source=str(path))
+    return parse_agent_trace(
+        text,
+        source=str(path),
+        redaction_policy=redaction_policy,
+    )
 
 
-def parse_agent_trace(text: str, *, source: str | None = None) -> list[AgentTraceEvent]:
-    """Parse JSONL trace *text* into events (the in-memory form of #254)."""
+def parse_agent_trace(
+    text: str,
+    *,
+    source: str | None = None,
+    redaction_policy: RedactionPolicy | None = None,
+) -> list[AgentTraceEvent]:
+    """Parse JSONL trace text, optionally redacting payloads for this load (#376)."""
     events: list[AgentTraceEvent] = []
+    redactor = LoadScopedTraceRedactor(redaction_policy) if redaction_policy is not None else None
     for lineno, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
@@ -381,7 +422,14 @@ def parse_agent_trace(text: str, *, source: str | None = None) -> list[AgentTrac
             raise AgentTraceImportError(
                 f"invalid JSON ({exc.msg})", source=source, line=lineno
             ) from exc
-        events.append(_coerce_event(obj, line=lineno, source=source))
+        events.append(
+            _coerce_event(
+                obj,
+                line=lineno,
+                source=source,
+                redactor=redactor,
+            )
+        )
     return events
 
 
