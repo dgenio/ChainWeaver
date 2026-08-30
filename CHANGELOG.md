@@ -8,7 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Maintainer tooling moved out of published metadata into PEP 735 dependency
+  groups** (#550). The `dev` extra is **removed**. `pip install chainweaver[dev]`
+  no longer works and `chainweaver[dev]` no longer appears in the wheel's
+  `Provides-Extra` — a consumer of the library was never meant to be offered
+  ruff, mypy and a notebook kernel.
+
+  - Contributors now run `pip install -e ".[integrations]" --group dev`
+    (pip >= 25.1, or `uv pip install`). `[integrations]` is a new published
+    extra: the composition of every user-facing integration extra, named once
+    so the workflows, CONTRIBUTING, the docs and the floor job cannot drift
+    apart. It deliberately excludes `llm-anthropic` / `llm-openai`; the evals
+    workflow adds the provider it needs.
+  - A second group, `test-runners`, holds the four pytest packages. The
+    free-threaded 3.14t and Python-next lanes install exactly that group
+    instead of hand-copying the list — and that copy had already drifted: it
+    never gained `pytest-timeout` when #543 added it, so the lane most likely
+    to hang was the one lane running unbounded.
+  - Resolution is unchanged, measured rather than assumed: `pip install
+    --dry-run --ignore-installed -e ".[integrations]" --group dev` resolves the
+    same 193 distributions at the same versions as the old `-e ".[dev]"`.
+  - `tests/test_dependency_groups.py` fails if a maintainer tool reappears in a
+    published extra, if a workflow installs `.[dev]` or pins a pytest runner
+    inline, or if the `integrations` composition and the integration extras
+    disagree.
+
+  Functional extras (`yaml`, `otel`, `contrib`, `langchain`, `llamaindex`,
+  `langgraph`, `openai-agents`, `mcp`, `weaver-stack`, `test`, `docs`) are
+  unchanged.
+
 ### Fixed
+
+- **Execution traces now snapshot nested step inputs and outputs at record time** (#398):
+  `StepRecord` defensively deep-copies its persisted `inputs`/`outputs` at the
+  model boundary. A later tool mutating a shared nested list/dict in the live
+  context can no longer retroactively rewrite an earlier trace. This is a
+  correctness change for code that incorrectly relied on object identity between
+  caller/context containers and recorded trace data; well-behaved flow semantics
+  are unchanged. The copy is paid once per recorded step, not for the whole
+  cumulative context before every invocation.
 
 - **Synchronous tool timeouts now return near the declared deadline** (#520): the
   sync path ran `fn` inside `with ThreadPoolExecutor(...)`, and `__exit__` calls

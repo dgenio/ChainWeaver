@@ -51,7 +51,8 @@ jobs:
           PROVIDER: ${{ github.event.inputs.provider || 'anthropic' }}
         run: |
           set -euo pipefail
-          pip install -e ".[dev,yaml,llm-${PROVIDER}]"
+          python -m pip install --upgrade pip
+          pip install -e ".[integrations,llm-${PROVIDER}]" --group dev
 
       - name: Run proposer evals against the real provider
         env:

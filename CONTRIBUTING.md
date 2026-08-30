@@ -33,11 +33,16 @@ python -m venv .venv
 # Linux/macOS
 # source .venv/bin/activate
 
-# Install with dev dependencies (editable mode)
-pip install -e ".[dev]"
+# Install the library, every integration extra, and the maintainer tooling
+pip install --upgrade pip          # --group needs pip >= 25.1
+pip install -e ".[integrations]" --group dev
 ```
 
-Python 3.10 or later is required.
+Python 3.10 or later is required. Maintainer tooling (pytest, ruff, mypy,
+nbmake, ...) lives in PEP 735 [dependency groups](https://peps.python.org/pep-0735/)
+rather than a published extra, so it is never advertised to people who only
+install the library; `[integrations]` is the composition CI exercises. There
+is no `[dev]` extra any more (#550).
 
 ---
 
@@ -88,7 +93,7 @@ excluded to keep commit speed reasonable, so run it manually before pushing
 or rely on CI. Set the hooks up once per clone:
 
 ```bash
-# One-time install (after `pip install -e ".[dev]"`)
+# One-time install (after the editable install above)
 pip install pre-commit
 pre-commit install
 ```
@@ -174,10 +179,10 @@ applications and lockfiles, not here):
   is caught early. Note that `--resolution lowest-direct` pins each *directly*
   declared dependency to its floor; where a heavier extra's transitive
   requirement lifts one above its declared floor (currently `pydantic`, which
-  the framework extras in `[dev]` pull to `>=2.12`), that floor is verified in a
-  standalone run rather than by the combined `.[dev]` floor job. If you raise a
-  dependency floor, run the floor job locally first:
-  `uv pip install --resolution lowest-direct -e ".[dev]" && pytest tests/ --no-cov`.
+  the framework extras in `[integrations]` pull to `>=2.12`), that floor is
+  verified in a standalone run rather than by the combined floor job. If you
+  raise a dependency floor, run the floor job locally first:
+  `uv pip install --resolution lowest-direct -e ".[integrations]" --group dev && pytest tests/ --no-cov`.
 
 ### Vocabulary
 

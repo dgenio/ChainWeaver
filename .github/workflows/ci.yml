@@ -38,7 +38,11 @@ jobs:
         # Pin transitive weaver-contracts to a reviewed version (#495).
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
-        run: pip install -e ".[dev]"
+        # ``--group`` needs pip >= 25.1 (PEP 735); upgrade explicitly rather
+        # than depending on whatever the runner image happens to ship.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[integrations]" --group dev
 
       # Lint / format / mypy / workflow + vocabulary checks live in the
       # dedicated `lint` job below so the static-analysis signal is a single
@@ -84,7 +88,11 @@ jobs:
         # Pin transitive weaver-contracts to a reviewed version (#495).
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
-        run: pip install -e ".[dev]"
+        # ``--group`` needs pip >= 25.1 (PEP 735); upgrade explicitly rather
+        # than depending on whatever the runner image happens to ship.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[integrations]" --group dev
 
       # The first three steps are the static-analysis commands from
       # AGENTS.md §7, verbatim (same scope, same flags) so local pre-commit
@@ -128,7 +136,11 @@ jobs:
         # Pin transitive weaver-contracts to a reviewed version (#495).
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
-        run: pip install -e ".[dev]"
+        # ``--group`` needs pip >= 25.1 (PEP 735); upgrade explicitly rather
+        # than depending on whatever the runner image happens to ship.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[integrations]" --group dev
 
       # Dedicated gate so the conformance signal stays distinguishable
       # in the CI matrix even when other lanes fail.  Mirrors the
@@ -164,7 +176,7 @@ jobs:
         run: python -m pip install uv
 
       - name: Install minimum declared dependency versions
-        run: uv pip install --system --resolution lowest-direct -e ".[dev]"
+        run: uv pip install --system --resolution lowest-direct -e ".[integrations]" --group dev
 
       - name: Run tests against floor dependencies
         run: python -m pytest tests/ -v --no-cov
@@ -190,7 +202,7 @@ jobs:
       - name: Install newest (incl. pre-release) dependency versions
         run: |
           python -m pip install --upgrade pip
-          pip install --pre --upgrade -e ".[dev]"
+          pip install --pre --upgrade -e ".[integrations]" --group dev
 
       - name: Run tests against latest dependencies
         run: python -m pytest tests/ -v --no-cov
@@ -215,7 +227,7 @@ jobs:
           python-version: "3.14t"
 
       - name: Install dependencies
-        # NOT ".[dev]": that pulls langchain-core and langgraph, whose
+        # NOT ".[integrations]": that pulls langchain-core and langgraph, whose
         # langsmith / langgraph-sdk require orjson, which publishes no cp314t
         # wheel. pip then builds it from source and the PyO3/cargo build fails
         # under the no-GIL interpreter, so the whole lane died at install and
@@ -225,20 +237,23 @@ jobs:
         # it turns collection into errors rather than skips).
         #
         # Cost of the narrower set, measured: 2243 passed / 11 skipped versus
-        # 2327 passed / 1 skipped under ".[dev]" — the 84 difference is the
+        # 2327 passed / 1 skipped under the full set — the 84 difference is the
         # langchain / langgraph / llamaindex / openai-agents / otel /
         # weaver-contracts integration tests, which skip via their existing
         # importorskip guards. Every test this lane exists for (stream_flow
         # worker threads, ThreadPoolExecutor tool timeouts, asyncio.to_thread
         # offloading, record_then_replay monkey-patching) still runs.
-        # Revisit and restore ".[dev]" once orjson ships a free-threaded wheel.
+        # Revisit and restore ".[integrations]" once orjson ships a free-threaded
+        # wheel.  The runners come from the ``test-runners`` dependency group
+        # rather than a hand-copied list, so this lane cannot drift behind the
+        # rest of CI again the way it did when #543 added pytest-timeout.
         #
         # Pin transitive weaver-contracts to a reviewed version (#495).
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
         run: |
-          pip install -e ".[test,yaml,mcp]" \
-            "pytest>=7.0" "pytest-cov>=4.0" "pytest-asyncio>=0.23"
+          python -m pip install --upgrade pip
+          pip install -e ".[test,yaml,mcp]" --group test-runners
 
       - name: Run tests on the free-threaded build
         # --no-cov: this is a concurrency smoke signal, not a coverage gate

@@ -97,6 +97,7 @@ chainweaver/
 ├── cost.py            CostProfile + CostReport for cost-avoided estimation; PriceSnap + PROVIDER_PRICES maintained price table + lookup_price + CostProfile.from_provider (#156)
 ├── fuzz.py            Property-based fuzzing harness for flows (#220, #221, #222): input-corpus generation, explicit property checks (e.g. gracefully_handles_input), replayable violation traces; drives the `chainweaver fuzz` CLI and fuzz.yml workflow (#340)
 ├── trace_store.py     TraceStore protocol + InMemoryTraceStore + FileTraceStore (JSONL) + redact_execution_result — redacted execution-trace persistence with retention (#292)
+├── trace_redaction.py  RedactionPolicy (recommended|strict|none) + load-scoped placeholder mapping for imported coding-agent traces (#376): redacts data-bearing `args` and vendor `metadata` at the ingestion boundary, leaves structural mining fields untouched so candidate IDs/order and scores are unchanged; opt-in via `redaction_policy=` / `--redact`; offline, banned from executor.py
 ├── observation.py     TraceRecorder + ObservedTrace for ad-hoc capture
 ├── observer.py        ChainObserver: record runtime tool calls, mine repeated sequences, suggest FlowSuggestion proposals (#78); banned from executor.py
 ├── traces.py          Coding-agent trace pipeline: AgentTraceEvent + load_agent_trace (#254), CandidateScore + score_candidate (#256), DraftFlow + draft_flow_from_candidate (#257), render_candidate_report (#266), BacktestReport + backtest_flow (#267); offline, banned from executor.py
@@ -147,8 +148,9 @@ benchmarks/                  Standalone benchmark scripts (not coverage-gated): 
 ```
 
 > The "banned from executor.py" annotations above are the enforced list:
-> `compiler_llm`, `optimizer`, `observer`, `traces`, `lessons`, `service`,
-> `_offline_llm`, `proposals`, `routing`, `opencode` — matched one-to-one
+> `compiler_llm`, `optimizer`, `observer`, `traces`, `trace_redaction`,
+> `lessons`, `service`, `_offline_llm`, `proposals`, `routing`, `opencode`,
+> `claude`, `vscode`, `_agent_config` — matched one-to-one
 > against `BANNED_INREPO` in `tests/test_executor_import_contract.py` by
 > `tests/test_agent_instructions.py`.
 
