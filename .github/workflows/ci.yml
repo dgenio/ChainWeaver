@@ -213,6 +213,41 @@ jobs:
   # timeouts, asyncio.to_thread offloading, record_then_replay monkey-patching)
   # while they are cheap to fix. Non-gating (``continue-on-error``) — it feeds
   # the concurrency-contract work (#336); it warns, it does not block.
+  dist-verify:
+    name: build + verify distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel + sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Verify the built artifacts
+        # scripts/verify_dist.py gates the release in publish.yml, between
+        # `python -m build` and the artifact upload. Until this job existed it
+        # met a real distribution for the first time *during a release*, which
+        # is how it shipped rejecting every real sdist: setuptools puts a second
+        # PKG-INFO inside `<pkg>.egg-info/`, the selector matched both, and the
+        # unit tests passed because their fixture wrote only one. A verifier
+        # whose first real run is the thing it guards is not a gate.
+        run: |
+          # pyproject sets `dynamic = ["version"]`, sourced from
+          # chainweaver.__version__ — so read that literal. Not imported, since
+          # this job installs only `build` and a missing runtime dependency
+          # would turn a version lookup into a spurious release-gate failure.
+          # Not derived from the built filename either, which would make
+          # verify_dist's own filename check vacuous.
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' chainweaver/__init__.py)"
+          echo "verifying built artifacts for ${version}"
+          python scripts/verify_dist.py "${version}"
+
   free-threaded:
     name: free-threaded smoke (Python 3.14t)
     runs-on: ubuntu-latest
