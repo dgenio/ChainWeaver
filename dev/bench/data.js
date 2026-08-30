@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788078729381,
+  "lastUpdate": 1788089737371,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4392,6 +4392,78 @@ window.BENCHMARK_DATA = {
             "value": 0.6238599999903727,
             "unit": "ms",
             "extra": "min=0.59ms max=0.68ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb626660aea6cad9ace333953f7ac8fdee54c1f8",
+          "message": "docs: make ChainWeaver validation-first before v1 (#557)\n\nAdds the product-validation, API-tier, macro-capability-security and participant-guide docs plus the independent-validation issue template, changes the PyPI project.description and MkDocs site_description, and converts v1 from feature-completion to evidence-gated.\n\nTwo blocking gates cleared first:\n\n- Vocabulary: two flagged uses of \"pipeline\" allowlisted as genuine non-flow uses (Prefect/Dagster's own vocabulary in the comparison page; the CI release process for #519). The third, \"candidates disappearing from the pipeline\", was reworded — it really was using \"pipeline\" for ChainWeaver's own processing, which is what the rule bans, so allowlisting it would have hollowed out the gate.\n- README asset guard (#227) split rather than deleted. The quantified-headline half is retired with the reason recorded in the test docstring: a synthetic executor benchmark is evidence about the executor, not about product-market fit. The reproducibility half stays enforced, and `python benchmarks/report.py` is restored to the README so calling the report \"reproducible\" is backed by instructions.\n\n22 of 23 checks green, including all 14 test matrix cells, lint/format/types, docs build, weaver-spec conformance, floor deps, bench and free-threaded smoke.\n\nThe one red check is the non-gating Python 3.15 canary, and it is not this PR's: on 3.15.0-rc.1 it reports 5 failed / 2183 passed / 4 errors, every one an MCP import failure from fastmcp -> key_value.aio -> beartype, which imports typing.no_type_check_decorator (removed in 3.15). That blocker is recorded in constraints/python-next.txt. This PR changes documentation and a description string and cannot produce an ImportError inside fastmcp.",
+          "timestamp": "2026-08-30T12:34:07+01:00",
+          "tree_id": "faa4c1039f4c26065a3fd5f1090e35c4a3829736",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/bb626660aea6cad9ace333953f7ac8fdee54c1f8"
+        },
+        "date": 1788089736858,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.46404299973801244,
+            "unit": "ms",
+            "extra": "min=0.43ms max=0.75ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.33757899973352323,
+            "unit": "ms",
+            "extra": "min=0.31ms max=0.63ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.6575130000783247,
+            "unit": "ms",
+            "extra": "min=0.54ms max=1.00ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.46860200018272735,
+            "unit": "ms",
+            "extra": "min=0.38ms max=0.69ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.90267200025482,
+            "unit": "ms",
+            "extra": "min=102.70ms max=103.44ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 1.1426040005062532,
+            "unit": "ms",
+            "extra": "min=1.02ms max=1.39ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 252.3343070001829,
+            "unit": "ms",
+            "extra": "min=252.15ms max=252.43ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.9565169998495548,
+            "unit": "ms",
+            "extra": "min=0.91ms max=1.04ms repeats=5"
           }
         ]
       }
