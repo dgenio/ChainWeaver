@@ -18,14 +18,18 @@ The base install ships with a small runtime dependency stack: `pydantic`, `typer
 | `yaml` | Read and write `.flow.yaml` files | `pip install "chainweaver[yaml]"` |
 | `otel` | OpenTelemetry exporter middleware | `pip install "chainweaver[otel]"` |
 | `docs` | Build this documentation site locally | `pip install "chainweaver[docs]"` |
-| `dev` | Lint, type-check, and test (contributor extra) | `pip install "chainweaver[dev]"` |
+| `integrations` | Every integration extra at once — the composition CI exercises | `pip install "chainweaver[integrations]"` |
+
+Contributor tooling (pytest, ruff, mypy, ...) is not an extra: it lives in a
+PEP 735 dependency group and is installed with `--group dev` (see below).
 
 ## From source
 
 ```bash
 git clone https://github.com/dgenio/ChainWeaver.git
 cd ChainWeaver
-pip install -e ".[dev]"
+pip install --upgrade pip          # --group needs pip >= 25.1
+pip install -e ".[integrations]" --group dev
 ```
 
 ## Verify

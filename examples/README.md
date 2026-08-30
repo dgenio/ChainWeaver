@@ -5,7 +5,7 @@ script in this directory runs without a test framework and without live
 external services:
 
 ```bash
-pip install -e ".[dev]"      # from the repo root
+pip install -e ".[integrations]" --group dev   # from the repo root
 python examples/simple_linear_flow.py
 ```
 
