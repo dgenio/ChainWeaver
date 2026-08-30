@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -65,14 +66,23 @@ _needs_tomllib = pytest.mark.skipif(
 )
 
 
-def _pyproject() -> dict:
-    import tomllib
+def _pyproject() -> dict[str, Any]:
+    """Parse ``pyproject.toml``.
 
-    with _PYPROJECT.open("rb") as handle:
-        return tomllib.load(handle)
+    ``tomllib`` is stdlib from 3.11 and ChainWeaver supports 3.10 without
+    adding ``tomli`` for the single leg (same trade-off as
+    ``test_metadata_consistency``), so every caller carries
+    ``_needs_tomllib``.
+    """
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        with _PYPROJECT.open("rb") as handle:
+            return tomllib.load(handle)
+    raise RuntimeError("unreachable: callers are skipped below 3.11")
 
 
-def _requirement_names(entries: list) -> set[str]:
+def _requirement_names(entries: list[Any]) -> set[str]:
     """Distribution names from a requirement list, ignoring include-group refs."""
     names = set()
     for entry in entries:
