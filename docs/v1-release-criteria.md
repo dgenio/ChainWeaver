@@ -152,7 +152,7 @@ architecture into v1.
   calls; cost/token claims identify measured versus assumed basis.
 - [ ] Safety-name heuristics cannot satisfy an explicit safety requirement.
 - [ ] Rejected candidates are first-class observable results rather than silently
-  disappearing from the pipeline.
+  disappearing from the recommendation.
 - [ ] If #555 demonstrates that portable outputs matter, artifact identity and
   provenance do not require execution through `FlowExecutor`, and exports do not
   claim guarantees their target runtime cannot enforce.

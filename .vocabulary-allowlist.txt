@@ -27,3 +27,10 @@ otel pipeline
 evaluation pipeline
 refine-in-place pipeline
 strict pipeline
+
+# Other orchestrators' own vocabulary, in the comparison page describing when
+# to use Prefect/Dagster instead. Their "recurring pipelines" are not flows.
+recurring pipelines
+
+# The release/CI process (#519 release coherence), not a ChainWeaver flow.
+release pipeline

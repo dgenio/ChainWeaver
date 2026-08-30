@@ -36,9 +36,10 @@ property fuzzing, and structured audit traces provide a disciplined execution
 substrate for paths that have actually earned deterministic promotion.
 
 > **Benchmarks are evidence about the executor, not proof of product-market fit.**
-> The repo's [benchmark report](benchmarks/results/latest.md) is reproducible and
-> shows the deterministic core avoiding model-mediated transitions in its
-> synthetic comparison. It does **not** establish that every repeated path should
+> The repo's [benchmark report](benchmarks/results/latest.md) is reproducible —
+> regenerate it yourself with `python benchmarks/report.py` — and shows the
+> deterministic core avoiding model-mediated transitions in its synthetic
+> comparison. It does **not** establish that every repeated path should
 > be compiled, or that ChainWeaver beats the obvious plain-Python implementation.
 > The independent validation program requires that manual baseline explicitly.
 
