@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chainweaver"
 dynamic = ["version"]
-description = "Deterministic orchestration layer for MCP-based agents."
+description = "Analyze repeated AI-agent tool paths and turn reviewed candidates into governed deterministic capabilities."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

@@ -1,0 +1,125 @@
+name: Independent validation result
+description: Share a critical result from running ChainWeaver on an independent agent workload
+title: "validation: <short workload description>"
+labels:
+  - adoption
+  - product
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing ChainWeaver on a workload that was not created just to make the project look good.
+
+        **Negative and no-op results are welcome.** Do not upload secrets, customer data, private source, raw prompts, or sensitive tool payloads. Local analysis with minimized/sanitized evidence is preferred. See `docs/validation-participant-guide.md` and issue #553.
+
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: What kind of agent/workflow did you evaluate? Keep private organization details anonymous if needed.
+      placeholder: Coding agent using repository, CI, and issue tools across normal PR work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: independence
+    attributes:
+      label: Why this is an independent workload
+      description: Explain why the workload/traces existed independently of this ChainWeaver evaluation.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Evidence/privacy mode
+      description: What level of trace content did the analysis use?
+      options:
+        - Shape-only / metadata-only
+        - Redacted values
+        - Hashed or pseudonymized values
+        - Full local trace, not shared publicly
+        - Other / mixed
+    validations:
+      required: true
+
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Pre-analysis human baseline
+      description: Before seeing ChainWeaver results, which paths would you manually automate or explicitly leave agentic, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Analysis evidence
+      description: Summarize trace/session count, recurring paths, model boundaries, counterexamples, dataflow/safety findings, and unavailable fields. Do not paste sensitive raw content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: findings
+    attributes:
+      label: Accepted, rejected, missed, and wrong candidates
+      description: Include useful discoveries, useful rejections, false positives, false negatives, and no-useful-candidate outcomes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: manual_comparison
+    attributes:
+      label: Plain-Python / host-framework comparison
+      description: For an accepted candidate, how did the obvious manual implementation compare on effort, evidence, validation, security, drift, auditability, runtime, and maintenance? If no candidate was accepted, explain why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security / approval-boundary result
+      description: Did any candidate cross principals, scopes, side effects, approvals, retries, or policies? Was it rejected or safely preserved?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Would you keep ChainWeaver installed for this job?
+      options:
+        - Yes — analysis and lifecycle
+        - Yes — mainly the analyzer/compiler
+        - Yes — mainly the deterministic runtime
+        - Maybe / unsure
+        - No
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: Give the strongest reason for your verdict and the biggest reason not to adopt ChainWeaver.
+    validations:
+      required: true
+
+  - type: textarea
+    id: change
+    attributes:
+      label: What would change your verdict?
+      description: What product, documentation, integration, or architecture change would make ChainWeaver more or less useful?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Reporting checks
+      options:
+        - label: I have removed secrets and sensitive/private payloads from this public report.
+          required: true
+        - label: I included negative findings rather than selecting only flattering evidence.
+          required: true
+        - label: The pre-analysis baseline was written before I used ChainWeaver's candidates as hints.
+          required: true

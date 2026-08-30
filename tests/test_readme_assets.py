@@ -72,14 +72,24 @@ def test_quickstart_notebook_is_valid_and_self_installing() -> None:
     assert "flow_to_openai_function" in joined
 
 
-def test_readme_headline_number_links_report() -> None:
-    """README hero surfaces a quantified, reproducible claim linked to the report (#227)."""
+def test_readme_benchmark_claim_stays_reproducible() -> None:
+    """A benchmark claim in the README must be reproducible by the reader (#227).
+
+    #227 originally required a quantified *headline* number ("0% data corruption
+    versus 61-96%"). That half is deliberately retired: the README no longer
+    leads on a benchmark figure, because a synthetic executor benchmark is
+    evidence about the executor and not about product-market fit, and leading on
+    it overstated what it proves.
+
+    The reproducibility half is not retired and is what this test still enforces.
+    The README calls the report reproducible, so it must both link the artifact
+    and say how to regenerate it — otherwise "reproducible" is an unbacked claim,
+    which is exactly what #227 existed to prevent.
+    """
     report = _REPO / "benchmarks" / "results" / "latest.md"
     assert report.is_file(), "benchmark report artifact is missing"
     assert "benchmarks/results/latest.md" in _README
     assert "python benchmarks/report.py" in _README
-    # The defensible headline metric: zero data corruption vs naive chaining.
-    assert "0%" in _README
 
 
 def test_readme_has_standardized_weaver_stack_section() -> None:

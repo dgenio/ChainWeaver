@@ -1,5 +1,5 @@
 site_name: ChainWeaver
-site_description: Deterministic orchestration layer for MCP-based agents.
+site_description: Analyze repeated agent tool paths and turn reviewed candidates into governed deterministic capabilities.
 site_url: https://chainweaver.readthedocs.io/
 repo_url: https://github.com/dgenio/ChainWeaver
 repo_name: dgenio/ChainWeaver
@@ -99,6 +99,10 @@ nav:
       - Schema validation: concepts/schema-validation.md
   - Is this for me?:
       - When ChainWeaver fits: boundaries.md
+      - Product validation & adoption gates: product-validation.md
+      - Independent validation guide: validation-participant-guide.md
+      - API tiers & v1 compatibility: api-tiers.md
+      - Macro-capability security boundary: macro-capability-security.md
       - Data integrity guarantees: data-integrity.md
       - Runtime responsibilities for hosts: runtime-responsibilities.md
       - vs LangChain, Prefect, Dagster, Temporal, LangGraph: comparisons.md
