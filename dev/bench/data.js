@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787947195034,
+  "lastUpdate": 1788078729381,
   "repoUrl": "https://github.com/dgenio/ChainWeaver",
   "entries": {
     "ChainWeaver microbenchmarks": [
@@ -4320,6 +4320,78 @@ window.BENCHMARK_DATA = {
             "value": 0.7186659999547373,
             "unit": "ms",
             "extra": "min=0.69ms max=0.85ms repeats=5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "diogofcul@hotmail.com",
+            "name": "Diogo Santos",
+            "username": "dgenio"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "02f1589ebc61c947a3aaad360c5624092af538e6",
+          "message": "chore(deps): move maintainer tooling to PEP 735 dependency groups (#564)\n\nThe dev extra mixed tools that run this repository's own gate (ruff, mypy, nbmake, a Jupyter kernel) with the integration packages the suite needs. Only the second kind belongs in wheel metadata.\n\n- dev extra removed; maintainer tooling moves to [dependency-groups], which is never published. Verified by building the wheel: Provides-Extra no longer lists dev, and the metadata no longer mentions ruff, nbmake or opentelemetry-sdk.\n- New published extra `integrations`: every user-facing integration extra at once, named once instead of in eight workflow steps plus four documents. Excludes llm-anthropic/llm-openai; evals.yml adds the provider it needs.\n- Second group `test-runners` holds the four pytest packages. The free-threaded 3.14t lane and the Python-next canary had each hand-copied that list, and neither copy gained pytest-timeout when #543 added it — the two lanes most likely to hang were the only two running unbounded.\n- Every --group install upgrades pip first (PEP 735 needs pip >= 25.1).\n\nResolution unchanged, measured: both compositions resolve the same 193 distributions at the same versions, empty set difference both ways.\n\ntests/test_dependency_groups.py (8 tests) fails if maintainer tooling reappears in a published extra, if a workflow installs .[dev] or pins a pytest runner inline, or if the integrations composition and the integration extras disagree.\n\nCloses #550",
+          "timestamp": "2026-08-30T09:30:38+01:00",
+          "tree_id": "3ea1ac06d9da1c0d1ddd2b8f34caab4ec17b26c7",
+          "url": "https://github.com/dgenio/ChainWeaver/commit/02f1589ebc61c947a3aaad360c5624092af538e6"
+        },
+        "date": 1788078728418,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "compiled_total_ms_n2_llm100_tool0",
+            "value": 0.3717179999966902,
+            "unit": "ms",
+            "extra": "min=0.28ms max=0.70ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n2_llm100_tool0",
+            "value": 0.2682530000015504,
+            "unit": "ms",
+            "extra": "min=0.20ms max=0.59ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm200_tool0",
+            "value": 0.63416999999788,
+            "unit": "ms",
+            "extra": "min=0.57ms max=0.69ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm200_tool0",
+            "value": 0.441618999971638,
+            "unit": "ms",
+            "extra": "min=0.41ms max=0.49ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n10_llm200_tool10",
+            "value": 102.72726200000193,
+            "unit": "ms",
+            "extra": "min=102.38ms max=102.90ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n10_llm200_tool10",
+            "value": 1.0300320000311558,
+            "unit": "ms",
+            "extra": "min=0.90ms max=1.10ms repeats=5"
+          },
+          {
+            "name": "compiled_total_ms_n5_llm500_tool50",
+            "value": 251.50837600000386,
+            "unit": "ms",
+            "extra": "min=251.44ms max=251.57ms repeats=5"
+          },
+          {
+            "name": "compiled_overhead_ms_n5_llm500_tool50",
+            "value": 0.6238599999903727,
+            "unit": "ms",
+            "extra": "min=0.59ms max=0.68ms repeats=5"
           }
         ]
       }
