@@ -305,7 +305,12 @@ SDK pinned.  Pick extras for the integrations you actually use:
 | `chainweaver[test]` | Hypothesis-based property tests for your own flows | `hypothesis`, `hypothesis-jsonschema` |
 | `chainweaver[docs]` | Building the docs site locally with mkdocs | `mkdocs`, `mkdocs-material`, `mkdocstrings` |
 | `chainweaver[weaver-stack]` | Real Weaver Stack interop — consuming the shared routing/capability contract (`weaver-spec` #91, `contextweaver` #106, `agent-kernel` #89, #233) | `weaver-contracts` |
-| `chainweaver[dev]` | Contributing — pulls every test/lint/type dep and most integration deps | the union of the above |
+| `chainweaver[integrations]` | Every integration extra above at once — the composition CI exercises | the union of the integration rows above |
+
+Maintainer tooling (pytest, ruff, mypy, nbmake, ...) is **not** a published
+extra: it lives in PEP 735 dependency groups, installed with
+`pip install -e ".[integrations]" --group dev` (#550). The `[dev]` extra no
+longer exists.
 
 Package metadata (`pyproject.toml`) publishes URLs for the
 [documentation](https://chainweaver.readthedocs.io/), the
@@ -1213,8 +1218,9 @@ in `CONTRIBUTING.md` for the `good-first-issue` / `good-first-ai-issue` onramp
 and the step-by-step path to your first PR.
 
 ```bash
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Install with the integration extras and the maintainer tooling group
+pip install --upgrade pip          # --group needs pip >= 25.1
+pip install -e ".[integrations]" --group dev
 
 # Run tests
 python -m pytest tests/ -v

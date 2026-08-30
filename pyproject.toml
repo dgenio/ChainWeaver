@@ -122,34 +122,15 @@ docs = [
     "mkdocstrings[python]>=0.26",
     "pymdown-extensions>=10.7",
 ]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "pytest-asyncio>=0.23",
-    "pytest-timeout>=2.3",
-    "ruff>=0.8",
-    "mypy>=1.0",
-    "pyyaml>=6.0",
-    "types-pyyaml>=6.0",
-    "griffe>=2.0",
-    "hypothesis>=6.150",
-    "hypothesis-jsonschema>=0.23",
-    "opentelemetry-api>=1.20",
-    "opentelemetry-sdk>=1.20",
-    "langchain-core>=0.3",
-    "llama-index-core>=0.10",
-    "langgraph>=0.2",
-    "openai-agents>=0.1",
-    "mcp>=1.0",
-    "fastmcp>=3.4",
-    # Weaver Stack interop (issue #233): the conformance + adapter suites import
-    # the real weaver-contracts types, so CI's ``.[dev]`` install must carry them.
-    "weaver-contracts>=0.6,<1.0",
-    # Notebook execution gate (issue #229): nbmake runs notebooks/ in CI so the
-    # "Open in Colab" quickstart cannot silently rot; ipykernel is the kernel it
-    # executes against.
-    "nbmake>=1.5",
-    "ipykernel>=6.29",
+# Every user-facing integration extra at once (issue #550).  CI installs this
+# alongside the ``dev`` dependency group, so the composition CI exercises is
+# named once here rather than repeated in each workflow, CONTRIBUTING and the
+# floor job — three hand-maintained copies of a list drift, and this one had
+# already grown a fourth as the old ``dev`` extra.  Deliberately excludes
+# ``llm-anthropic`` / ``llm-openai``: those pull real provider SDKs and the
+# evals workflow adds the one it needs explicitly.
+integrations = [
+    "chainweaver[yaml,otel,contrib,langchain,llamaindex,langgraph,openai-agents,mcp,weaver-stack,test]",
 ]
 
 [project.urls]
@@ -159,6 +140,49 @@ dev = [
 "Changelog" = "https://github.com/dgenio/ChainWeaver/blob/main/CHANGELOG.md"
 "Issues" = "https://github.com/dgenio/ChainWeaver/issues"
 "Bug Tracker" = "https://github.com/dgenio/ChainWeaver/issues"
+
+# ---------------------------------------------------------------------------
+# Maintainer-only tooling (PEP 735 dependency groups, issue #550).
+#
+# Nothing here is published in the wheel's metadata: a downstream consumer of
+# ChainWeaver never needs a linter, a type checker or a notebook kernel, and
+# advertising them as an extra invited ``pip install chainweaver[dev]`` in
+# environments that only wanted the library.  User-facing capability stays in
+# ``[project.optional-dependencies]`` above.
+#
+# Install with ``pip install -e ".[integrations]" --group dev`` (pip >= 25.1)
+# or ``uv pip install -e ".[integrations]" --group dev``.
+# ---------------------------------------------------------------------------
+[dependency-groups]
+# The pytest runners alone.  The free-threaded 3.14t lane installs exactly
+# these (see the comment on that job in ``.github/workflows/ci.yml``); before
+# issue #550 it hand-copied the list into the workflow, and that copy had
+# already drifted — it never gained ``pytest-timeout`` when issue #543 added
+# it, so the lane most likely to hang was the one lane running unbounded.
+test-runners = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
+    # Per-test hang ceiling (issue #543): a blocked Event.wait() must fail
+    # attributably instead of burning the runner's global timeout.
+    "pytest-timeout>=2.3",
+]
+dev = [
+    { include-group = "test-runners" },
+    "ruff>=0.8",
+    "mypy>=1.0",
+    "types-pyyaml>=6.0",
+    "griffe>=2.0",
+    # Notebook execution gate (issue #229): nbmake runs notebooks/ in CI so the
+    # "Open in Colab" quickstart cannot silently rot; ipykernel is the kernel it
+    # executes against.
+    "nbmake>=1.5",
+    "ipykernel>=6.29",
+    # The library depends on ``opentelemetry-api`` only (the ``otel`` extra).
+    # The SDK is how the tests *observe* the spans it emits, so it is
+    # maintainer tooling, not a consumer dependency.
+    "opentelemetry-sdk>=1.20",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -236,8 +260,9 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Optional provider SDKs for the llm-anthropic / llm-openai adapters (issue #368).
-# They are not part of the base or .[dev] install, so the type check must not
-# fail when they are absent; the adapters import them lazily behind a guard.
+# They are not part of the base or .[integrations] install, so the type check
+# must not fail when they are absent; the adapters import them lazily behind a
+# guard.
 module = ["anthropic", "anthropic.*", "openai", "openai.*"]
 ignore_missing_imports = true
 
