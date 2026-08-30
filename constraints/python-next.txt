@@ -1,0 +1,22 @@
+# Constraints for the Python-next canary ONLY (.github/workflows/python-next.yml).
+#
+# Not a project constraint. Nothing else reads this file, and it must never be
+# used to pin a dependency for the supported matrix — the supported floors live
+# in pyproject.toml and are proven by the `floor deps` job.
+#
+# Why it exists: deepdiff 9.1.0 added `cachebox<6,>=5.2`. The newest cachebox in
+# that range is 5.2.3 (2026-04-10), whose wheels stop at cp314; no cachebox 5.x
+# ships a cp315 wheel. So on CPython 3.15 pip must build cachebox 5.2.3 from
+# source, and its vendored PyO3 refuses the interpreter:
+#
+#   the configured Python interpreter version (3.15) is newer than PyO3's
+#   maximum supported version
+#
+# cachebox 6.1.2+ does ship cp315 wheels, but deepdiff's `<6` cap excludes them,
+# so there is no resolution of deepdiff 9.1.0 that installs on 3.15 today.
+# deepdiff 9.0.0 has no cachebox dependency at all and satisfies this project's
+# declared `deepdiff>=9.0` floor, which is what lets the canary keep testing
+# ChainWeaver's own code on 3.15 while the upstream gap stands.
+#
+# Remove this file once deepdiff relaxes the cap or cachebox 5.x ships cp315.
+deepdiff<9.1

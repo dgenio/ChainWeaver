@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "pyproject.toml"
+      - "constraints/python-next.txt"
       - ".github/workflows/python-next.yml"
 
 permissions:
@@ -16,6 +17,12 @@ jobs:
   python-next:
     name: Python 3.15 pre-release
     runs-on: ubuntu-latest
+    # Non-gating: this lane warns about the next Python, it does not block. That
+    # is also how it managed to do nothing at all from 2026-08-10 to 2026-08-30 —
+    # the install failed on every single run, `Run core suite` was skipped, and
+    # job-level continue-on-error reported the *run* as success, so the failure
+    # was only visible to someone opening the job. The two-attempt install and
+    # the always-run summary below exist so a dead lane looks dead.
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,9 +30,54 @@ jobs:
         with:
           python-version: "3.15"
           allow-prereleases: true
+
       - name: Install compatibility surface
+        id: install
+        # Two attempts on purpose. The first one failing IS one of the two
+        # signals this lane exists to produce ("the dependency tree does not
+        # install on the next Python yet"), and it must not swallow the other
+        # one ("ChainWeaver's own code still works there"). So: try the real
+        # thing, record the outcome, and on failure fall back to the canary
+        # constraints so the suite still runs. See constraints/python-next.txt
+        # for the current blocker.
+        shell: bash
         run: |
+          set -uo pipefail
           python -m pip install --upgrade pip
-          pip install -e ".[test,yaml,mcp]" --group test-runners
+          if pip install -e ".[test,yaml,mcp]" --group test-runners; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::Unconstrained install failed on Python 3.15; retrying with constraints/python-next.txt."
+          echo "mode=constrained" >> "$GITHUB_OUTPUT"
+          pip install -e ".[test,yaml,mcp]" --group test-runners -c constraints/python-next.txt
+
       - name: Run core suite
         run: python -m pytest tests/ -v --no-cov
+
+      - name: Summarise what this lane proved
+        # `always()` so the summary is written even when the suite fails or the
+        # constrained install also fails — a silent lane is the bug this fixes.
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Python 3.15 canary"
+            echo
+            python -c "import sys; print(f'- interpreter: {sys.version.split()[0]}')" || true
+            case "${{ steps.install.outputs.mode }}" in
+              full)
+                echo "- install: **unconstrained** — the full dependency tree resolves on 3.15."
+                echo "- if constraints/python-next.txt still exists, it is now obsolete; delete it."
+                ;;
+              constrained)
+                echo "- install: **constrained** — the unconstrained install FAILED on 3.15."
+                echo "- the suite below ran against constraints/python-next.txt, which names the blocker."
+                echo "- ChainWeaver's own code is being exercised; its dependency tree is not yet 3.15-ready."
+                ;;
+              *)
+                echo "- install: **did not complete** — neither attempt produced an environment."
+                echo "- the suite did not run. This lane proved nothing on this commit."
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
