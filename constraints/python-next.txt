@@ -19,4 +19,16 @@
 # ChainWeaver's own code on 3.15 while the upstream gap stands.
 #
 # Remove this file once deepdiff relaxes the cap or cachebox 5.x ships cp315.
+#
+# NOT constrained here, deliberately — a second, independent 3.15 blocker found
+# by the first run of this lane that got far enough to collect tests
+# (2026-08-30): fastmcp -> key_value.aio -> beartype, and beartype does
+# `from typing import no_type_check_decorator`, which 3.15 removed:
+#
+#   ImportError: cannot import name 'no_type_check_decorator' from 'typing'
+#
+# It surfaces as "FastMCP server support is not installed" and takes out the
+# four tests/test_mcp_*.py modules at collection. Pinning around it would mean
+# pinning fastmcp itself, which is the surface this lane is supposed to test, so
+# the suite runs with --continue-on-collection-errors instead and reports it.
 deepdiff<9.1

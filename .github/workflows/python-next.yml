@@ -53,7 +53,12 @@ jobs:
           pip install -e ".[test,yaml,mcp]" --group test-runners -c constraints/python-next.txt
 
       - name: Run core suite
-        run: python -m pytest tests/ -v --no-cov
+        # --continue-on-collection-errors: a module that cannot import on the
+        # next Python must not abort the other ~2400 tests. It still fails the
+        # step and still prints every error — it just stops one unimportable
+        # dependency from erasing the entire signal, which is what happened on
+        # the first run of this lane that got far enough to collect at all.
+        run: python -m pytest tests/ -v --no-cov --continue-on-collection-errors
 
       - name: Summarise what this lane proved
         # `always()` so the summary is written even when the suite fails or the
