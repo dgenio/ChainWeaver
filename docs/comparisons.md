@@ -1,110 +1,226 @@
-# vs LangChain / Prefect / Dagster / Temporal / LangGraph
+# ChainWeaver vs agent and workflow frameworks
 
-ChainWeaver overlaps with several adjacent libraries. The honest comparison is that
-**no two of them solve the same problem**. This page lays out where they differ so you
-can pick the right tool — not just the one you've heard of.
+ChainWeaver overlaps with several mature libraries. The important comparison is
+**not** "which one can run deterministic code?" They all can, in different
+forms.
 
-## Compact comparison
+The decision is whether you already know the workflow you want to run, or
+whether you need evidence for **which regions of observed agent behavior should
+stop being model-mediated in the first place**.
 
-| | ChainWeaver | LangChain LCEL | Prefect 3 | Dagster | Temporal | LangGraph |
-|---|---|---|---|---|---|---|
-| LLM-free between steps (by design) | **Yes (hard invariant)** | No | N/A | N/A | N/A | No |
-| Pydantic-validated I/O at every step | **Yes** | Partial | No | Partial | No | No |
-| Small runtime dependency set | **Yes (5 packages)** | No | No | No | No | No |
-| File-serializable flow definitions | **Yes (JSON / YAML)** | No | Python | Python | Python | No |
-| Standalone (no scheduler / server) | **Yes** | Yes | No (server) | No (daemon) | No (server) | Yes |
-| Built for MCP tool composition | Planned (#150) | No | No | No | No | No |
-| Stateful long-running workflows | No | No | Yes | Yes | Yes | Partial |
-| Graph branching on LLM output | No (by design) | Limited | N/A | N/A | N/A | **Yes** |
-| Durable retries / scheduling | No | No | Yes | Yes | Yes | No |
+> **If you already know the path is fixed, start with the simplest thing that
+> works: a Python function or the workflow primitive in the framework you
+> already use.** ChainWeaver should earn another dependency through discovery,
+> evidence, useful rejection, review/governance, security-boundary preservation,
+> or drift handling—not through the claim that deterministic orchestration is
+> otherwise unavailable.
 
-> Versions evaluated: LangChain 0.3, LangGraph 0.3, Prefect 3, Dagster 1.9, Temporal 1.24
-> (Python SDK), ChainWeaver 0.8. Re-evaluate on each minor release of any of these.
+The product thesis is under independent validation in
+[#553](https://github.com/dgenio/ChainWeaver/issues/553). See
+[Product validation & adoption gates](product-validation.md).
 
-## One paragraph each
+## Compact decision guide
 
-### LangChain LCEL
+| Starting problem | Usually start with | Where ChainWeaver may add value |
+| --- | --- | --- |
+| "I already know A → B → C and it is ordinary Python" | Plain Python | Only if you need ChainWeaver's contracts, evidence/audit, drift, or promotion lifecycle |
+| "I need a stateful agent/workflow graph with fixed and conditional paths" | LangGraph | Analyze observed tool-use regions and propose/reject deterministic promotion candidates; optionally expose accepted capabilities back to the graph |
+| "I use the OpenAI Agents SDK and want deterministic orchestration" | Agents SDK + normal code | Evidence-driven discovery/review of repeated tool paths and governed capability artifacts |
+| "I need LLM-centric composable chains/retrievers/tools" | LangChain | Deterministic capability behind the agent/chain when the evidence says a region no longer needs model mediation |
+| "I need scheduled data/workflow orchestration" | Prefect / Dagster | A bounded deterministic agent capability inside the larger job, if useful |
+| "I need long-running durable business workflows" | Temporal (or LangGraph where its runtime fits) | Only for the agent/tool subproblem; ChainWeaver is not a replacement durable platform |
+| "I have real agent traces and don't know which repeated paths are safe/worth compiling" | **ChainWeaver is testing this as its primary job** | Candidate discovery, evidence, rejection, review, governed promotion, drift |
 
-LangChain Expression Language is the closest neighbour. Both LCEL and ChainWeaver
-express "run tool A, then B, then C". LCEL is more flexible (anything that satisfies
-`Runnable` composes), more opinionated about LLM-centric primitives (prompts, retrievers,
-output parsers), and does not promise zero LLM calls between steps — `RunnableLambda |
-RunnableLambda` runs synchronously without a model, but the broader ecosystem assumes
-models are in the loop. ChainWeaver picks "deterministic-by-construction" as a hard
-invariant and trades flexibility for that guarantee. **Pick LangChain LCEL when** your
-flow mixes LLM and non-LLM steps and you want one DSL covering both.
-**Pick ChainWeaver when** the flow is fully deterministic and you want a runner that
-can prove it.
+## The baseline ChainWeaver must beat: plain Python
 
-### Prefect 3
+A repeated path can always be written directly:
 
-Prefect is a general-purpose workflow engine: durable execution, scheduling, retries,
-fan-out across workers, observability dashboards. It runs Python functions decorated
-with `@flow` and `@task` against a Prefect server (cloud or self-hosted). The mission
-shape is "data jobs that have to run on a schedule across time". ChainWeaver, by
-contrast, runs **inside a single agent turn**: no scheduler, no server, no calendar.
-**Pick Prefect when** your work shape is recurring data jobs.
-**Pick ChainWeaver when** your work shape is "agent decides → run this deterministic
-flow → return result".
+```python
+def collect_pr_context(repo, pr):
+    files = list_changed_files(repo, pr)
+    ci = read_ci(repo, pr)
+    metadata = read_pr_metadata(repo, pr)
+    return build_context(files, ci, metadata)
+```
 
-### Dagster
+If that is all you need, it is probably the right answer.
 
-Dagster is also a workflow engine, with a stronger emphasis on data-asset modelling:
-software-defined assets, lineage, materialisations, partitioned schedules. It's the
-"build a warehouse of curated datasets" tool. ChainWeaver doesn't model assets, doesn't
-track lineage across runs, and doesn't carry state between calls — it's stateless,
-ephemeral, embedded.
-**Pick Dagster when** you need asset lineage and partitioned data jobs.
-**Pick ChainWeaver when** you need a single agent turn to dispatch a known flow.
+ChainWeaver becomes interesting only if it contributes material value around the
+*lifecycle*:
 
-### Temporal
+- identifying a useful candidate from real traces;
+- proving the path recurs across independent sessions;
+- distinguishing actual model-mediated transitions from assumed ones;
+- validating cumulative dataflow/schema compatibility;
+- showing counterexamples and rejected candidates;
+- preserving authorization/approval boundaries during promotion;
+- producing reproducible review evidence and durable artifact identity;
+- detecting schema/safety/policy drift later;
+- making the accepted capability portable or easy to expose through the host.
 
-Temporal is a durable execution engine: workflows survive worker crashes, sleep for days
-without holding RAM, and resume from any point. The cost is operational complexity
-(Temporal cluster, worker processes, SDK constraints on which Python you can use inside
-activities). ChainWeaver has no durability layer — a process restart kills an
-in-flight flow — but offers checkpoint-based crash resume via `Checkpointer` for the
-common case of "I want to retry from the last successful step".
-**Pick Temporal when** you need true durable execution across hours / days / crashes.
-**Pick ChainWeaver when** the flow finishes inside a single process and you only need
-crash resume across operator-driven retries.
+The validation program explicitly implements the manual baseline for accepted
+candidates instead of comparing only against an intentionally inefficient agent
+loop.
 
-### LangGraph
+## LangGraph
 
-LangGraph builds a graph where **nodes can decide which edge to follow next, based on
-LLM output**. That's the polar opposite of ChainWeaver's design: ChainWeaver flows are
-compiled with the graph fixed at definition time. LangGraph is the right tool when you
-genuinely don't know the next node until a model has spoken; ChainWeaver is the right
-tool when you do know.
-**Pick LangGraph when** the next step depends on an LLM's decision.
-**Pick ChainWeaver when** the flow is fixed and you want the cheapest, most repeatable
-way to run it.
+LangGraph is a low-level orchestration/runtime system for agent workflows. Its
+current documentation explicitly distinguishes **workflows with predetermined
+code paths** from dynamic agents, and its Graph API supports both fixed and
+conditional edges. Its custom-workflow guidance also supports mixing
+deterministic logic with agentic behavior. The Functional API lets users write
+ordinary Python control flow while retaining runtime features such as
+checkpointing.
 
-## Combining them
+So this is **not** the differentiator:
 
-These libraries are not mutually exclusive. The realistic deployment uses several:
+> "ChainWeaver can run a fixed path; LangGraph cannot."
 
-- An **agent framework** (LangGraph, Anthropic SDK tool-use, OpenAI Assistants, …) owns
-  the conversation and decides "what to do next".
-- ChainWeaver gets called **from inside** that agent's tool-call loop whenever the
-  next few tool calls are deterministic.
-- A **workflow engine** (Prefect, Dagster, Temporal) orchestrates the *outer* job —
-  scheduling, recurring runs, durability — and treats the agent as one step in a larger
-  workflow.
+That would be false.
 
-The result: the LLM thinks once, ChainWeaver dispatches deterministically, and the
-workflow engine handles retries and scheduling. Each layer does what it's best at.
+Use LangGraph when you want to author and operate the workflow/agent topology
+itself, especially when state, durable execution, streaming, human-in-the-loop,
+or mixed deterministic/agentic control flow are central.
 
-## Updating this page
+ChainWeaver's narrower hypothesis is useful when the starting point is
+**observed agent/tool traces** and the problem is determining which
+model-mediated regions have earned deterministic promotion. If a candidate is
+accepted, the resulting capability can be called from a LangGraph node; see the
+[LangGraph recipe](cookbook/langgraph-node.md).
 
-This document is a **living comparison**. We re-evaluate on each minor release of any of
-the projects listed above. If you spot a comparison that's gone stale, open an issue —
-this page is a maintained dependency, not a marketing artefact.
+Official references:
+
+- [LangGraph: workflows and agents](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
+- [LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- [LangChain custom workflow](https://docs.langchain.com/oss/python/langchain/multi-agent/custom-workflow)
+- [LangGraph Functional API](https://docs.langchain.com/oss/python/langgraph/functional-api)
+
+## OpenAI Agents SDK
+
+The OpenAI Agents SDK also explicitly supports **orchestration via code** and
+describes it as a way to make behavior more deterministic and predictable in
+speed, cost, and performance. Its examples include deterministic workflows.
+
+Therefore ChainWeaver should not be adopted merely to prove that an OpenAI
+agent can call deterministic Python.
+
+Use normal Agents SDK orchestration when the sequence is already known and your
+application can own it directly.
+
+The possible ChainWeaver value is upstream of that execution decision:
+
+```text
+observed tool use
+→ repeated candidate
+→ evidence + counterexamples
+→ safety/dataflow review
+→ accepted deterministic capability
+→ expose as an Agents SDK tool / callable
+```
+
+See the [OpenAI Agents SDK recipe](cookbook/openai-agents-tool.md).
+
+Official references:
+
+- [OpenAI Agents SDK: agent orchestration](https://openai.github.io/openai-agents-python/multi_agent/)
+- [OpenAI Agents SDK examples](https://openai.github.io/openai-agents-python/examples/)
+
+## LangChain
+
+LangChain provides model/tool abstractions, agent loops, retrievers,
+middleware, and composition primitives. It is a broader LLM application
+framework, and modern LangChain agents run on LangGraph.
+
+Use LangChain when the main problem is composing model-centric application
+components or building an agent with its ecosystem.
+
+If a region of the resulting tool behavior proves repetitive and no longer
+needs model judgment, ChainWeaver can be evaluated as an analysis/governance
+layer and deterministic capability behind that agent. It does not need to own
+the outer loop.
+
+Official reference:
+
+- [LangChain agents](https://docs.langchain.com/oss/python/langchain/agents)
+
+## Prefect and Dagster
+
+Prefect and Dagster solve general workflow/data-orchestration jobs rather than
+the same product problem ChainWeaver is testing.
+
+Use them when you need things such as scheduling, operational orchestration,
+worker infrastructure, data assets/lineage, recurring pipelines, or
+organization-level workflow observability.
+
+A ChainWeaver capability, if useful, belongs **inside** that larger job rather
+than replacing the orchestrator.
 
 References:
 
-- [LangChain Expression Language docs](https://python.langchain.com/docs/concepts/lcel/)
-- [Prefect 3 documentation](https://docs.prefect.io/v3/)
+- [Prefect documentation](https://docs.prefect.io/)
 - [Dagster documentation](https://docs.dagster.io/)
-- [Temporal Python SDK](https://docs.temporal.io/develop/python)
-- [LangGraph documentation](https://langchain-ai.github.io/langgraph/)
+
+## Temporal
+
+Temporal is a durable execution platform for workflows that must survive
+process/worker failures and continue across long periods. That is a different
+operational contract from ChainWeaver's embedded deterministic capability
+runtime.
+
+Use Temporal when durable business-workflow execution is the requirement. Do
+not choose ChainWeaver as a smaller substitute for a requirement that actually
+needs Temporal's execution model.
+
+Reference:
+
+- [Temporal documentation](https://docs.temporal.io/)
+
+## MCP is not the comparison category
+
+ChainWeaver can expose an accepted deterministic flow as an MCP tool and consume
+MCP tools as execution steps. MCP is therefore an important interoperability
+surface.
+
+But "MCP workflow engine" is too broad a category claim. A company's most useful
+compiled capability is often private and organization-specific. The value must
+survive even when the outer host is LangGraph, the OpenAI Agents SDK, a custom
+agent, or plain Python.
+
+## Security is part of the comparison
+
+A macro capability can be *less* safe than the original agent path if its
+convenience silently aggregates child privileges or removes approval boundaries.
+
+Current ChainWeaver has child safety/approval contracts and a macro-level
+FlowServer authorization seam, but generic caller-specific child authorization
+is still a v1 blocker. See
+[Macro-capability security boundary](macro-capability-security.md) and
+[#554](https://github.com/dgenio/ChainWeaver/issues/554).
+
+Do not count "one tool call instead of several" as an advantage if the resulting
+capability weakens the host's authorization model.
+
+## A fair adoption rule
+
+Choose ChainWeaver only if, on your workload, it demonstrates enough value over
+the simplest existing alternative.
+
+The project deliberately records these possible outcomes:
+
+- **analysis + runtime are valuable** → continue the current combined product;
+- **analysis is valuable, runtime is not** → lean toward analyzer/compiler +
+  portable governed artifacts (#555);
+- **runtime is valuable, trace discovery is not** → simplify toward a focused
+  deterministic-flow library;
+- **plain Python / current framework wins** → do not force ChainWeaver into the
+  architecture;
+- **security boundaries cannot be preserved** → reject the candidate.
+
+Those are product results, not failures to be hidden.
+
+## Updating this page
+
+This document is a living comparison. Framework capabilities change quickly;
+prefer their official documentation and update this page when a claim drifts.
+Avoid feature-table claims whose truth depends on an old minor version when the
+actual adoption decision is about product responsibility and lifecycle.
